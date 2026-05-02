@@ -5,7 +5,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 
-from yuki_conductor.config import CLAUDE_TIMEOUT, CLAUDE_WORKING_DIR
+from yuki_conductor.config import CLAUDE_BIN, CLAUDE_TIMEOUT, CLAUDE_WORKING_DIR
 
 SLACK_MESSAGE_LIMIT = 4000
 
@@ -32,7 +32,7 @@ def run_claude(
         model: Optional model alias (e.g. "sonnet", "opus", "haiku").
     """
     cmd = [
-        "claude",
+        CLAUDE_BIN,
         "-p",
         "--dangerously-skip-permissions",
         "--output-format", "json",
@@ -65,7 +65,7 @@ def run_claude(
         )
     except FileNotFoundError:
         return ClaudeResult(
-            text="claude CLI not found. Ensure it is installed and on PATH.",
+            text=f"{CLAUDE_BIN} CLI not found. Ensure it is installed and on PATH (or set CLAUDE_BIN).",
             session_id=None,
             is_error=True,
         )

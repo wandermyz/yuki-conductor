@@ -16,7 +16,7 @@ src/yuki_conductor/
     slack_platform.py  — Slack adapter
     teams_cli_platform.py — Teams CLI adapter (placeholder until binary lands)
     web_platform.py    — Web chat adapter
-  cron_scheduler.py — cron task scheduler (reads workspace/cron.yaml)
+  cron_scheduler.py — cron task scheduler (reads ~/.yuki-conductor/workspace/cron.yaml)
   daemon.py         — macOS LaunchAgent management
   web_server.py     — FastAPI HTTP server (agent conductor web UI)
 web/                — React + Vite frontend (pnpm, TypeScript)
@@ -24,11 +24,14 @@ web/                — React + Vite frontend (pnpm, TypeScript)
 
 ## Workspace
 
-The personal workspace directory is `workspace/`. This is the place to store all personal information such as cron task definitions, personal notes, and any data that should persist across sessions. **Do not include any personal information in the repo itself** — anything in the repo can end up in git.
+The personal workspace lives outside the repo at `~/.yuki-conductor/` (override with `YUKI_CONDUCTOR_DATA_DIR`). This is where all personal information — cron task definitions, secrets, attachments, the SQLite DB — is stored. **Do not include any personal information in the repo itself** — anything in the repo can end up in git.
 
-Key workspace files:
-- `workspace/yuki-conductor.db` — SQLite database for session and model tracking
-- `workspace/cron.yaml` — Cron task definitions (see `cron.example.yaml` for format)
+Key files:
+- `~/.yuki-conductor/.env` — secrets and env overrides (loaded at startup)
+- `~/.yuki-conductor/workspace/yuki-conductor.db` — SQLite database for session and model tracking
+- `~/.yuki-conductor/workspace/cron.yaml` — Cron task definitions (see `cron.example.yaml` for format)
+- `~/.yuki-conductor/workspace/attachments/`, `uploads/` — runtime file storage
+- `~/.yuki-conductor/daemon.log`, `daemon.err.log` — LaunchAgent logs
 
 ## Chat Apps
 
@@ -42,7 +45,7 @@ Multiple values may be combined: `CHAT_APPS=slack_socket,teams_cli`. Each sessio
 
 ## Cron Scheduler
 
-The daemon supports scheduled tasks via `workspace/cron.yaml`. Each task specifies a cron expression, a description, a Claude prompt, and optionally `chat_app` (`slack_socket` or `teams_cli`) to control where the notification goes. When the cron fires, the routed platform opens a new thread and runs Claude Code with the prompt, posting the result. The thread is session-tracked, so follow-up replies in that thread continue the conversation.
+The daemon supports scheduled tasks via `~/.yuki-conductor/workspace/cron.yaml`. Each task specifies a cron expression, a description, a Claude prompt, and optionally `chat_app` (`slack_socket` or `teams_cli`) to control where the notification goes. When the cron fires, the routed platform opens a new thread and runs Claude Code with the prompt, posting the result. The thread is session-tracked, so follow-up replies in that thread continue the conversation.
 
 Routing rule when `chat_app:` is omitted: pick the first enabled platform, with `slack` preferred. If `chat_app:` names a platform that isn't in `CHAT_APPS`, the task is skipped with a warning rather than misrouted.
 
@@ -79,7 +82,7 @@ Keep the code clean. **No backward compatibility is required.** This project has
 
 ## Architecture
 
-- **Session tracking**: SQLite database at `workspace/yuki-conductor.db` maps `thread_ts → (session_id, channel_id)` and `channel_id → model`
+- **Session tracking**: SQLite database at `~/.yuki-conductor/workspace/yuki-conductor.db` maps `thread_ts → (session_id, channel_id)` and `channel_id → model`
 - **Web server**: FastAPI on port 2333 (env: `WEB_PORT`), serves React frontend and `/api/sessions` + chat endpoints. Starts in a daemon thread alongside any enabled chat-app receivers.
 - **Concurrency**: slack-bolt's default thread pool (10 threads); each handler blocks on `subprocess.run`
 - **Claude invocation**: `claude -p --dangerously-skip-permissions --output-format json [-r session_id] "prompt"`

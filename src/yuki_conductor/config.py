@@ -6,20 +6,16 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load .env from workspace/ (gitignored, contains secrets).
-# Falls back to project root .env for backwards compatibility.
-_project_root = Path(__file__).resolve().parent.parent.parent
-_workspace_env = _project_root.parent / "workspace" / ".env"
-_project_env = _project_root / ".env"
-load_dotenv(_workspace_env if _workspace_env.exists() else _project_env, override=True)
-
 DATA_DIR = Path(os.environ.get("YUKI_CONDUCTOR_DATA_DIR", Path.home() / ".yuki-conductor"))
 LOG_FILE = DATA_DIR / "daemon.log"
 ERR_LOG_FILE = DATA_DIR / "daemon.err.log"
 PLIST_LABEL = "com.user.yuki-conductor"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{PLIST_LABEL}.plist"
 
-WORKSPACE_DIR = _project_root.parent / "workspace"
+# .env lives next to the data dir (gitignored, contains secrets).
+load_dotenv(DATA_DIR / ".env", override=True)
+
+WORKSPACE_DIR = DATA_DIR / "workspace"
 DB_FILE = WORKSPACE_DIR / "yuki-conductor.db"
 CRON_FILE = WORKSPACE_DIR / "cron.yaml"
 ATTACHMENTS_DIR = WORKSPACE_DIR / "attachments"
@@ -28,6 +24,7 @@ WEB_UPLOADS_DIR = UPLOADS_DIR / "web"
 
 CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "1800"))
 CLAUDE_WORKING_DIR = os.path.expanduser(os.environ.get("CLAUDE_WORKING_DIR", "~/Projects/wandering-vibe"))
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 
 
 class ChatApp(StrEnum):

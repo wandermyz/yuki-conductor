@@ -16,6 +16,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import (
+    CLAUDE_BIN,
     CLAUDE_WORKING_DIR,
     slack_app_dm_channel,
     slack_app_token,
@@ -88,7 +89,7 @@ def create_app() -> App:
 
         try:
             proc = subprocess.run(
-                ["claude", "--version"],
+                [CLAUDE_BIN, "--version"],
                 capture_output=True,
                 text=True,
                 timeout=10,

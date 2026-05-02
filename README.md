@@ -17,8 +17,9 @@ Bridge Slack messages to Claude Code CLI. Messages sent to the bot start a new C
 
 2. **Configure environment**
    ```bash
-   cp .env.template .env
-   # Edit .env with your Slack tokens
+   mkdir -p ~/.yuki-conductor
+   cp .env.template ~/.yuki-conductor/.env
+   # Edit ~/.yuki-conductor/.env with your Slack tokens
    ```
 
 3. **Test locally**
@@ -66,4 +67,4 @@ uv run pytest
 2. Each new message spawns `claude -p --dangerously-skip-permissions --output-format json`
 3. The response is posted as a thread reply
 4. Thread replies look up the stored `session_id` and resume with `claude -r <session_id>`
-5. Session mappings (`thread_ts -> session_id`) are persisted in `~/.yuki-conductor/sessions.json`
+5. Session mappings (`thread_ts -> session_id`) and per-channel model settings are persisted in the SQLite DB at `~/.yuki-conductor/workspace/yuki-conductor.db`

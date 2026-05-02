@@ -5,7 +5,7 @@ import os
 import re
 import subprocess
 
-from yuki_conductor.config import CLAUDE_WORKING_DIR
+from yuki_conductor.config import CLAUDE_BIN, CLAUDE_WORKING_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +39,9 @@ def create_session(name: str, worktree: str, working_dir: str | None = None,
         import time
         time.sleep(0.5)  # Give the session a moment to initialise
         if resume:
-            claude_cmd = f"claude --continue --worktree {worktree}\n"
+            claude_cmd = f"{CLAUDE_BIN} --continue --worktree {worktree}\n"
         else:
-            claude_cmd = f"claude --worktree {worktree}\n"
+            claude_cmd = f"{CLAUDE_BIN} --worktree {worktree}\n"
         subprocess.run(
             ["zellij", "--session", name, "action", "write-chars", claude_cmd],
             capture_output=True,
