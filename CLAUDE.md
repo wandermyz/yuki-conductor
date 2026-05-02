@@ -40,8 +40,6 @@ The daemon's chat surfaces are selected by `CHAT_APPS` (comma-separated):
 
 Multiple values may be combined: `CHAT_APPS=slack_socket,teams_cli`. Each session is platform-tagged so replies always route back to the originating chat app.
 
-The legacy `SLACK_MODE` env (`SOCKET`/`NONE`) is honored with a deprecation warning. `SLACK_MODE=TOKEN` is no longer supported.
-
 ## Cron Scheduler
 
 The daemon supports scheduled tasks via `workspace/cron.yaml`. Each task specifies a cron expression, a description, a Claude prompt, and optionally `chat_app` (`slack_socket` or `teams_cli`) to control where the notification goes. When the cron fires, the routed platform opens a new thread and runs Claude Code with the prompt, posting the result. The thread is session-tracked, so follow-up replies in that thread continue the conversation.

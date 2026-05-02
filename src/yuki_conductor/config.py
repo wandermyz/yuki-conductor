@@ -35,45 +35,13 @@ class ChatApp(StrEnum):
     TEAMS_CLI = "teams_cli"
 
 
-_LEGACY_SLACK_MODE_MAP: dict[str, set[ChatApp]] = {
-    "SOCKET": {ChatApp.SLACK_SOCKET},
-    "NONE": set(),
-}
-
-
 def chat_apps() -> set[ChatApp]:
     """Return the set of enabled chat-app platforms.
 
     Reads `CHAT_APPS` (comma-separated app names; "" or "none" → empty set).
-    Defaults to `slack_socket` for back-compat with existing deployments.
-
-    Honors the legacy `SLACK_MODE` env (`SOCKET`/`NONE`) with a deprecation
-    warning. `SLACK_MODE=TOKEN` is no longer supported and raises.
+    Defaults to `slack_socket` when the env var is unset.
     """
     raw_apps = os.environ.get("CHAT_APPS")
-    legacy = os.environ.get("SLACK_MODE")
-
-    if raw_apps is None and legacy:
-        legacy_norm = legacy.strip().upper()
-        if legacy_norm == "TOKEN":
-            raise RuntimeError(
-                "SLACK_MODE=TOKEN is no longer supported. Set CHAT_APPS instead "
-                "(e.g. CHAT_APPS=slack_socket or CHAT_APPS=teams_cli)."
-            )
-        if legacy_norm not in _LEGACY_SLACK_MODE_MAP:
-            valid = ", ".join(_LEGACY_SLACK_MODE_MAP.keys())
-            raise RuntimeError(
-                f"Invalid SLACK_MODE={legacy!r}; expected one of: {valid}"
-            )
-        import logging
-
-        logging.getLogger(__name__).warning(
-            "SLACK_MODE is deprecated; use CHAT_APPS "
-            "(comma-separated: slack_socket, teams_cli). Translating "
-            f"SLACK_MODE={legacy_norm} for now."
-        )
-        return set(_LEGACY_SLACK_MODE_MAP[legacy_norm])
-
     if raw_apps is None:
         return {ChatApp.SLACK_SOCKET}
 
