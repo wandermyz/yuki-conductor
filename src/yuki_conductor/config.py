@@ -30,19 +30,70 @@ CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "1800"))
 CLAUDE_WORKING_DIR = os.path.expanduser(os.environ.get("CLAUDE_WORKING_DIR", "~/Projects/wandering-vibe"))
 
 
-class SlackMode(StrEnum):
-    NONE = "NONE"
-    SOCKET = "SOCKET"
-    TOKEN = "TOKEN"
+class ChatApp(StrEnum):
+    SLACK_SOCKET = "slack_socket"
+    TEAMS_CLI = "teams_cli"
 
 
-def slack_mode() -> SlackMode:
-    raw = os.environ.get("SLACK_MODE", SlackMode.SOCKET).strip().upper()
-    try:
-        return SlackMode(raw)
-    except ValueError as err:
-        valid = ", ".join(m.value for m in SlackMode)
-        raise RuntimeError(f"Invalid SLACK_MODE={raw!r}; expected one of: {valid}") from err
+_LEGACY_SLACK_MODE_MAP: dict[str, set[ChatApp]] = {
+    "SOCKET": {ChatApp.SLACK_SOCKET},
+    "NONE": set(),
+}
+
+
+def chat_apps() -> set[ChatApp]:
+    """Return the set of enabled chat-app platforms.
+
+    Reads `CHAT_APPS` (comma-separated app names; "" or "none" → empty set).
+    Defaults to `slack_socket` for back-compat with existing deployments.
+
+    Honors the legacy `SLACK_MODE` env (`SOCKET`/`NONE`) with a deprecation
+    warning. `SLACK_MODE=TOKEN` is no longer supported and raises.
+    """
+    raw_apps = os.environ.get("CHAT_APPS")
+    legacy = os.environ.get("SLACK_MODE")
+
+    if raw_apps is None and legacy:
+        legacy_norm = legacy.strip().upper()
+        if legacy_norm == "TOKEN":
+            raise RuntimeError(
+                "SLACK_MODE=TOKEN is no longer supported. Set CHAT_APPS instead "
+                "(e.g. CHAT_APPS=slack_socket or CHAT_APPS=teams_cli)."
+            )
+        if legacy_norm not in _LEGACY_SLACK_MODE_MAP:
+            valid = ", ".join(_LEGACY_SLACK_MODE_MAP.keys())
+            raise RuntimeError(
+                f"Invalid SLACK_MODE={legacy!r}; expected one of: {valid}"
+            )
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "SLACK_MODE is deprecated; use CHAT_APPS "
+            "(comma-separated: slack_socket, teams_cli). Translating "
+            f"SLACK_MODE={legacy_norm} for now."
+        )
+        return set(_LEGACY_SLACK_MODE_MAP[legacy_norm])
+
+    if raw_apps is None:
+        return {ChatApp.SLACK_SOCKET}
+
+    raw = raw_apps.strip()
+    if raw == "" or raw.lower() == "none":
+        return set()
+
+    out: set[ChatApp] = set()
+    for piece in raw.split(","):
+        piece = piece.strip().lower()
+        if not piece:
+            continue
+        try:
+            out.add(ChatApp(piece))
+        except ValueError as err:
+            valid = ", ".join(a.value for a in ChatApp)
+            raise RuntimeError(
+                f"Invalid CHAT_APPS entry {piece!r}; expected one of: {valid}"
+            ) from err
+    return out
 
 
 def slack_cron_channel() -> str:

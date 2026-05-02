@@ -1,4 +1,8 @@
-"""Slack Bolt event handlers — thin adapter over messaging.SlackPlatform."""
+"""Slack Bolt event handlers + SlackSocketReceiver.
+
+Process-level startup lives in `runtime.py`; this module only owns the
+Slack-specific Bolt app and a small `ChatAppReceiver` wrapper.
+"""
 
 import logging
 import os
@@ -13,18 +17,18 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import (
     CLAUDE_WORKING_DIR,
-    SlackMode,
     slack_app_dm_channel,
     slack_app_token,
     slack_bot_token,
-    slack_mode,
 )
-from yuki_conductor.cron_scheduler import start_cron_scheduler
 from yuki_conductor.formatting import markdown_to_mrkdwn
 from yuki_conductor.messaging import IncomingMessage, handle_incoming_message
-from yuki_conductor.messaging.slack_platform import SlackPlatform, download_slack_files
+from yuki_conductor.messaging.slack_platform import (
+    SESSION_TYPE,
+    SlackPlatform,
+    download_slack_files,
+)
 from yuki_conductor.store import VALID_MODELS, ModelStore, SessionStore
-from yuki_conductor.web_server import start_web_server
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +161,16 @@ def create_app() -> App:
         if thread_ts and store.get(thread_ts) is None:
             return
 
+        # Thread reply for a session owned by another platform — refuse to act.
+        if thread_ts:
+            existing_type = store.get_session_type(thread_ts)
+            if existing_type and existing_type != SESSION_TYPE:
+                logger.warning(
+                    f"Ignoring Slack message for thread_ts={thread_ts}: "
+                    f"session_type={existing_type!r} (not slack)"
+                )
+                return
+
         is_thread_start = thread_ts is None
         conversation_key = thread_ts or ts
         if is_thread_start:
@@ -166,12 +180,12 @@ def create_app() -> App:
                 value="",
                 channel_id=channel,
                 title=text or "(attachment)",
-                session_type="slack",
+                session_type=SESSION_TYPE,
             )
 
         platform = SlackPlatform(client=client, bot_token=slack_bot_token())
         msg = IncomingMessage(
-            platform="slack",
+            platform=SESSION_TYPE,
             conversation_key=conversation_key,
             message_id=ts,
             text=text,
@@ -211,60 +225,39 @@ def _connection_error_listener(error: Exception) -> None:
             os._exit(1)
 
 
-def start() -> None:
-    """Start yuki-conductor (blocking). Slack integration is dispatched by SLACK_MODE."""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+class SlackSocketReceiver:
+    """ChatAppReceiver wrapping slack-bolt Socket Mode."""
 
-    mode = slack_mode()
-    logger.info(f"Starting yuki-conductor with SLACK_MODE={mode.value}")
+    name = "slack"
 
-    if mode is SlackMode.SOCKET:
-        _start_socket_mode()
-    elif mode is SlackMode.TOKEN:
-        _start_token_mode()
-    elif mode is SlackMode.NONE:
-        _start_no_slack()
-    else:
-        raise RuntimeError(f"Unhandled SlackMode: {mode!r}")
+    def __init__(self) -> None:
+        self._app = create_app()
+        self.platform = SlackPlatform(self._app.client, slack_bot_token())
+        self._handler = SocketModeHandler(self._app, slack_app_token())
+        self._handler.client.on_error_listeners.append(_connection_error_listener)
 
+    def start(self) -> None:
+        logger.info("Connection watchdog installed")
+        logger.info("Starting Slack Socket Mode receiver...")
+        self._post_restart_notification()
+        threading.Thread(
+            target=self._handler.start, name="slack-socket", daemon=True
+        ).start()
 
-def _start_socket_mode() -> None:
-    app = create_app()
-
-    start_web_server()
-    start_cron_scheduler(app.client)
-
-    handler = SocketModeHandler(app, slack_app_token())
-    handler.client.on_error_listeners.append(_connection_error_listener)
-    logger.info("Connection watchdog installed")
-    logger.info("Starting yuki-conductor in Socket Mode...")
-
-    try:
-        commit = (
-            subprocess.run(
-                ["git", "rev-parse", "--short", "HEAD"],
-                cwd=CLAUDE_WORKING_DIR,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            or "unknown"
-        )
-        app.client.chat_postMessage(
-            channel=slack_app_dm_channel(),
-            text=f":arrows_counterclockwise: yuki-conductor daemon restarted (commit `{commit}`).",
-        )
-    except Exception:
-        logger.warning("Failed to send restart notification", exc_info=True)
-
-    handler.start()
-
-
-def _start_token_mode() -> None:
-    raise NotImplementedError("SLACK_MODE=TOKEN is not yet implemented")
-
-
-def _start_no_slack() -> None:
-    start_web_server()
-    start_cron_scheduler(slack_client=None)
-    logger.info("Slack integration disabled (SLACK_MODE=NONE); web + cron only")
-    threading.Event().wait()
+    def _post_restart_notification(self) -> None:
+        try:
+            commit = (
+                subprocess.run(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    cwd=CLAUDE_WORKING_DIR,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                or "unknown"
+            )
+            self._app.client.chat_postMessage(
+                channel=slack_app_dm_channel(),
+                text=f":arrows_counterclockwise: yuki-conductor daemon restarted (commit `{commit}`).",
+            )
+        except Exception:
+            logger.warning("Failed to send restart notification", exc_info=True)

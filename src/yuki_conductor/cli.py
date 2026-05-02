@@ -7,7 +7,7 @@ import sys
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="yuki-conductor",
-        description="Bridge Slack messages to Claude Code CLI",
+        description="Bridge chat-app messages (Slack, Teams CLI, web) to Claude Code CLI",
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     if args.command == "run":
-        from yuki_conductor.slack_app import start
+        from yuki_conductor.runtime import start
 
         start()
     elif args.command == "daemon":

@@ -132,6 +132,18 @@ class SessionStore:
             finally:
                 con.close()
 
+    def get_session_type(self, key: str) -> str | None:
+        """Return the session_type stored for a key, or None if unknown."""
+        with self._lock:
+            con = self._connect()
+            try:
+                row = con.execute(
+                    "SELECT session_type FROM sessions WHERE key = ?", (key,)
+                ).fetchone()
+                return row[0] if row and row[0] else None
+            finally:
+                con.close()
+
     _SENTINEL = object()
 
     def set(self, key: str, value: str, channel_id: str | None = None,

@@ -142,6 +142,20 @@ class WebPlatform:
             conversation_key, claude_session_id=session_id
         )
 
+    def start_thread(self, text: str, title: str | None = None) -> str:
+        """Create a fresh web conversation seeded with `text` as the first
+        assistant message, and return its id."""
+        conv = self._store.create_conversation(
+            platform="web", title=title or text[:80]
+        )
+        stored = self._store.add_message(
+            conv.id, role="assistant", text=text, attachments=[]
+        )
+        self._manager.broadcast(
+            conv.id, {"type": "message", "message": serialize_message(stored)}
+        )
+        return conv.id
+
     def _import_outgoing_attachments(
         self, attachments: Iterable
     ) -> list[StoredAttachment]:

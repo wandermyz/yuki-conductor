@@ -8,6 +8,7 @@ the response back through the originating `MessagingPlatform`.
 from yuki_conductor.messaging.conversation import handle_incoming_message
 from yuki_conductor.messaging.platform import (
     Attachment,
+    ChatAppReceiver,
     IncomingMessage,
     MessagingPlatform,
     OutgoingMessage,
@@ -15,6 +16,7 @@ from yuki_conductor.messaging.platform import (
 
 __all__ = [
     "Attachment",
+    "ChatAppReceiver",
     "IncomingMessage",
     "MessagingPlatform",
     "OutgoingMessage",

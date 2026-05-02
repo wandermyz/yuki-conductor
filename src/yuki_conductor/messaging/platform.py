@@ -37,7 +37,7 @@ class OutgoingMessage:
 
 
 class MessagingPlatform(Protocol):
-    """Abstract messaging surface. Slack and the web chat both implement this."""
+    """Abstract messaging surface. Slack, Teams CLI, and the web chat all implement this."""
 
     name: str
 
@@ -53,4 +53,26 @@ class MessagingPlatform(Protocol):
         self, conversation_key: str, session_id: str, title_hint: str | None = None
     ) -> None:
         """Persist the Claude session id (and optional initial title) for resume."""
+        ...
+
+    def start_thread(self, text: str, title: str | None = None) -> str:
+        """Open a new conversation thread with an initial message and return its key.
+
+        Used by the cron scheduler (and any other producer) to seed a thread
+        the platform owns. Slack creates a top-level message and returns its
+        `thread_ts`; Teams CLI returns a fresh `teams:{uuid}`; web creates a
+        new conversation row.
+        """
+        ...
+
+
+class ChatAppReceiver(Protocol):
+    """A non-blocking entry point that wires a chat app's inbound stream
+    into `handle_incoming_message`."""
+
+    name: str
+    platform: MessagingPlatform
+
+    def start(self) -> None:
+        """Start the receiver. Must not block; spawn threads as needed."""
         ...

@@ -5,10 +5,17 @@
 ```
 src/yuki_conductor/
   cli.py            — argparse entry point (run, daemon, simulate)
-  config.py         — env loading, path constants
+  config.py         — env loading, path constants, CHAT_APPS parsing
   store.py          — SQLite-backed session & model stores
   claude_runner.py  — subprocess wrapper for claude CLI
-  slack_app.py      — Slack handlers + start() dispatcher (NONE/SOCKET/TOKEN)
+  runtime.py        — process orchestrator (starts receivers + web + cron)
+  slack_app.py      — Slack Bolt handlers + SlackSocketReceiver
+  messaging/        — platform-agnostic messaging core
+    platform.py        — MessagingPlatform / ChatAppReceiver Protocols + types
+    conversation.py    — handle_incoming_message: shared run_claude orchestration
+    slack_platform.py  — Slack adapter
+    teams_cli_platform.py — Teams CLI adapter (placeholder until binary lands)
+    web_platform.py    — Web chat adapter
   cron_scheduler.py — cron task scheduler (reads workspace/cron.yaml)
   daemon.py         — macOS LaunchAgent management
   web_server.py     — FastAPI HTTP server (agent conductor web UI)
@@ -23,19 +30,25 @@ Key workspace files:
 - `workspace/yuki-conductor.db` — SQLite database for session and model tracking
 - `workspace/cron.yaml` — Cron task definitions (see `cron.example.yaml` for format)
 
-## Slack Mode
+## Chat Apps
 
-The daemon's Slack integration is selected by `SLACK_MODE`:
+The daemon's chat surfaces are selected by `CHAT_APPS` (comma-separated):
 
-- `SOCKET` (default) — slack-bolt Socket Mode using `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN`.
-- `NONE` — no Slack. Web server and cron scheduler still run; cron notifications are logged instead of posted.
-- `TOKEN` — direct Slack tokens (not yet implemented; raises `NotImplementedError`).
+- `slack_socket` (default) — slack-bolt Socket Mode using `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN`.
+- `teams_cli` — Microsoft Teams via the (in-development) `teams-cli` binary. Currently a placeholder receiver: outbound messages log only.
+- empty / `none` — no chat receivers. Web server and cron scheduler still run; cron notifications are logged instead of posted.
+
+Multiple values may be combined: `CHAT_APPS=slack_socket,teams_cli`. Each session is platform-tagged so replies always route back to the originating chat app.
+
+The legacy `SLACK_MODE` env (`SOCKET`/`NONE`) is honored with a deprecation warning. `SLACK_MODE=TOKEN` is no longer supported.
 
 ## Cron Scheduler
 
-The daemon supports scheduled tasks via `workspace/cron.yaml`. Each task specifies a cron expression, a description, and a Claude prompt. When the cron fires, it posts a new thread in the configured `SLACK_CRON_CHANNEL` and runs Claude Code with the prompt, posting the result as a thread reply. The thread is session-tracked, so follow-up replies in that thread continue the conversation.
+The daemon supports scheduled tasks via `workspace/cron.yaml`. Each task specifies a cron expression, a description, a Claude prompt, and optionally `chat_app` (`slack_socket` or `teams_cli`) to control where the notification goes. When the cron fires, the routed platform opens a new thread and runs Claude Code with the prompt, posting the result. The thread is session-tracked, so follow-up replies in that thread continue the conversation.
 
-Required env var (only when `SLACK_MODE=SOCKET`): `SLACK_CRON_CHANNEL` — the Slack channel ID to post cron results to.
+Routing rule when `chat_app:` is omitted: pick the first enabled platform, with `slack` preferred. If `chat_app:` names a platform that isn't in `CHAT_APPS`, the task is skipped with a warning rather than misrouted.
+
+Required env var (only when `slack_socket` is enabled): `SLACK_CRON_CHANNEL` — the Slack channel ID to post cron results to.
 
 ## Key Commands
 
@@ -59,7 +72,7 @@ Do not commit or open a PR if either fails.
 ## Architecture
 
 - **Session tracking**: SQLite database at `workspace/yuki-conductor.db` maps `thread_ts → (session_id, channel_id)` and `channel_id → model`
-- **Web server**: FastAPI on port 2333 (env: `WEB_PORT`), serves React frontend and `/api/sessions` endpoint. Starts in a daemon thread alongside Slack Socket Mode.
+- **Web server**: FastAPI on port 2333 (env: `WEB_PORT`), serves React frontend and `/api/sessions` + chat endpoints. Starts in a daemon thread alongside any enabled chat-app receivers.
 - **Concurrency**: slack-bolt's default thread pool (10 threads); each handler blocks on `subprocess.run`
 - **Claude invocation**: `claude -p --dangerously-skip-permissions --output-format json [-r session_id] "prompt"`
 - **Environment**: Must unset `CLAUDECODE` env var in subprocess to avoid nested session errors

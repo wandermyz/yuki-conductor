@@ -9,13 +9,14 @@ import yaml
 from croniter import croniter
 
 from yuki_conductor.claude_runner import run_claude
-from yuki_conductor.config import CRON_FILE, WORKSPACE_DIR, slack_cron_channel
-from yuki_conductor.formatting import markdown_to_mrkdwn
-from yuki_conductor.store import SessionStore
+from yuki_conductor.config import CRON_FILE, WORKSPACE_DIR
+from yuki_conductor.messaging import MessagingPlatform
 
 logger = logging.getLogger(__name__)
 
-store = SessionStore()
+# Preference order when a cron task does not specify chat_app and multiple
+# platforms are enabled.
+_PREFERRED_ORDER = ("slack", "teams_cli", "web")
 
 
 @dataclass
@@ -24,6 +25,7 @@ class CronTask:
     schedule: str
     description: str
     prompt: str
+    chat_app: str | None = None  # "slack" | "teams_cli" | None (default routing)
 
 
 def _ensure_workspace() -> None:
@@ -53,6 +55,7 @@ def _load_cron_tasks() -> list[CronTask]:
                 schedule=entry["schedule"],
                 description=entry.get("description", ""),
                 prompt=entry["prompt"],
+                chat_app=entry.get("chat_app"),
             )
             # Validate cron expression
             croniter(task.schedule)
@@ -77,23 +80,47 @@ _CRON_PROMPT_PREFIX = (
 )
 
 
-def _run_cron_task(task: CronTask, slack_client) -> None:
-    """Execute a single cron task: run Claude, post to Slack only if <notify>.
+# `slack` (legacy) is accepted as an alias for `slack_socket` since
+# CHAT_APPS uses the latter while platform.name is the former.
+_TASK_APP_ALIASES = {"slack_socket": "slack"}
 
-    When `slack_client` is None (Slack disabled), notifications are logged
-    instead of posted.
+
+def _pick_platform(
+    task: CronTask,
+    platforms_by_name: dict[str, MessagingPlatform],
+) -> MessagingPlatform | None:
+    """Resolve which platform a cron task should notify into.
+
+    Returns None when the task should be skipped (explicit chat_app refers
+    to a disabled platform) or when no platforms are enabled at all.
     """
+    if task.chat_app:
+        requested = _TASK_APP_ALIASES.get(task.chat_app, task.chat_app)
+        platform = platforms_by_name.get(requested)
+        if platform is None:
+            logger.warning(
+                f"Cron task={task.name} requested chat_app={task.chat_app!r} "
+                f"but it is not enabled; skipping notification"
+            )
+        return platform
+
+    for name in _PREFERRED_ORDER:
+        if name in platforms_by_name:
+            return platforms_by_name[name]
+    return None
+
+
+def _run_cron_task(
+    task: CronTask, platforms_by_name: dict[str, MessagingPlatform]
+) -> None:
+    """Execute a single cron task: run Claude, post via the routed platform if <notify>."""
     logger.info(f"Cron task={task.name} starting, running Claude...")
 
-    # Run Claude with the cron prompt, prefixed with notify/silence instructions
     prefixed_prompt = _CRON_PROMPT_PREFIX + task.prompt
     result = run_claude(prefixed_prompt)
 
-    # Determine whether to notify the user
     response_text = result.text or ""
     should_notify = "<notify>" in response_text
-
-    # Strip the notify/silence tags from the displayed text
     display_text = response_text.replace("<notify>", "").replace("<silence>", "").strip()
 
     if not should_notify:
@@ -102,28 +129,26 @@ def _run_cron_task(task: CronTask, slack_client) -> None:
 
     logger.info(f"Cron task={task.name} completed with notification")
 
-    if slack_client is None:
-        logger.info(f"Cron task={task.name} notification (Slack disabled): {display_text}")
+    if not platforms_by_name:
+        logger.info(f"Cron task={task.name} notification (no chat apps enabled): {display_text}")
         return
 
-    # Post Claude's response directly to Slack
-    channel = slack_cron_channel()
-    display_text = markdown_to_mrkdwn(display_text)
+    platform = _pick_platform(task, platforms_by_name)
+    if platform is None:
+        return
+
+    title = task.description or task.name
     try:
-        response = slack_client.chat_postMessage(channel=channel, text=display_text)
-        thread_ts = response["ts"]
+        conversation_key = platform.start_thread(display_text, title=title)
     except Exception:
-        logger.error(f"Failed to post cron message for task={task.name}", exc_info=True)
+        logger.error(
+            f"Failed to start cron thread on platform={platform.name} for task={task.name}",
+            exc_info=True,
+        )
         return
 
-    # Store session for potential follow-up in the thread
     if result.session_id:
-        store.set(
-            thread_ts,
-            result.session_id,
-            channel_id=channel,
-            title=task.description or task.name,
-        )
+        platform.set_session_id(conversation_key, result.session_id, title_hint=title)
 
 
 def _build_task_state(tasks: list[CronTask]) -> tuple[list[tuple[CronTask, croniter]], dict[str, datetime]]:
@@ -135,19 +160,21 @@ def _build_task_state(tasks: list[CronTask]) -> tuple[list[tuple[CronTask, croni
 
 def _tasks_changed(old: list[CronTask], new: list[CronTask]) -> bool:
     """Check if the task list has changed (by comparing as tuples)."""
-    def to_tuple(t: CronTask) -> tuple[str, str, str, str]:
-        return (t.name, t.schedule, t.description, t.prompt)
+    def to_tuple(t: CronTask) -> tuple:
+        return (t.name, t.schedule, t.description, t.prompt, t.chat_app)
     return [to_tuple(t) for t in old] != [to_tuple(t) for t in new]
 
 
-def _scheduler_loop(slack_client, stop_event: threading.Event) -> None:
+def _scheduler_loop(
+    platforms_by_name: dict[str, MessagingPlatform],
+    stop_event: threading.Event,
+) -> None:
     """Main loop that reloads cron file every cycle and fires due tasks."""
     current_tasks: list[CronTask] = []
     iters: list[tuple[CronTask, croniter]] = []
     next_times: dict[str, datetime] = {}
 
     while not stop_event.is_set():
-        # Reload cron file and rebuild state if changed
         new_tasks = _load_cron_tasks()
         if _tasks_changed(current_tasks, new_tasks):
             current_tasks = new_tasks
@@ -158,7 +185,6 @@ def _scheduler_loop(slack_client, stop_event: threading.Event) -> None:
                 iters, next_times = [], {}
                 logger.info("Cron tasks cleared")
 
-        # Check and fire due tasks
         now = datetime.now()
         for task, it in iters:
             fire_at = next_times.get(task.name)
@@ -166,7 +192,7 @@ def _scheduler_loop(slack_client, stop_event: threading.Event) -> None:
                 logger.info(f"Cron firing task={task.name} (scheduled={fire_at})")
                 threading.Thread(
                     target=_run_cron_task,
-                    args=(task, slack_client),
+                    args=(task, platforms_by_name),
                     name=f"cron-{task.name}",
                     daemon=True,
                 ).start()
@@ -175,26 +201,32 @@ def _scheduler_loop(slack_client, stop_event: threading.Event) -> None:
         stop_event.wait(timeout=30)
 
 
-def start_cron_scheduler(slack_client=None) -> threading.Event:
+def start_cron_scheduler(
+    platforms_by_name: dict[str, MessagingPlatform] | None = None,
+) -> threading.Event:
     """Initialize workspace and start the cron scheduler thread.
 
-    The scheduler reloads workspace/cron.yaml every 30 seconds,
-    so changes take effect without restarting the daemon.
+    The scheduler reloads workspace/cron.yaml every 30 seconds, so changes
+    take effect without restarting the daemon.
 
-    Pass `slack_client=None` to run cron tasks without Slack delivery
-    (notifications get logged instead).
+    `platforms_by_name` maps a platform name (e.g. "slack", "teams_cli") to
+    its `MessagingPlatform`. Pass an empty dict / None to run cron without
+    any chat-app delivery (notifications are logged instead).
 
     Returns a stop_event that can be set to stop the scheduler.
     """
     _ensure_workspace()
+    platforms_by_name = platforms_by_name or {}
 
     stop_event = threading.Event()
     thread = threading.Thread(
         target=_scheduler_loop,
-        args=(slack_client, stop_event),
+        args=(platforms_by_name, stop_event),
         name="cron-scheduler",
         daemon=True,
     )
     thread.start()
-    logger.info("Cron scheduler started")
+    logger.info(
+        f"Cron scheduler started (chat apps: {sorted(platforms_by_name.keys()) or 'none'})"
+    )
     return stop_event

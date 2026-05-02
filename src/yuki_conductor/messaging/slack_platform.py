@@ -4,11 +4,13 @@ import logging
 import urllib.request
 from pathlib import Path
 
-from yuki_conductor.config import UPLOADS_DIR
+from yuki_conductor.config import UPLOADS_DIR, slack_cron_channel
 from yuki_conductor.formatting import markdown_to_mrkdwn
 from yuki_conductor.messaging.platform import Attachment, OutgoingMessage
 
 logger = logging.getLogger(__name__)
+
+SESSION_TYPE = "slack"
 
 
 class SlackPlatform:
@@ -87,6 +89,24 @@ class SlackPlatform:
         from yuki_conductor.store import SessionStore
 
         return SessionStore().get_channel(thread_ts)
+
+    def start_thread(self, text: str, title: str | None = None) -> str:
+        """Post a top-level message to the cron channel and return its `ts`."""
+        channel = slack_cron_channel()
+        response = self._client.chat_postMessage(
+            channel=channel, text=markdown_to_mrkdwn(text)
+        )
+        thread_ts = response["ts"]
+        from yuki_conductor.store import SessionStore
+
+        SessionStore().set(
+            thread_ts,
+            value="",
+            channel_id=channel,
+            title=title or text[:100],
+            session_type=SESSION_TYPE,
+        )
+        return thread_ts
 
 
 def download_slack_files(files: list[dict], bot_token: str) -> list[Attachment]:
