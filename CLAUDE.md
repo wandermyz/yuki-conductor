@@ -67,6 +67,16 @@ Before making any commit or creating a PR, you MUST run both:
 
 Do not commit or open a PR if either fails.
 
+## Code Style
+
+Keep the code clean. **No backward compatibility is required.** This project has a single user and no external consumers, so:
+
+- Don't support old formats of `.env`, `cron.yaml`, the SQLite schema, CLI flags, or any other config. When a format changes, update the file in place and delete the old code path.
+- Don't add migration shims, deprecated-field fallbacks, or "if old format then…" branches. Just change the format and the code together.
+- Don't keep removed functions/flags as aliases or re-exports. Delete them.
+- Don't write `# kept for backwards compatibility` comments — there is no such requirement.
+- When renaming or restructuring, update all call sites and config files in the same change. Don't leave a transition period.
+
 ## Architecture
 
 - **Session tracking**: SQLite database at `workspace/yuki-conductor.db` maps `thread_ts → (session_id, channel_id)` and `channel_id → model`
