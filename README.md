@@ -6,7 +6,7 @@ Bridge Slack messages to Claude Code CLI. Messages sent to the bot start a new C
 
 ### Prerequisites
 
-- macOS
+- macOS, or Windows 10/11 with PowerShell 7+ (foreground `run` only — daemon install is macOS-only for now; see [docs/plans/2026-05-02-windows-support.md](docs/plans/2026-05-02-windows-support.md))
 - [uv](https://docs.astral.sh/uv/) package manager
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 - A Slack workspace with admin access
@@ -54,6 +54,30 @@ yuki-conductor daemon log                       # Show log file paths + recent o
 yuki-conductor simulate message "hello"         # Test without Slack
 yuki-conductor simulate reply <ts> "follow up"  # Resume session
 ```
+
+## Windows
+
+`yuki-conductor run` works on Windows; the macOS daemon installer
+(`yuki-conductor daemon ...`) does not. Use PowerShell:
+
+```powershell
+mkdir $env:USERPROFILE\.yuki-conductor
+copy .env.template $env:USERPROFILE\.yuki-conductor\.env
+# Edit the .env in your editor of choice
+uv run yuki-conductor run
+```
+
+Caveats:
+
+- Zellij terminal sessions are disabled on Windows (the
+  `/ws/terminal/...` WebSocket returns "not supported"). The rest of the
+  web UI (chat, sessions list, cron) works the same as on macOS.
+- If your `%USERPROFILE%` is redirected into OneDrive, set
+  `YUKI_CONDUCTOR_DATA_DIR` to a non-synced path to avoid SQLite
+  corruption.
+
+A Windows-native daemon (Task Scheduler-based) is planned — see
+[docs/plans/2026-05-02-windows-support.md](docs/plans/2026-05-02-windows-support.md).
 
 ## Development
 

@@ -92,6 +92,8 @@ def create_app() -> App:
                 [CLAUDE_BIN, "--version"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=10,
                 cwd=CLAUDE_WORKING_DIR,
             )
@@ -253,6 +255,8 @@ class SlackSocketReceiver:
                     cwd=CLAUDE_WORKING_DIR,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                 ).stdout.strip()
                 or "unknown"
             )

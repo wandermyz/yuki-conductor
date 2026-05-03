@@ -1,17 +1,9 @@
 """FastAPI HTTP server for the agent conductor web UI."""
 
 import asyncio
-import concurrent.futures
-import fcntl
-import json
 import logging
 import os
-import pty
-import select
-import signal
-import struct
-import subprocess
-import termios
+import sys
 import threading
 import time
 from pathlib import Path
@@ -31,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from yuki_conductor import zellij_manager
-from yuki_conductor.config import CLAUDE_WORKING_DIR, WEB_UPLOADS_DIR
+from yuki_conductor.config import WEB_UPLOADS_DIR
 from yuki_conductor.conversation_store import ConversationStore
 from yuki_conductor.messaging import Attachment, IncomingMessage, handle_incoming_message
 from yuki_conductor.messaging.web_platform import (
@@ -53,8 +45,6 @@ _WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 store = SessionStore()
 conv_store = ConversationStore()
 ws_manager = ConnectionManager()
-# Dedicated thread pool for PTY reads so they don't block the default executor
-_pty_executor = concurrent.futures.ThreadPoolExecutor(max_workers=10, thread_name_prefix="pty")
 
 
 def _slack_thread_url(channel_id: str, thread_ts: str) -> str:
@@ -148,131 +138,14 @@ def create_api() -> FastAPI:
             raise HTTPException(status_code=404, detail="Session not found")
         return {"ok": True}
 
-    @api.websocket("/ws/terminal/{session_key:path}")
-    async def terminal_websocket(websocket: WebSocket, session_key: str):
-        """Bridge a Zellij session to a browser terminal via WebSocket + PTY."""
-        await websocket.accept()
+    if sys.platform == "win32":
+        @api.websocket("/ws/terminal/{session_key:path}")
+        async def terminal_websocket(websocket: WebSocket, session_key: str):
+            await websocket.close(code=1011, reason="Terminal not supported on Windows")
+    else:
+        from yuki_conductor.pty_bridge import register_terminal_ws
 
-        # Extract zellij session name from key
-        if not session_key.startswith("zellij:"):
-            await websocket.close(code=1008, reason="Not a Zellij session")
-            return
-        zellij_name = session_key[len("zellij:"):]
-
-        # Wait for the initial resize message from the frontend
-        # so we can set the PTY size before spawning zellij
-        initial_msg = await websocket.receive()
-        init_cols, init_rows = 80, 24
-        if "text" in initial_msg:
-            try:
-                parsed = json.loads(initial_msg["text"])
-                if parsed.get("type") == "resize":
-                    init_cols = parsed.get("cols", 80)
-                    init_rows = parsed.get("rows", 24)
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-        # Create a PTY and set initial size
-        master_fd, slave_fd = pty.openpty()
-        winsize = struct.pack("HHHH", init_rows, init_cols, 0, 0)
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
-        env = os.environ.copy()
-        env.update({
-            "TERM": "xterm-256color",
-            "COLORTERM": "truecolor",
-            "SHELL": "/bin/zsh",
-            "LC_ALL": "en_US.UTF-8",
-            "LANG": "en_US.UTF-8",
-        })
-        try:
-            proc = subprocess.Popen(
-                ["zellij", "attach", zellij_name, "--create"],
-                stdin=slave_fd,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                cwd=CLAUDE_WORKING_DIR,
-                env=env,
-                start_new_session=True,
-            )
-        except FileNotFoundError:
-            os.close(master_fd)
-            os.close(slave_fd)
-            await websocket.close(code=1011, reason="zellij not found")
-            return
-
-        os.close(slave_fd)  # Only the master side is needed
-
-        loop = asyncio.get_event_loop()
-        stop_event = threading.Event()
-
-        def _blocking_read():
-            """Read from PTY with select() so we can be interrupted."""
-            while not stop_event.is_set():
-                ready, _, _ = select.select([master_fd], [], [], 0.5)
-                if ready:
-                    try:
-                        data = os.read(master_fd, 4096)
-                        if not data:
-                            return None
-                        return data
-                    except OSError:
-                        return None
-            return None
-
-        async def pty_reader():
-            """Read from PTY and send to WebSocket."""
-            try:
-                while not stop_event.is_set():
-                    data = await loop.run_in_executor(
-                        _pty_executor, _blocking_read
-                    )
-                    if not data:
-                        break
-                    await websocket.send_bytes(data)
-            except (OSError, WebSocketDisconnect):
-                pass
-
-        reader_task = asyncio.create_task(pty_reader())
-
-        try:
-            while True:
-                msg = await websocket.receive()
-                if msg.get("type") == "websocket.disconnect":
-                    break
-                try:
-                    if "bytes" in msg:
-                        os.write(master_fd, msg["bytes"])
-                    elif "text" in msg:
-                        # Handle resize messages or text input
-                        try:
-                            parsed = json.loads(msg["text"])
-                            if parsed.get("type") == "resize":
-                                cols = parsed.get("cols", 80)
-                                rows = parsed.get("rows", 24)
-                                winsize = struct.pack("HHHH", rows, cols, 0, 0)
-                                fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
-                                # Explicitly signal the process group
-                                try:
-                                    os.killpg(os.getpgid(proc.pid), signal.SIGWINCH)
-                                except (OSError, ProcessLookupError):
-                                    pass
-                                continue
-                        except (json.JSONDecodeError, ValueError):
-                            pass
-                        os.write(master_fd, msg["text"].encode())
-                except OSError:
-                    logger.debug("PTY write failed, closing WebSocket", exc_info=True)
-                    break
-        except WebSocketDisconnect:
-            pass
-        finally:
-            stop_event.set()
-            reader_task.cancel()
-            try:
-                os.close(master_fd)
-            except OSError:
-                pass
-            proc.terminate()
+        register_terminal_ws(api)
 
     # ── Web messaging endpoints ────────────────────────────────────────────
 

@@ -53,6 +53,8 @@ def run_claude(
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=effective_timeout,
             env=env,
             cwd=CLAUDE_WORKING_DIR,

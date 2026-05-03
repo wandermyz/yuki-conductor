@@ -1,13 +1,20 @@
-"""Zellij session lifecycle management."""
+"""Zellij session lifecycle management.
+
+Zellij is POSIX-only; on Windows every entry point short-circuits
+(`list_sessions()` returns `[]`, mutating calls raise NotImplementedError).
+"""
 
 import logging
 import os
 import re
 import subprocess
+import sys
 
 from yuki_conductor.config import CLAUDE_BIN, CLAUDE_WORKING_DIR
 
 logger = logging.getLogger(__name__)
+
+_WINDOWS_MSG = "Zellij sessions are not supported on Windows"
 
 
 def create_session(name: str, worktree: str, working_dir: str | None = None,
@@ -17,6 +24,8 @@ def create_session(name: str, worktree: str, working_dir: str | None = None,
     If resume=True, uses `claude --continue --worktree` to resume the
     most recent conversation in that worktree.
     """
+    if sys.platform == "win32":
+        raise NotImplementedError(_WINDOWS_MSG)
     cwd = working_dir or CLAUDE_WORKING_DIR
     env = os.environ.copy()
     env.update({
@@ -55,10 +64,13 @@ def create_session(name: str, worktree: str, working_dir: str | None = None,
 
 def list_sessions() -> list[str]:
     """Return names of active (non-exited) Zellij sessions."""
+    if sys.platform == "win32":
+        return []
     try:
         result = subprocess.run(
             ["zellij", "list-sessions"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=5,
         )
         if result.returncode != 0:
             return []
@@ -87,6 +99,8 @@ def is_session_alive(name: str) -> bool:
 
 def kill_session(name: str) -> None:
     """Kill a Zellij session by name, then delete the exited entry."""
+    if sys.platform == "win32":
+        raise NotImplementedError(_WINDOWS_MSG)
     try:
         subprocess.run(
             ["zellij", "kill-session", name],
