@@ -193,6 +193,14 @@
   background: var(--accent-bg);
 }
 
+.conv-menu-item-danger {
+  color: #e03131;
+}
+
+.conv-menu-item-danger:hover {
+  background: rgba(224, 49, 49, 0.1);
+}
+
 .conv-menu-divider {
   height: 1px;
   background: var(--border);

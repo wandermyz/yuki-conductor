@@ -84,11 +84,13 @@ function ConvMenu({
   status,
   onShowSessionId,
   onSetStatus,
+  onDelete,
   onClose,
 }: {
   status: ConvStatus;
   onShowSessionId: () => void;
   onSetStatus: (s: ConvStatus) => void;
+  onDelete: () => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -133,6 +135,13 @@ function ConvMenu({
           Mark as Done
         </button>
       )}
+      <div className="conv-menu-divider" />
+      <button
+        className="conv-menu-item conv-menu-item-danger"
+        onClick={(e) => { e.stopPropagation(); onDelete(); onClose(); }}
+      >
+        Delete
+      </button>
     </div>
   );
 }
@@ -308,16 +317,25 @@ function ChatThread({
   conv,
   messages,
   processing,
+  status,
   onBack,
   onSend,
+  onShowSessionId,
+  onSetStatus,
+  onDelete,
 }: {
   conv: Conversation;
   messages: ChatMessage[];
   processing: boolean;
+  status: ConvStatus;
   onBack: () => void;
   onSend: (text: string, files: AttachmentRef[]) => void;
+  onShowSessionId: () => void;
+  onSetStatus: (s: ConvStatus) => void;
+  onDelete: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
 
   const isNearBottomRef = useRef(true);
 
@@ -344,6 +362,25 @@ function ChatThread({
           ←
         </button>
         <h2 className="chat-thread-title">{conv.title || "New chat"}</h2>
+        <div className="menu-anchor">
+          <button
+            className="chat-list-menu-btn"
+            onClick={() => setHeaderMenuOpen(!headerMenuOpen)}
+            aria-label="Menu"
+            title="Menu"
+          >
+            &#8942;
+          </button>
+          {headerMenuOpen && (
+            <ConvMenu
+              status={status}
+              onShowSessionId={onShowSessionId}
+              onSetStatus={onSetStatus}
+              onDelete={onDelete}
+              onClose={() => setHeaderMenuOpen(false)}
+            />
+          )}
+        </div>
       </header>
       <div className="chat-scroll" ref={scrollRef}>
         {messages.length === 0 && !processing && (
@@ -540,21 +577,11 @@ export default function Chat() {
                           status={st}
                           onShowSessionId={() => setSessionIdModal(c.claude_session_id || "(no session yet)")}
                           onSetStatus={(s) => setStatus(c.id, s)}
+                          onDelete={() => remove(c.id)}
                           onClose={() => setMenuOpen(null)}
                         />
                       )}
                     </div>
-                    <button
-                      className="chat-list-delete"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        remove(c.id);
-                      }}
-                      aria-label="Delete"
-                      title="Delete"
-                    >
-                      ×
-                    </button>
                   </div>
                 </div>
               </li>
@@ -569,8 +596,12 @@ export default function Chat() {
             conv={active}
             messages={messagesByConv[active.id] || []}
             processing={processingConvs.has(active.id)}
+            status={getStatus(statuses, active.id)}
             onBack={() => setSelected(null)}
             onSend={(text, files) => handleSend(active.id, text, files)}
+            onShowSessionId={() => setSessionIdModal(active.claude_session_id || "(no session yet)")}
+            onSetStatus={(s) => setStatus(active.id, s)}
+            onDelete={() => remove(active.id)}
           />
         ) : (
           <div className="chat-placeholder">
