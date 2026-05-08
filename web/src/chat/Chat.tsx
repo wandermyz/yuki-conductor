@@ -166,7 +166,7 @@ function Composer({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (e.key === "Enter" && e.shiftKey) {
               e.preventDefault();
               submit();
             }
@@ -228,9 +228,22 @@ function ChatThread({
     };
   }, [conv.id]);
 
+  const isNearBottomRef = useRef(true);
+
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const handleScroll = () => {
+      isNearBottomRef.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    };
+    el.addEventListener("scroll", handleScroll);
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && isNearBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, processing]);
 
   const handleSend = async (text: string, files: AttachmentRef[]) => {
