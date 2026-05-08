@@ -70,7 +70,8 @@ class ConversationStore:
                         project TEXT,
                         claude_session_id TEXT,
                         created_at REAL NOT NULL,
-                        updated_at REAL NOT NULL
+                        updated_at REAL NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'read'
                     )
                     """
                 )
@@ -90,6 +91,15 @@ class ConversationStore:
                     "CREATE INDEX IF NOT EXISTS idx_messages_conv_created "
                     "ON messages(conversation_id, created_at)"
                 )
+                # Auto-migrate: add columns if missing
+                cols = {
+                    row[1]
+                    for row in con.execute("PRAGMA table_info(conversations)").fetchall()
+                }
+                if "status" not in cols:
+                    con.execute(
+                        "ALTER TABLE conversations ADD COLUMN status TEXT NOT NULL DEFAULT 'read'"
+                    )
                 con.commit()
             finally:
                 con.close()
@@ -209,6 +219,30 @@ class ConversationStore:
             try:
                 con.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
                 cur = con.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+                con.commit()
+                return cur.rowcount > 0
+            finally:
+                con.close()
+
+    def get_all_statuses(self) -> dict[str, str]:
+        """Return {conv_id: status} for all conversations."""
+        with self._lock:
+            con = self._connect()
+            try:
+                rows = con.execute("SELECT id, status FROM conversations").fetchall()
+                return {r[0]: r[1] for r in rows}
+            finally:
+                con.close()
+
+    def set_status(self, conv_id: str, status: str) -> bool:
+        """Set the status for a conversation. Returns True if found."""
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    "UPDATE conversations SET status = ? WHERE id = ?",
+                    (status, conv_id),
+                )
                 con.commit()
                 return cur.rowcount > 0
             finally:

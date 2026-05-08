@@ -98,6 +98,21 @@ export async function uploadFile(file: File): Promise<AttachmentRef> {
   return r.json();
 }
 
+export async function fetchStatuses(): Promise<Record<string, string>> {
+  const r = await fetch("/api/chat/conversations/statuses");
+  if (!r.ok) throw new Error("Failed to fetch statuses");
+  return r.json();
+}
+
+export async function setConvStatus(convId: string, status: string): Promise<void> {
+  const r = await fetch(`/api/chat/conversations/${encodeURIComponent(convId)}/status`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!r.ok) throw new Error("Failed to set status");
+}
+
 export function openChatSocket(
   onEvent: (e: WSEvent) => void,
   opts: { onOpen?: () => void; onClose?: () => void } = {},

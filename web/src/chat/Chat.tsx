@@ -4,10 +4,12 @@ import remarkGfm from "remark-gfm";
 import {
   createConversation,
   deleteConversation,
+  fetchStatuses,
   listConversations,
   listMessages,
   openChatSocket,
   sendMessage,
+  setConvStatus,
   uploadFile,
 } from "./api";
 import type {
@@ -54,18 +56,6 @@ function isImage(mime: string | null, filename: string): boolean {
 /* ---------- Conversation status helpers ---------- */
 
 type ConvStatus = "unread" | "read" | "done";
-
-function loadStatuses(): Record<string, ConvStatus> {
-  try {
-    return JSON.parse(localStorage.getItem("conv-statuses") ?? "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveStatuses(s: Record<string, ConvStatus>) {
-  localStorage.setItem("conv-statuses", JSON.stringify(s));
-}
 
 function getStatus(statuses: Record<string, ConvStatus>, id: string): ConvStatus {
   return statuses[id] ?? "read";
@@ -422,7 +412,7 @@ export default function Chat() {
   const [selected, setSelected] = useState<string | null>(null);
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({});
   const [processingConvs, setProcessingConvs] = useState<Set<string>>(new Set());
-  const [statuses, setStatuses] = useState<Record<string, ConvStatus>>(loadStatuses);
+  const [statuses, setStatuses] = useState<Record<string, ConvStatus>>({});
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [sessionIdModal, setSessionIdModal] = useState<string | null>(null);
 
@@ -431,11 +421,8 @@ export default function Chat() {
   selectedRef.current = selected;
 
   const setStatus = useCallback((id: string, s: ConvStatus) => {
-    setStatuses((prev) => {
-      const next = { ...prev, [id]: s };
-      saveStatuses(next);
-      return next;
-    });
+    setStatuses((prev) => ({ ...prev, [id]: s }));
+    setConvStatus(id, s).catch(console.error);
   }, []);
 
   // Single global WS connection
@@ -453,7 +440,7 @@ export default function Chat() {
           setStatuses((prev) => {
             if (prev[cid] === "done") return prev; // don't override "done"
             const next = { ...prev, [cid]: "unread" as ConvStatus };
-            saveStatuses(next);
+            setConvStatus(cid, "unread").catch(console.error);
             return next;
           });
         }
@@ -476,6 +463,7 @@ export default function Chat() {
 
   useEffect(() => {
     listConversations().then(setConversations).catch(console.error);
+    fetchStatuses().then((s) => setStatuses(s as Record<string, ConvStatus>)).catch(console.error);
   }, []);
 
   // Load messages when selecting a conversation
@@ -538,9 +526,8 @@ export default function Chat() {
     setStatuses((prev) => {
       const cur = prev[id] ?? "read";
       if (cur === "unread") {
-        const next = { ...prev, [id]: "read" as ConvStatus };
-        saveStatuses(next);
-        return next;
+        setConvStatus(id, "read").catch(console.error);
+        return { ...prev, [id]: "read" as ConvStatus };
       }
       return prev;
     });

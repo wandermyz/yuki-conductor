@@ -215,6 +215,21 @@ def create_api() -> FastAPI:
         store.delete_session(conv_id)
         return {"ok": True}
 
+    @api.get("/api/chat/conversations/statuses")
+    def get_conversation_statuses():
+        return conv_store.get_all_statuses()
+
+    class StatusUpdate(BaseModel):
+        status: str
+
+    @api.put("/api/chat/conversations/{conv_id}/status")
+    def set_conversation_status(conv_id: str, body: StatusUpdate):
+        if body.status not in ("unread", "read", "done"):
+            raise HTTPException(status_code=400, detail="Invalid status")
+        if not conv_store.set_status(conv_id, body.status):
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return {"ok": True}
+
     @api.get("/api/conversations/{conv_id}/messages")
     def list_messages(
         conv_id: str,
