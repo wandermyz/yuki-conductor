@@ -24,12 +24,13 @@ def test_basic_call():
     assert not result.is_error
 
     cmd = mock.call_args[0][0]
-    assert "claude" in cmd
-    assert "-p" in cmd
-    assert "--dangerously-skip-permissions" in cmd
-    assert "--output-format" in cmd
-    assert "json" in cmd
-    assert "hi" in cmd
+    cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+    assert "claude" in cmd_str
+    assert "-p" in cmd_str
+    assert "--dangerously-skip-permissions" in cmd_str
+    assert "--output-format" in cmd_str
+    assert "json" in cmd_str
+    assert "hi" in cmd_str
 
 
 def test_resume_session():
@@ -38,8 +39,9 @@ def test_resume_session():
         result = run_claude("continue", session_id="sess_456")
 
     cmd = mock.call_args[0][0]
-    assert "-r" in cmd
-    assert "sess_456" in cmd
+    cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+    assert "-r" in cmd_str
+    assert "sess_456" in cmd_str
     assert result.text == "Resumed!"
 
 

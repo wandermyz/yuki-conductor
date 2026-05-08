@@ -2,12 +2,18 @@
 
 import json
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 
 from yuki_conductor.config import CLAUDE_BIN, CLAUDE_TIMEOUT, CLAUDE_WORKING_DIR
 
 SLACK_MESSAGE_LIMIT = 4000
+
+
+def _ps_quote(arg: str) -> str:
+    """Wrap an argument for PowerShell single-quoted context."""
+    return "'" + arg.replace("'", "''") + "'"
 
 
 @dataclass
@@ -31,17 +37,24 @@ def run_claude(
         timeout: Timeout in seconds (defaults to CLAUDE_TIMEOUT).
         model: Optional model alias (e.g. "sonnet", "opus", "haiku").
     """
-    cmd = [
-        CLAUDE_BIN,
+    args = [
         "-p",
         "--dangerously-skip-permissions",
         "--output-format", "json",
     ]
     if model:
-        cmd.extend(["--model", model])
+        args.extend(["--model", model])
     if session_id:
-        cmd.extend(["-r", session_id])
-    cmd.append(prompt)
+        args.extend(["-r", session_id])
+    args.append(prompt)
+
+    if CLAUDE_BIN.endswith(".ps1"):
+        cmd = ["powershell", "-Command", f"& '{CLAUDE_BIN}' {' '.join(_ps_quote(a) for a in args)}"]
+    elif CLAUDE_BIN.endswith(".sh"):
+        git_bash = shutil.which("bash") or "bash"
+        cmd = [git_bash, CLAUDE_BIN, *args]
+    else:
+        cmd = [CLAUDE_BIN, *args]
 
     # Unset CLAUDECODE to avoid nested session errors
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}

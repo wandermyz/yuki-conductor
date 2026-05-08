@@ -26,6 +26,11 @@ CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "1800"))
 CLAUDE_WORKING_DIR = os.path.expanduser(os.environ.get("CLAUDE_WORKING_DIR", "~/Projects/wandering-vibe"))
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 
+TEAMS_CLI_BIN = os.environ.get("TEAMS_CLI_BIN", "teams")
+TEAMS_TEAM_ID = os.environ.get("TEAMS_TEAM_ID", "")
+TEAMS_CHANNEL_ID = os.environ.get("TEAMS_CHANNEL_ID", "")
+TEAMS_POLL_INTERVAL = int(os.environ.get("TEAMS_POLL_INTERVAL", "5"))
+
 
 class ChatApp(StrEnum):
     SLACK_SOCKET = "slack_socket"
