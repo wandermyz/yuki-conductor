@@ -318,22 +318,18 @@ def create_api() -> FastAPI:
             content_disposition_type="inline",
         )
 
-    @api.websocket("/ws/conversations/{conv_id}")
-    async def conversation_ws(websocket: WebSocket, conv_id: str):
-        if not conv_store.get_conversation(conv_id):
-            await websocket.close(code=1008, reason="Unknown conversation")
-            return
+    @api.websocket("/ws/chat")
+    async def chat_ws(websocket: WebSocket):
         await websocket.accept()
         loop = asyncio.get_event_loop()
-        ws_manager.add(conv_id, websocket, loop)
+        ws_manager.add(websocket, loop)
         try:
             while True:
-                # We don't expect inbound traffic on this socket; just keep it open.
                 await websocket.receive_text()
         except WebSocketDisconnect:
             pass
         finally:
-            ws_manager.remove(conv_id, websocket)
+            ws_manager.remove(websocket)
 
     # Serve the React frontend (if built)
     if _WEB_DIST.is_dir():

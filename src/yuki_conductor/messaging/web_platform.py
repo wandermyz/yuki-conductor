@@ -24,34 +24,33 @@ logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
-    """Tracks WebSocket subscribers per conversation, schedules broadcasts.
+    """Tracks global WebSocket subscribers and broadcasts conversation events.
 
-    Threads call `broadcast()` (e.g. from `handle_incoming_message` worker
-    threads); we marshal the actual `send_json` onto the asyncio loop the
+    All connected clients receive every conversation event (each payload
+    includes ``conversation_id``).  Threads call `broadcast()` from worker
+    threads; we marshal the actual `send_json` onto the asyncio loop the
     socket lives on.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._subs: dict[str, list[tuple[object, asyncio.AbstractEventLoop]]] = {}
+        self._clients: list[tuple[object, asyncio.AbstractEventLoop]] = []
 
-    def add(self, conv_id: str, ws, loop: asyncio.AbstractEventLoop) -> None:
+    def add(self, ws, loop: asyncio.AbstractEventLoop) -> None:
         with self._lock:
-            self._subs.setdefault(conv_id, []).append((ws, loop))
+            self._clients.append((ws, loop))
 
-    def remove(self, conv_id: str, ws) -> None:
+    def remove(self, ws) -> None:
         with self._lock:
-            subs = self._subs.get(conv_id) or []
-            self._subs[conv_id] = [(s, lp) for (s, lp) in subs if s is not ws]
-            if not self._subs[conv_id]:
-                self._subs.pop(conv_id, None)
+            self._clients = [(s, lp) for (s, lp) in self._clients if s is not ws]
 
     def broadcast(self, conv_id: str, payload: dict) -> None:
+        enriched = {**payload, "conversation_id": conv_id}
         with self._lock:
-            targets = list(self._subs.get(conv_id) or [])
+            targets = list(self._clients)
         for ws, loop in targets:
             try:
-                asyncio.run_coroutine_threadsafe(ws.send_json(payload), loop)
+                asyncio.run_coroutine_threadsafe(ws.send_json(enriched), loop)
             except Exception:
                 logger.debug("WS broadcast failed", exc_info=True)
 

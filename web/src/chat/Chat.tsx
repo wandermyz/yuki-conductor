@@ -6,7 +6,7 @@ import {
   deleteConversation,
   listConversations,
   listMessages,
-  openConversationSocket,
+  openChatSocket,
   sendMessage,
   uploadFile,
 } from "./api";
@@ -201,44 +201,18 @@ function Composer({
 
 function ChatThread({
   conv,
+  messages,
+  processing,
   onBack,
-  onTitleChanged,
+  onSend,
 }: {
   conv: Conversation;
+  messages: ChatMessage[];
+  processing: boolean;
   onBack: () => void;
-  onTitleChanged: (id: string, title: string) => void;
+  onSend: (text: string, files: AttachmentRef[]) => void;
 }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [processing, setProcessing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Keep onTitleChanged in a ref so the WS effect only depends on conv.id —
-  // otherwise a re-render in App (e.g. title update) would tear down the socket.
-  const titleChangedRef = useRef(onTitleChanged);
-  useEffect(() => {
-    titleChangedRef.current = onTitleChanged;
-  }, [onTitleChanged]);
-
-  useEffect(() => {
-    let cancelled = false;
-    listMessages(conv.id).then((m) => {
-      if (!cancelled) setMessages(m);
-    });
-    const ws = openConversationSocket(conv.id, (e: WSEvent) => {
-      if (e.type === "message") {
-        setMessages((prev) =>
-          prev.find((m) => m.id === e.message.id) ? prev : [...prev, e.message],
-        );
-      } else if (e.type === "processing") {
-        setProcessing(e.on);
-      } else if (e.type === "title") {
-        titleChangedRef.current(conv.id, e.title);
-      }
-    });
-    return () => {
-      cancelled = true;
-      ws.close();
-    };
-  }, [conv.id]);
 
   const isNearBottomRef = useRef(true);
 
@@ -257,46 +231,6 @@ function ChatThread({
     const el = scrollRef.current;
     if (el && isNearBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, processing]);
-
-  const handleSend = async (text: string, files: AttachmentRef[]) => {
-    try {
-      const userMsg = await sendMessage(
-        conv.id,
-        text,
-        files.map((f) => f.id),
-      );
-      // Optimistic render: WS will also broadcast this; dedupe by id.
-      setMessages((prev) =>
-        prev.find((m) => m.id === userMsg.id) ? prev : [...prev, userMsg],
-      );
-      // Belt-and-suspenders: poll briefly in case the WS missed the assistant
-      // reply (e.g. a brand-new conversation where the WS handshake races the
-      // first send). Stops as soon as a new assistant message arrives.
-      const userMsgTime = userMsg.created_at;
-      const stopAt = Date.now() + 120_000;
-      const tick = async () => {
-        if (Date.now() > stopAt) return;
-        try {
-          const fresh = await listMessages(conv.id);
-          setMessages((prev) => {
-            const existing = new Set(prev.map((m) => m.id));
-            const merged = [...prev];
-            for (const m of fresh) if (!existing.has(m.id)) merged.push(m);
-            return merged;
-          });
-          if (fresh.some((m) => m.role === "assistant" && m.created_at > userMsgTime)) {
-            return;
-          }
-        } catch {
-          /* ignore */
-        }
-        setTimeout(tick, 2000);
-      };
-      setTimeout(tick, 2000);
-    } catch (e) {
-      console.error(e);
-    }
-  };
 
   return (
     <div className="chat-thread">
@@ -317,7 +251,7 @@ function ChatThread({
           <div className="responding-shimmer">Claude is responding…</div>
         )}
       </div>
-      <Composer conversationId={conv.id} onSend={handleSend} disabled={processing} />
+      <Composer conversationId={conv.id} onSend={onSend} disabled={processing} />
     </div>
   );
 }
@@ -325,15 +259,53 @@ function ChatThread({
 export default function Chat() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({});
+  const [processingConvs, setProcessingConvs] = useState<Set<string>>(new Set());
+
+  // Single global WS connection
+  useEffect(() => {
+    const ws = openChatSocket((e: WSEvent) => {
+      const cid = e.conversation_id;
+      if (e.type === "message") {
+        setMessagesByConv((prev) => {
+          const msgs = prev[cid] || [];
+          if (msgs.find((m) => m.id === e.message.id)) return prev;
+          return { ...prev, [cid]: [...msgs, e.message] };
+        });
+      } else if (e.type === "processing") {
+        setProcessingConvs((prev) => {
+          const next = new Set(prev);
+          if (e.on) next.add(cid);
+          else next.delete(cid);
+          return next;
+        });
+      } else if (e.type === "title") {
+        setConversations((prev) =>
+          prev.map((c) => (c.id === cid ? { ...c, title: e.title } : c)),
+        );
+      }
+    });
+    return () => ws.close();
+  }, []);
 
   useEffect(() => {
     listConversations().then(setConversations).catch(console.error);
   }, []);
 
+  // Load messages when selecting a conversation
+  useEffect(() => {
+    if (!selected) return;
+    if (messagesByConv[selected]) return; // already loaded
+    listMessages(selected).then((msgs) => {
+      setMessagesByConv((prev) => ({ ...prev, [selected]: msgs }));
+    });
+  }, [selected, messagesByConv]);
+
   const newChat = async () => {
     try {
       const c = await createConversation();
       setConversations((prev) => [c, ...prev]);
+      setMessagesByConv((prev) => ({ ...prev, [c.id]: [] }));
       setSelected(c.id);
     } catch (e) {
       console.error(e);
@@ -345,16 +317,33 @@ export default function Chat() {
     try {
       await deleteConversation(id);
       setConversations((prev) => prev.filter((c) => c.id !== id));
+      setMessagesByConv((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       if (selected === id) setSelected(null);
     } catch (e) {
       console.error(e);
     }
   };
 
-  const handleTitleChanged = (id: string, title: string) => {
-    setConversations((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, title } : c)),
-    );
+  const handleSend = async (convId: string, text: string, files: AttachmentRef[]) => {
+    try {
+      const userMsg = await sendMessage(
+        convId,
+        text,
+        files.map((f) => f.id),
+      );
+      // Optimistic render; WS will also broadcast — dedupe by id.
+      setMessagesByConv((prev) => {
+        const msgs = prev[convId] || [];
+        if (msgs.find((m) => m.id === userMsg.id)) return prev;
+        return { ...prev, [convId]: [...msgs, userMsg] };
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const active = conversations.find((c) => c.id === selected);
@@ -402,8 +391,10 @@ export default function Chat() {
           <ChatThread
             key={active.id}
             conv={active}
+            messages={messagesByConv[active.id] || []}
+            processing={processingConvs.has(active.id)}
             onBack={() => setSelected(null)}
-            onTitleChanged={handleTitleChanged}
+            onSend={(text, files) => handleSend(active.id, text, files)}
           />
         ) : (
           <div className="chat-placeholder">
