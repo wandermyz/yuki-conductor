@@ -25,9 +25,9 @@ export interface ChatMessage {
 }
 
 export type WSEvent =
-  | { type: "message"; message: ChatMessage }
-  | { type: "processing"; on: boolean; message_id: string }
-  | { type: "title"; title: string };
+  | { type: "message"; conversation_id: string; message: ChatMessage }
+  | { type: "processing"; conversation_id: string; on: boolean; message_id: string }
+  | { type: "title"; conversation_id: string; title: string };
 
 export async function listConversations(): Promise<Conversation[]> {
   const r = await fetch("/api/conversations?platform=web");
@@ -98,14 +98,13 @@ export async function uploadFile(file: File): Promise<AttachmentRef> {
   return r.json();
 }
 
-export function openConversationSocket(
-  convId: string,
+export function openChatSocket(
   onEvent: (e: WSEvent) => void,
   opts: { onOpen?: () => void; onClose?: () => void } = {},
 ): WebSocket {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(
-    `${proto}://${window.location.host}/ws/conversations/${encodeURIComponent(convId)}`,
+    `${proto}://${window.location.host}/ws/chat`,
   );
   ws.onmessage = (ev) => {
     try {
