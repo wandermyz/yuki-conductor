@@ -18,6 +18,25 @@ import type {
 } from "./api";
 import "./chat.css";
 
+function playNotificationSound() {
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 660;
+    osc.type = "sine";
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.3);
+    osc.onended = () => ctx.close();
+  } catch {
+    // Audio not available
+  }
+}
+
 function formatTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString(undefined, {
     month: "short",
@@ -273,6 +292,7 @@ export default function Chat() {
           return { ...prev, [cid]: [...msgs, e.message] };
         });
       } else if (e.type === "processing") {
+        if (!e.on) playNotificationSound();
         setProcessingConvs((prev) => {
           const next = new Set(prev);
           if (e.on) next.add(cid);
