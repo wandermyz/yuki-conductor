@@ -81,13 +81,11 @@ function SessionIdModal({ sessionId, onClose }: { sessionId: string; onClose: ()
 /* ---------- Context Menu ---------- */
 
 function ConvMenu({
-  conv,
   status,
   onShowSessionId,
   onSetStatus,
   onClose,
 }: {
-  conv: Conversation;
   status: ConvStatus;
   onShowSessionId: () => void;
   onSetStatus: (s: ConvStatus) => void;
@@ -539,7 +537,6 @@ export default function Chat() {
                       </button>
                       {menuOpen === c.id && (
                         <ConvMenu
-                          conv={c}
                           status={st}
                           onShowSessionId={() => setSessionIdModal(c.claude_session_id || "(no session yet)")}
                           onSetStatus={(s) => setStatus(c.id, s)}
