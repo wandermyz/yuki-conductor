@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -30,6 +30,113 @@ function formatTime(ts: number): string {
 function isImage(mime: string | null, filename: string): boolean {
   if (mime?.startsWith("image/")) return true;
   return /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(filename);
+}
+
+/* ---------- Conversation status helpers ---------- */
+
+type ConvStatus = "unread" | "read" | "done";
+
+function loadStatuses(): Record<string, ConvStatus> {
+  try {
+    return JSON.parse(localStorage.getItem("conv-statuses") ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveStatuses(s: Record<string, ConvStatus>) {
+  localStorage.setItem("conv-statuses", JSON.stringify(s));
+}
+
+function getStatus(statuses: Record<string, ConvStatus>, id: string): ConvStatus {
+  return statuses[id] ?? "read";
+}
+
+/* ---------- Session ID Modal ---------- */
+
+function SessionIdModal({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(sessionId).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <h3 className="modal-title">Session ID</h3>
+        <div className="session-id-display">
+          <code className="session-id-code">{sessionId}</code>
+          <button className="copy-btn" onClick={copy}>
+            {copied ? "Copied!" : "Copy"}
+          </button>
+        </div>
+        <button className="modal-close-btn" onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Context Menu ---------- */
+
+function ConvMenu({
+  conv,
+  status,
+  onShowSessionId,
+  onSetStatus,
+  onClose,
+}: {
+  conv: Conversation;
+  status: ConvStatus;
+  onShowSessionId: () => void;
+  onSetStatus: (s: ConvStatus) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  return (
+    <div className="conv-menu" ref={ref}>
+      <button
+        className="conv-menu-item"
+        onClick={(e) => { e.stopPropagation(); onShowSessionId(); onClose(); }}
+      >
+        Show Session ID
+      </button>
+      <div className="conv-menu-divider" />
+      {status !== "read" && (
+        <button
+          className="conv-menu-item"
+          onClick={(e) => { e.stopPropagation(); onSetStatus("read"); onClose(); }}
+        >
+          Mark as Read
+        </button>
+      )}
+      {status !== "unread" && (
+        <button
+          className="conv-menu-item"
+          onClick={(e) => { e.stopPropagation(); onSetStatus("unread"); onClose(); }}
+        >
+          Mark as Unread
+        </button>
+      )}
+      {status !== "done" && (
+        <button
+          className="conv-menu-item"
+          onClick={(e) => { e.stopPropagation(); onSetStatus("done"); onClose(); }}
+        >
+          Mark as Done
+        </button>
+      )}
+    </div>
+  );
 }
 
 function MessageBubble({ msg }: { msg: ChatMessage }) {
@@ -261,6 +368,21 @@ export default function Chat() {
   const [selected, setSelected] = useState<string | null>(null);
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({});
   const [processingConvs, setProcessingConvs] = useState<Set<string>>(new Set());
+  const [statuses, setStatuses] = useState<Record<string, ConvStatus>>(loadStatuses);
+  const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [sessionIdModal, setSessionIdModal] = useState<string | null>(null);
+
+  // Keep a ref to `selected` so the WS handler can read the latest value
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+
+  const setStatus = useCallback((id: string, s: ConvStatus) => {
+    setStatuses((prev) => {
+      const next = { ...prev, [id]: s };
+      saveStatuses(next);
+      return next;
+    });
+  }, []);
 
   // Single global WS connection
   useEffect(() => {
@@ -272,6 +394,15 @@ export default function Chat() {
           if (msgs.find((m) => m.id === e.message.id)) return prev;
           return { ...prev, [cid]: [...msgs, e.message] };
         });
+        // Mark as unread if this is an assistant message and the conversation is not currently selected
+        if (e.message.role === "assistant" && selectedRef.current !== cid) {
+          setStatuses((prev) => {
+            if (prev[cid] === "done") return prev; // don't override "done"
+            const next = { ...prev, [cid]: "unread" as ConvStatus };
+            saveStatuses(next);
+            return next;
+          });
+        }
       } else if (e.type === "processing") {
         setProcessingConvs((prev) => {
           const next = new Set(prev);
@@ -346,10 +477,27 @@ export default function Chat() {
     }
   };
 
+  const selectConv = (id: string) => {
+    setSelected(id);
+    // Mark as read when selecting (unless it's done)
+    setStatuses((prev) => {
+      const cur = prev[id] ?? "read";
+      if (cur === "unread") {
+        const next = { ...prev, [id]: "read" as ConvStatus };
+        saveStatuses(next);
+        return next;
+      }
+      return prev;
+    });
+  };
+
   const active = conversations.find((c) => c.id === selected);
 
   return (
     <div className={`chat ${selected ? "chat-detail-open" : ""}`}>
+      {sessionIdModal && (
+        <SessionIdModal sessionId={sessionIdModal} onClose={() => setSessionIdModal(null)} />
+      )}
       <aside className="chat-sidebar">
         <div className="chat-sidebar-header">
           <h2>Chats</h2>
@@ -361,29 +509,60 @@ export default function Chat() {
           {conversations.length === 0 && (
             <li className="chat-empty-list">No conversations yet.</li>
           )}
-          {conversations.map((c) => (
-            <li
-              key={c.id}
-              className={c.id === selected ? "active" : ""}
-              onClick={() => setSelected(c.id)}
-            >
-              <div className="chat-list-title">{c.title || "New chat"}</div>
-              <div className="chat-list-meta">
-                <span>{formatTime(c.updated_at)}</span>
-                <button
-                  className="chat-list-delete"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    remove(c.id);
-                  }}
-                  aria-label="Delete"
-                  title="Delete"
-                >
-                  ×
-                </button>
-              </div>
-            </li>
-          ))}
+          {conversations.map((c) => {
+            const st = getStatus(statuses, c.id);
+            return (
+              <li
+                key={c.id}
+                className={c.id === selected ? "active" : ""}
+                onClick={() => selectConv(c.id)}
+              >
+                <div className="chat-list-title-row">
+                  {st === "unread" && <span className="status-dot" title="Unread" />}
+                  {st === "done" && <span className="status-check" title="Done">&#10003;</span>}
+                  <span className="chat-list-title">{c.title || "New chat"}</span>
+                </div>
+                <div className="chat-list-meta">
+                  <span>{formatTime(c.updated_at)}</span>
+                  <div className="chat-list-actions">
+                    <div className="menu-anchor">
+                      <button
+                        className="chat-list-menu-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuOpen(menuOpen === c.id ? null : c.id);
+                        }}
+                        aria-label="Menu"
+                        title="Menu"
+                      >
+                        &#8942;
+                      </button>
+                      {menuOpen === c.id && (
+                        <ConvMenu
+                          conv={c}
+                          status={st}
+                          onShowSessionId={() => setSessionIdModal(c.claude_session_id || "(no session yet)")}
+                          onSetStatus={(s) => setStatus(c.id, s)}
+                          onClose={() => setMenuOpen(null)}
+                        />
+                      )}
+                    </div>
+                    <button
+                      className="chat-list-delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        remove(c.id);
+                      }}
+                      aria-label="Delete"
+                      title="Delete"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       </aside>
       <main className="chat-main">
