@@ -70,13 +70,16 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 }
 
 function Composer({
+  conversationId,
   onSend,
   disabled,
 }: {
+  conversationId: string;
   onSend: (text: string, files: AttachmentRef[]) => void;
   disabled: boolean;
 }) {
-  const [text, setText] = useState("");
+  const draftKey = `draft:${conversationId}`;
+  const [text, setText] = useState(() => localStorage.getItem(draftKey) ?? "");
   const [pending, setPending] = useState<AttachmentRef[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -91,11 +94,20 @@ function Composer({
 
   useEffect(adjustHeight, [text]);
 
+  useEffect(() => {
+    if (text) {
+      localStorage.setItem(draftKey, text);
+    } else {
+      localStorage.removeItem(draftKey);
+    }
+  }, [draftKey, text]);
+
   const submit = () => {
     if (!text.trim() && pending.length === 0) return;
     onSend(text, pending);
     setText("");
     setPending([]);
+    localStorage.removeItem(draftKey);
   };
 
   const onPickFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -239,7 +251,7 @@ function ChatThread({
           <div className="responding-shimmer">Claude is responding…</div>
         )}
       </div>
-      <Composer onSend={onSend} disabled={processing} />
+      <Composer conversationId={conv.id} onSend={onSend} disabled={processing} />
     </div>
   );
 }

@@ -68,6 +68,12 @@ def create_api() -> FastAPI:
                 s["alive"] = s["session_id"] in alive_sessions
                 result.append(s)
                 continue
+            # Teams sessions: include all (key is "teams:<msg_id>")
+            if s["session_type"] == "teams_cli":
+                s["slack_url"] = None
+                s["alive"] = False
+                result.append(s)
+                continue
             # Slack sessions: filter by timestamp age
             try:
                 ts_float = float(s["thread_ts"])
