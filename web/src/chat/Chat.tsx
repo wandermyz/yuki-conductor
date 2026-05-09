@@ -20,23 +20,40 @@ import type {
 } from "./api";
 import "./chat.css";
 
-function playNotificationSound() {
+/* ---------- Notification sound (iOS-safe) ---------- */
+
+let sharedAudioCtx: AudioContext | null = null;
+
+function getAudioContext(): AudioContext | null {
   try {
-    const ctx = new AudioContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 660;
-    osc.type = "sine";
-    gain.gain.setValueAtTime(0.3, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.3);
-    osc.onended = () => ctx.close();
+    if (!sharedAudioCtx || sharedAudioCtx.state === "closed") {
+      sharedAudioCtx = new AudioContext();
+    }
+    return sharedAudioCtx;
   } catch {
-    // Audio not available
+    return null;
   }
+}
+
+/** Call from a user-gesture handler to unlock audio on iOS Safari. */
+function unlockAudio() {
+  const ctx = getAudioContext();
+  if (ctx && ctx.state === "suspended") ctx.resume();
+}
+
+function playNotificationSound() {
+  const ctx = getAudioContext();
+  if (!ctx || ctx.state !== "running") return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.frequency.value = 660;
+  osc.type = "sine";
+  gain.gain.setValueAtTime(0.3, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + 0.3);
 }
 
 function formatTime(ts: number): string {
@@ -227,6 +244,7 @@ function Composer({
 
   const submit = () => {
     if (!text.trim() && pending.length === 0) return;
+    unlockAudio();
     onSend(text, pending);
     setText("");
     setPending([]);
