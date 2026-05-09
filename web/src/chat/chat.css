@@ -152,10 +152,10 @@
   border: none;
   color: var(--text);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
 }
 
 .chat-list-delete:hover {
@@ -209,10 +209,10 @@
   border: none;
   color: var(--text);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
 }
 
 .chat-list-menu-btn:hover {
@@ -663,14 +663,14 @@
 
 .attach-btn {
   background: none;
-  border: 1px solid var(--border);
+  border: 1px solid var(--accent);
   border-radius: 999px;
   width: 36px;
   height: 36px;
   flex-shrink: 0;
   cursor: pointer;
   font-size: 16px;
-  color: var(--text);
+  color: var(--accent);
 }
 
 .attach-btn:hover {
