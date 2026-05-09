@@ -25,6 +25,25 @@
 .chat-sidebar-header h2 {
   margin: 0;
   font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.ws-connected {
+  background-color: #22c55e;
+}
+
+.ws-disconnected {
+  background-color: #ef4444;
 }
 
 .new-chat-btn {

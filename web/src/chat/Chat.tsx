@@ -415,6 +415,7 @@ export default function Chat() {
   const [statuses, setStatuses] = useState<Record<string, ConvStatus>>({});
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [sessionIdModal, setSessionIdModal] = useState<string | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
 
   // Keep a ref to `selected` so the WS handler can read the latest value
   const selectedRef = useRef(selected);
@@ -457,6 +458,9 @@ export default function Chat() {
           prev.map((c) => (c.id === cid ? { ...c, title: e.title } : c)),
         );
       }
+    }, {
+      onOpen: () => setWsConnected(true),
+      onClose: () => setWsConnected(false),
     });
     return () => ws.close();
   }, []);
@@ -542,7 +546,12 @@ export default function Chat() {
       )}
       <aside className="chat-sidebar">
         <div className="chat-sidebar-header">
-          <h2>Chats</h2>
+          <h2>Chats
+            <span
+              className={`ws-indicator ${wsConnected ? "ws-connected" : "ws-disconnected"}`}
+              title={wsConnected ? "Connected" : "Disconnected"}
+            />
+          </h2>
           <button className="new-chat-btn" onClick={newChat}>
             + New
           </button>
