@@ -113,23 +113,56 @@ export async function setConvStatus(convId: string, status: string): Promise<voi
   if (!r.ok) throw new Error("Failed to set status");
 }
 
+/**
+ * Opens a chat WebSocket with automatic reconnection using exponential backoff.
+ * Returns a handle with a `close()` method to permanently disconnect.
+ */
 export function openChatSocket(
   onEvent: (e: WSEvent) => void,
   opts: { onOpen?: () => void; onClose?: () => void } = {},
-): WebSocket {
-  const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(
-    `${proto}://${window.location.host}/ws/chat`,
-  );
-  ws.onmessage = (ev) => {
-    try {
-      const data = JSON.parse(ev.data) as WSEvent;
-      onEvent(data);
-    } catch {
-      /* ignore */
-    }
+): { close: () => void } {
+  const BASE_DELAY = 1000;
+  const MAX_DELAY = 30000;
+  let attempt = 0;
+  let ws: WebSocket | null = null;
+  let closed = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  function connect() {
+    if (closed) return;
+    const proto = window.location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(`${proto}://${window.location.host}/ws/chat`);
+
+    ws.onopen = () => {
+      attempt = 0;
+      opts.onOpen?.();
+    };
+
+    ws.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data) as WSEvent;
+        onEvent(data);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    ws.onclose = () => {
+      opts.onClose?.();
+      if (closed) return;
+      const delay = Math.min(BASE_DELAY * 2 ** attempt, MAX_DELAY);
+      attempt++;
+      timer = setTimeout(connect, delay);
+    };
+  }
+
+  connect();
+
+  return {
+    close() {
+      closed = true;
+      if (timer != null) clearTimeout(timer);
+      ws?.close();
+    },
   };
-  if (opts.onOpen) ws.onopen = opts.onOpen;
-  if (opts.onClose) ws.onclose = opts.onClose;
-  return ws;
 }

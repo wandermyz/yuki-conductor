@@ -447,7 +447,7 @@ export default function Chat() {
 
   // Single global WS connection
   useEffect(() => {
-    const ws = openChatSocket((e: WSEvent) => {
+    const handle = openChatSocket((e: WSEvent) => {
       const cid = e.conversation_id;
       if (e.type === "message") {
         setMessagesByConv((prev) => {
@@ -481,7 +481,7 @@ export default function Chat() {
       onOpen: () => setWsConnected(true),
       onClose: () => setWsConnected(false),
     });
-    return () => ws.close();
+    return () => handle.close();
   }, []);
 
   useEffect(() => {
