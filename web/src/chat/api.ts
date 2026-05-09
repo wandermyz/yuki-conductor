@@ -114,6 +114,13 @@ export async function setConvStatus(convId: string, status: string): Promise<voi
   if (!r.ok) throw new Error("Failed to set status");
 }
 
+export async function cancelProcessing(convId: string): Promise<void> {
+  const r = await fetch(`/api/conversations/${encodeURIComponent(convId)}/cancel`, {
+    method: "POST",
+  });
+  if (!r.ok) throw new Error("Failed to cancel");
+}
+
 /** Returns map of conversation_id -> message_id for conversations currently being processed. */
 export async function fetchProcessing(): Promise<Record<string, string>> {
   const r = await fetch("/api/chat/processing");

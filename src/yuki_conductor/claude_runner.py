@@ -4,11 +4,77 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 
 from yuki_conductor.config import CLAUDE_BIN, CLAUDE_TIMEOUT, CLAUDE_WORKING_DIR
 
 SLACK_MESSAGE_LIMIT = 4000
+
+# Registry of running Claude subprocesses, keyed by conversation_key.
+_active_processes: dict[str, subprocess.Popen] = {}
+_cancelled: set[str] = set()
+_active_lock = threading.Lock()
+
+
+def register_process(key: str, proc: subprocess.Popen) -> None:
+    with _active_lock:
+        _active_processes[key] = proc
+        _cancelled.discard(key)
+
+
+def unregister_process(key: str) -> None:
+    with _active_lock:
+        _active_processes.pop(key, None)
+
+
+def was_cancelled(key: str) -> bool:
+    with _active_lock:
+        return key in _cancelled
+
+
+def clear_cancelled(key: str) -> None:
+    with _active_lock:
+        _cancelled.discard(key)
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill a process and all its descendants (needed on Windows)."""
+    import sys
+
+    pid = proc.pid
+    if sys.platform == "win32":
+        # taskkill /T kills the whole process tree
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+            )
+        except OSError:
+            pass
+    else:
+        # On Unix, kill the process group if we have one, else just the process
+        import signal
+
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+
+def cancel_process(key: str) -> bool:
+    """Kill the running Claude process for *key*. Returns True if a process was found."""
+    with _active_lock:
+        proc = _active_processes.pop(key, None)
+        if proc is not None:
+            _cancelled.add(key)
+    if proc is None:
+        return False
+    _kill_tree(proc)
+    return True
 
 
 def _ps_quote(arg: str) -> str:
@@ -31,6 +97,7 @@ def run_claude(
     session_id: str | None = None,
     timeout: int | None = None,
     model: str | None = None,
+    conversation_key: str | None = None,
 ) -> ClaudeResult:
     """Run claude CLI and return the result.
 
@@ -65,21 +132,15 @@ def run_claude(
     effective_timeout = timeout if timeout is not None else CLAUDE_TIMEOUT
 
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=effective_timeout,
             env=env,
             cwd=CLAUDE_WORKING_DIR,
-        )
-    except subprocess.TimeoutExpired:
-        return ClaudeResult(
-            text="Claude timed out. Try a simpler prompt or increase CLAUDE_TIMEOUT.",
-            session_id=session_id,
-            is_error=True,
         )
     except FileNotFoundError:
         return ClaudeResult(
@@ -88,11 +149,35 @@ def run_claude(
             is_error=True,
         )
 
+    if conversation_key:
+        register_process(conversation_key, proc)
+
+    try:
+        stdout, stderr = proc.communicate(timeout=effective_timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        return ClaudeResult(
+            text="Claude timed out. Try a simpler prompt or increase CLAUDE_TIMEOUT.",
+            session_id=session_id,
+            is_error=True,
+        )
+    finally:
+        if conversation_key:
+            unregister_process(conversation_key)
+
     if proc.returncode != 0:
-        error_text = proc.stderr.strip() or proc.stdout.strip() or f"claude exited with code {proc.returncode}"
+        if conversation_key and was_cancelled(conversation_key):
+            clear_cancelled(conversation_key)
+            return ClaudeResult(
+                text="(stopped by user)",
+                session_id=session_id,
+                is_error=False,
+            )
+        error_text = stderr.strip() or stdout.strip() or f"claude exited with code {proc.returncode}"
         return ClaudeResult(text=error_text, session_id=session_id, is_error=True)
 
-    return _parse_output(proc.stdout, session_id)
+    return _parse_output(stdout, session_id)
 
 
 def _parse_output(stdout: str, fallback_session_id: str | None) -> ClaudeResult:

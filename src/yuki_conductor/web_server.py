@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from yuki_conductor import zellij_manager
+from yuki_conductor.claude_runner import cancel_process
 from yuki_conductor.config import WEB_UPLOADS_DIR
 from yuki_conductor.conversation_store import ConversationStore
 from yuki_conductor.messaging import Attachment, IncomingMessage, handle_incoming_message
@@ -336,6 +337,13 @@ def create_api() -> FastAPI:
     @api.get("/api/chat/processing")
     def get_processing():
         return ws_manager.get_processing()
+
+    @api.post("/api/conversations/{conv_id}/cancel")
+    def cancel_conversation(conv_id: str):
+        """Stop the running Claude process for a conversation."""
+        if not cancel_process(conv_id):
+            raise HTTPException(status_code=404, detail="No active process for this conversation")
+        return {"ok": True}
 
     @api.get("/api/chat/conversations/usage")
     def get_all_usage():

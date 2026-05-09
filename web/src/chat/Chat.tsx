@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  cancelProcessing,
   createConversation,
   deleteConversation,
   fetchStatuses,
@@ -229,10 +230,12 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 function Composer({
   conversationId,
   onSend,
+  onStop,
   disabled,
 }: {
   conversationId: string;
   onSend: (text: string, files: AttachmentRef[]) => void;
+  onStop: () => void;
   disabled: boolean;
 }) {
   const draftKey = `draft:${conversationId}`;
@@ -349,14 +352,25 @@ function Composer({
           placeholder="Message Claude…"
           disabled={disabled}
         />
-        <button
-          type="submit"
-          className="send-btn"
-          disabled={disabled || uploading || (!text.trim() && pending.length === 0)}
-          aria-label="Send"
-        >
-          ↑
-        </button>
+        {disabled ? (
+          <button
+            type="button"
+            className="stop-btn"
+            onClick={onStop}
+            aria-label="Stop"
+          >
+            ■
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className="send-btn"
+            disabled={uploading || (!text.trim() && pending.length === 0)}
+            aria-label="Send"
+          >
+            ↑
+          </button>
+        )}
       </div>
     </form>
   );
@@ -369,6 +383,7 @@ function ChatThread({
   status,
   onBack,
   onSend,
+  onStop,
   onShowSessionId,
   onSetStatus,
   onDelete,
@@ -379,6 +394,7 @@ function ChatThread({
   status: ConvStatus;
   onBack: () => void;
   onSend: (text: string, files: AttachmentRef[]) => void;
+  onStop: () => void;
   onShowSessionId: () => void;
   onSetStatus: (s: ConvStatus) => void;
   onDelete: () => void;
@@ -442,7 +458,7 @@ function ChatThread({
           <div className="responding-shimmer">Claude is responding…</div>
         )}
       </div>
-      <Composer conversationId={conv.id} onSend={onSend} disabled={processing} />
+      <Composer conversationId={conv.id} onSend={onSend} onStop={onStop} disabled={processing} />
     </div>
   );
 }
@@ -705,6 +721,7 @@ export default function Chat() {
             status={getStatus(statuses, active.id)}
             onBack={() => setSelected(null)}
             onSend={(text, files) => handleSend(active.id, text, files)}
+            onStop={() => cancelProcessing(active.id).catch(console.error)}
             onShowSessionId={() => setSessionIdModal(active.claude_session_id || "(no session yet)")}
             onSetStatus={(s) => setStatus(active.id, s)}
             onDelete={() => remove(active.id)}
