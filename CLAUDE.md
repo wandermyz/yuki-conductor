@@ -68,8 +68,9 @@ The production daemon serves the **built** frontend from `web/dist/`. Two things
 1. **Stale build**: Editing `web/src/` does nothing until you run `cd web && pnpm build`. The daemon serves whatever was last built into `web/dist/`, not the live source. Always rebuild after frontend changes.
 2. **Stale daemon**: The running process keeps the old code in memory. After rebuilding (or after any backend change), you must **restart the daemon** — and make sure the old process on port 2333 is actually dead first, or the new one silently fails to bind.
 3. **Worktree builds don't carry over**: If you build frontend in a git worktree, the hashed asset filenames (e.g. `index-BFz3Cwkn.js`) differ from the main branch. After merging, always rebuild in the main worktree.
+4. **Hash mismatch after merge**: `web/dist/` is gitignored, so only `index.html` is tracked. If a merge updates `index.html` to reference new hashed filenames but the actual JS/CSS files on disk are from an older build, the page loads blank (404 on assets). Always rebuild after any merge that touches frontend code.
 
-**Checklist after any frontend or backend change**: rebuild frontend → kill old process → start new daemon → verify endpoint.
+**Checklist after any frontend or backend change**: rebuild frontend (`cd web && pnpm build`) → kill old process on port 2333 → start new daemon → verify page loads.
 
 ## Pre-commit / Pre-PR Checks
 
