@@ -58,19 +58,26 @@ Required env var (only when `slack_socket` is enabled): `SLACK_CRON_CHANNEL` —
 - `uv run ruff check --fix .` — run linter with auto-fix
 - `uv run yuki-conductor --help` — show CLI help
 - `uv run yuki-conductor simulate message "test"` — test without Slack
+- `uv run yuki-conductor web rebuild` — rebuild frontend + auto-reload connected browsers
 - `cd web && pnpm dev` — start frontend dev server (proxies /api to port 2333)
 - `cd web && pnpm build` — build frontend for production (output: web/dist/)
 
 ## Frontend Deployment Gotchas
 
-The production daemon serves the **built** frontend from `web/dist/`. Two things consistently go wrong:
+The production daemon serves the **built** frontend from `web/dist/`.
 
-1. **Stale build**: Editing `web/src/` does nothing until you run `cd web && pnpm build`. The daemon serves whatever was last built into `web/dist/`, not the live source. Always rebuild after frontend changes.
-2. **Stale daemon**: The running process keeps the old code in memory. After rebuilding (or after any backend change), you must **restart the daemon** — and make sure the old process on port 2333 is actually dead first, or the new one silently fails to bind.
-3. **Worktree builds don't carry over**: If you build frontend in a git worktree, the hashed asset filenames (e.g. `index-BFz3Cwkn.js`) differ from the main branch. After merging, always rebuild in the main worktree.
-4. **Hash mismatch after merge**: `web/dist/` is gitignored, so only `index.html` is tracked. If a merge updates `index.html` to reference new hashed filenames but the actual JS/CSS files on disk are from an older build, the page loads blank (404 on assets). Always rebuild after any merge that touches frontend code.
+**After frontend-only changes**, run:
+```
+uv run yuki-conductor web rebuild
+```
+This rebuilds the frontend and, if the daemon is running, broadcasts a WebSocket reload to all connected browsers automatically. No daemon restart needed.
 
-**Checklist after any frontend or backend change**: rebuild frontend (`cd web && pnpm build`) → kill old process on port 2333 → start new daemon → verify page loads.
+**After backend changes** (Python code), you must restart the daemon — the running process keeps old code in memory.
+
+Other things that can go wrong:
+
+1. **Worktree builds don't carry over**: If you build frontend in a git worktree, the hashed asset filenames (e.g. `index-BFz3Cwkn.js`) differ from the main branch. After merging, always rebuild in the main worktree.
+2. **Hash mismatch after merge**: `web/dist/` is gitignored, so only `index.html` is tracked. If a merge updates `index.html` to reference new hashed filenames but the actual JS/CSS files on disk are from an older build, the page loads blank (404 on assets). Always rebuild after any merge that touches frontend code.
 
 ## Pre-commit / Pre-PR Checks
 

@@ -27,7 +27,8 @@ export interface ChatMessage {
 export type WSEvent =
   | { type: "message"; conversation_id: string; message: ChatMessage }
   | { type: "processing"; conversation_id: string; on: boolean; message_id: string }
-  | { type: "title"; conversation_id: string; title: string };
+  | { type: "title"; conversation_id: string; title: string }
+  | { type: "reload" };
 
 export async function listConversations(): Promise<Conversation[]> {
   const r = await fetch("/api/conversations?platform=web");

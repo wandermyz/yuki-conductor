@@ -467,6 +467,10 @@ export default function Chat() {
   useEffect(() => {
     let firstOpen = true;
     const handle = openChatSocket((e: WSEvent) => {
+      if (e.type === "reload") {
+        window.location.reload();
+        return;
+      }
       const cid = e.conversation_id;
       if (e.type === "message") {
         setMessagesByConv((prev) => {

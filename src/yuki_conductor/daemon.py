@@ -6,7 +6,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-from yuki_conductor.config import DATA_DIR, ERR_LOG_FILE, LOG_FILE, PLIST_LABEL, PLIST_PATH
+from yuki_conductor.config import (
+    DATA_DIR,
+    ERR_LOG_FILE,
+    LOG_FILE,
+    PLIST_LABEL,
+    PLIST_PATH,
+    build_web_frontend,
+    project_dir,
+)
 
 
 def _find_uv() -> str:
@@ -16,38 +24,9 @@ def _find_uv() -> str:
     return uv_path
 
 
-def _project_dir() -> str:
-    return str(Path(__file__).resolve().parent.parent.parent)
-
-
-def _build_web_frontend() -> None:
-    """Run `pnpm install --frozen-lockfile && pnpm build` in web/ so the served
-    dist matches the current source. Failures are logged but don't abort the
-    restart — the daemon will keep serving whatever dist already exists.
-    """
-    web_dir = Path(_project_dir()) / "web"
-    if not (web_dir / "package.json").exists():
-        return
-    pnpm = shutil.which("pnpm")
-    if not pnpm:
-        print("pnpm not on PATH; skipping web build")
-        return
-    try:
-        print("Installing web dependencies...")
-        subprocess.run(
-            [pnpm, "install", "--frozen-lockfile"],
-            cwd=web_dir,
-            check=True,
-        )
-        print("Building web frontend...")
-        subprocess.run([pnpm, "build"], cwd=web_dir, check=True)
-    except subprocess.CalledProcessError as exc:
-        print(f"Web frontend build failed: {exc}; previous dist will be served")
-
-
 def _generate_plist() -> bytes:
     uv = _find_uv()
-    project_dir = _project_dir()
+    proj_dir = str(project_dir())
 
     # Build PATH that includes common locations for claude binary
     home = Path.home()
@@ -63,10 +42,10 @@ def _generate_plist() -> bytes:
 
     plist = {
         "Label": PLIST_LABEL,
-        "ProgramArguments": [uv, "run", "--project", project_dir, "yuki-conductor", "run"],
+        "ProgramArguments": [uv, "run", "--project", proj_dir, "yuki-conductor", "run"],
         "KeepAlive": True,
         "RunAtLoad": True,
-        "WorkingDirectory": project_dir,
+        "WorkingDirectory": proj_dir,
         "EnvironmentVariables": {"PATH": path_value},
         "StandardOutPath": str(LOG_FILE),
         "StandardErrorPath": str(ERR_LOG_FILE),
@@ -95,7 +74,7 @@ def _uninstall():
 
 def _restart():
     if PLIST_PATH.exists():
-        _build_web_frontend()
+        build_web_frontend()
         subprocess.run(["launchctl", "unload", str(PLIST_PATH)], check=False)
         subprocess.run(["launchctl", "load", str(PLIST_PATH)], check=True)
         print(f"Restarted {PLIST_LABEL}")

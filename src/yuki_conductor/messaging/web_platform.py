@@ -55,6 +55,16 @@ class ConnectionManager:
             except Exception:
                 logger.debug("WS broadcast failed", exc_info=True)
 
+    def broadcast_all(self, payload: dict) -> None:
+        """Send a payload to every connected client (no conversation_id)."""
+        with self._lock:
+            targets = list(self._clients)
+        for ws, loop in targets:
+            try:
+                asyncio.run_coroutine_threadsafe(ws.send_json(payload), loop)
+            except Exception:
+                logger.debug("WS broadcast_all failed", exc_info=True)
+
     def set_processing(self, conv_id: str, message_id: str, on: bool) -> None:
         with self._lock:
             if on:

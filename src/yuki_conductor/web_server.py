@@ -342,6 +342,17 @@ def create_api() -> FastAPI:
         """Return aggregated token usage and cost per conversation."""
         return conv_store.get_all_conversation_usage()
 
+    @api.post("/api/admin/rebuild")
+    def admin_rebuild():
+        """Rebuild the frontend and notify all connected clients to reload."""
+        from yuki_conductor.config import build_web_frontend
+
+        success = build_web_frontend()
+        if not success:
+            raise HTTPException(status_code=500, detail="Frontend build failed")
+        ws_manager.broadcast_all({"type": "reload"})
+        return {"ok": True}
+
     @api.websocket("/ws/chat")
     async def chat_ws(websocket: WebSocket):
         await websocket.accept()

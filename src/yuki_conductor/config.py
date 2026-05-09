@@ -66,6 +66,39 @@ def chat_apps() -> set[ChatApp]:
     return out
 
 
+def project_dir() -> Path:
+    """Return the root of the yuki-conductor project."""
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def build_web_frontend() -> bool:
+    """Run `pnpm install --frozen-lockfile && pnpm build` in web/.
+
+    Returns True on success, False on failure or skip.
+    """
+    import shutil
+    import subprocess
+
+    web_dir = project_dir() / "web"
+    if not (web_dir / "package.json").exists():
+        print("No web/package.json found; skipping web build")
+        return False
+    pnpm = shutil.which("pnpm")
+    if not pnpm:
+        print("pnpm not on PATH; skipping web build")
+        return False
+    try:
+        print("Installing web dependencies...")
+        subprocess.run([pnpm, "install", "--frozen-lockfile"], cwd=web_dir, check=True)
+        print("Building web frontend...")
+        subprocess.run([pnpm, "build"], cwd=web_dir, check=True)
+        print("Web frontend built successfully.")
+        return True
+    except subprocess.CalledProcessError as exc:
+        print(f"Web frontend build failed: {exc}")
+        return False
+
+
 def slack_cron_channel() -> str:
     channel = os.environ.get("SLACK_CRON_CHANNEL", "")
     if not channel:

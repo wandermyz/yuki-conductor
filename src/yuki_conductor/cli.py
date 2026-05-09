@@ -32,6 +32,14 @@ def main(argv: list[str] | None = None) -> None:
     reply_parser.add_argument("thread_ts", help="Thread timestamp")
     reply_parser.add_argument("text", help="Reply text")
 
+    # web
+    web_parser = sub.add_parser("web", help="Web frontend management")
+    web_sub = web_parser.add_subparsers(dest="web_command")
+    web_sub.add_parser(
+        "rebuild",
+        help="Rebuild the frontend (hot-reload without restarting the daemon)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command is None:
@@ -72,6 +80,33 @@ def main(argv: list[str] | None = None) -> None:
                 store.set(args.thread_ts, result.session_id)
             print(f"session_id: {result.session_id}")
             print(f"response:\n{result.text}")
+    elif args.command == "web":
+        if args.web_command is None:
+            web_parser.print_help()
+            sys.exit(1)
+        if args.web_command == "rebuild":
+            import urllib.request
+
+            from yuki_conductor.web_server import WEB_PORT
+
+            url = f"http://localhost:{WEB_PORT}/api/admin/rebuild"
+            try:
+                req = urllib.request.Request(url, method="POST", data=b"")
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    if resp.status == 200:
+                        print("Frontend rebuilt. Connected browsers will reload automatically.")
+                    else:
+                        print(f"Rebuild endpoint returned status {resp.status}", file=sys.stderr)
+                        sys.exit(1)
+            except urllib.error.URLError:
+                # Daemon not running — fall back to local build
+                print("Daemon not reachable; building locally...")
+                from yuki_conductor.config import build_web_frontend
+
+                success = build_web_frontend()
+                if not success:
+                    sys.exit(1)
+                print("Frontend rebuilt. Restart the daemon to serve the new assets.")
 
 
 if __name__ == "__main__":
