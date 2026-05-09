@@ -416,6 +416,7 @@ export default function Chat() {
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [sessionIdModal, setSessionIdModal] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const [showDone, setShowDone] = useState(false);
 
   // Keep a ref to `selected` so the WS handler can read the latest value
   const selectedRef = useRef(selected);
@@ -556,11 +557,25 @@ export default function Chat() {
             + New
           </button>
         </div>
+        <div className="chat-filter-bar">
+          <button
+            className={`chat-filter-btn ${!showDone ? "active" : ""}`}
+            onClick={() => setShowDone(false)}
+          >
+            Active
+          </button>
+          <button
+            className={`chat-filter-btn ${showDone ? "active" : ""}`}
+            onClick={() => setShowDone(true)}
+          >
+            All
+          </button>
+        </div>
         <ul className="chat-list">
           {conversations.length === 0 && (
             <li className="chat-empty-list">No conversations yet.</li>
           )}
-          {conversations.map((c) => {
+          {conversations.filter((c) => showDone || getStatus(statuses, c.id) !== "done").map((c) => {
             const st = getStatus(statuses, c.id);
             return (
               <li

@@ -46,6 +46,35 @@
   background-color: #ef4444;
 }
 
+.chat-filter-bar {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-filter-btn {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.chat-filter-btn:hover {
+  background: var(--hover);
+}
+
+.chat-filter-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
 .new-chat-btn {
   background: var(--accent);
   color: #fff;
