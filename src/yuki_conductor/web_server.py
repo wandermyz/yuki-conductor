@@ -337,6 +337,11 @@ def create_api() -> FastAPI:
     def get_processing():
         return ws_manager.get_processing()
 
+    @api.get("/api/chat/conversations/usage")
+    def get_all_usage():
+        """Return aggregated token usage and cost per conversation."""
+        return conv_store.get_all_conversation_usage()
+
     @api.websocket("/ws/chat")
     async def chat_ws(websocket: WebSocket):
         await websocket.accept()

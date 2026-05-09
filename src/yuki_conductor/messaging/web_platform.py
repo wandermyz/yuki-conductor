@@ -128,6 +128,13 @@ class WebPlatform:
             text=msg.text,
             attachments=stored_atts,
         )
+        self._store.record_usage(
+            message_id=stored_msg.id,
+            conversation_id=conversation_key,
+            input_tokens=msg.input_tokens,
+            output_tokens=msg.output_tokens,
+            cost_usd=msg.cost_usd,
+        )
         self._manager.broadcast(
             conversation_key,
             {"type": "message", "message": serialize_message(stored_msg)},

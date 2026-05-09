@@ -34,6 +34,9 @@ class OutgoingMessage:
 
     text: str
     attachments: list[Attachment] = field(default_factory=list)
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_usd: float | None = None
 
 
 class MessagingPlatform(Protocol):

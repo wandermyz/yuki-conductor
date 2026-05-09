@@ -139,6 +139,14 @@
   color: var(--text);
 }
 
+.chat-list-usage {
+  font-size: 10px;
+  color: var(--text);
+  opacity: 0.7;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+
 .chat-list-delete {
   background: none;
   border: none;

@@ -120,6 +120,19 @@ export async function fetchProcessing(): Promise<Record<string, string>> {
   return r.json();
 }
 
+export interface ConversationUsage {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: number | null;
+}
+
+export async function fetchAllUsage(): Promise<Record<string, ConversationUsage>> {
+  const r = await fetch("/api/chat/conversations/usage");
+  if (!r.ok) throw new Error("Failed to fetch usage");
+  return r.json();
+}
+
 /**
  * Opens a chat WebSocket with automatic reconnection using exponential backoff.
  * Returns a handle with a `close()` method to permanently disconnect.

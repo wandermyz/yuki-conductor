@@ -91,6 +91,22 @@ class ConversationStore:
                     "CREATE INDEX IF NOT EXISTS idx_messages_conv_created "
                     "ON messages(conversation_id, created_at)"
                 )
+                con.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS message_usage (
+                        message_id TEXT PRIMARY KEY REFERENCES messages(id),
+                        conversation_id TEXT NOT NULL REFERENCES conversations(id),
+                        input_tokens INTEGER,
+                        output_tokens INTEGER,
+                        cost_usd REAL,
+                        created_at REAL NOT NULL
+                    )
+                    """
+                )
+                con.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_usage_conv "
+                    "ON message_usage(conversation_id)"
+                )
                 # Auto-migrate: add columns if missing
                 cols = {
                     row[1]
@@ -217,6 +233,7 @@ class ConversationStore:
         with self._lock:
             con = self._connect()
             try:
+                con.execute("DELETE FROM message_usage WHERE conversation_id = ?", (conv_id,))
                 con.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
                 cur = con.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
                 con.commit()
@@ -339,5 +356,74 @@ class ConversationStore:
                     )
                 msgs.reverse()  # ascending by time
                 return msgs
+            finally:
+                con.close()
+
+    def record_usage(
+        self,
+        message_id: str,
+        conversation_id: str,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        cost_usd: float | None = None,
+    ) -> None:
+        """Record token usage and/or cost for an assistant message."""
+        if input_tokens is None and output_tokens is None and cost_usd is None:
+            return
+        with self._lock:
+            con = self._connect()
+            try:
+                con.execute(
+                    "INSERT OR REPLACE INTO message_usage "
+                    "(message_id, conversation_id, input_tokens, output_tokens, cost_usd, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (message_id, conversation_id, input_tokens, output_tokens, cost_usd, time.time()),
+                )
+                con.commit()
+            finally:
+                con.close()
+
+    def get_conversation_usage(self, conv_id: str) -> dict:
+        """Return aggregated usage for a conversation."""
+        with self._lock:
+            con = self._connect()
+            try:
+                row = con.execute(
+                    "SELECT COALESCE(SUM(input_tokens), 0), "
+                    "COALESCE(SUM(output_tokens), 0), "
+                    "SUM(cost_usd) "
+                    "FROM message_usage WHERE conversation_id = ?",
+                    (conv_id,),
+                ).fetchone()
+                return {
+                    "input_tokens": row[0],
+                    "output_tokens": row[1],
+                    "total_tokens": row[0] + row[1],
+                    "cost_usd": row[2],
+                }
+            finally:
+                con.close()
+
+    def get_all_conversation_usage(self) -> dict[str, dict]:
+        """Return aggregated usage keyed by conversation_id."""
+        with self._lock:
+            con = self._connect()
+            try:
+                rows = con.execute(
+                    "SELECT conversation_id, "
+                    "COALESCE(SUM(input_tokens), 0), "
+                    "COALESCE(SUM(output_tokens), 0), "
+                    "SUM(cost_usd) "
+                    "FROM message_usage GROUP BY conversation_id"
+                ).fetchall()
+                return {
+                    r[0]: {
+                        "input_tokens": r[1],
+                        "output_tokens": r[2],
+                        "total_tokens": r[1] + r[2],
+                        "cost_usd": r[3],
+                    }
+                    for r in rows
+                }
             finally:
                 con.close()

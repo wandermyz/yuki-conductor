@@ -21,6 +21,9 @@ class ClaudeResult:
     text: str
     session_id: str | None
     is_error: bool = False
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_usd: float | None = None
 
 
 def run_claude(
@@ -109,7 +112,21 @@ def _parse_output(stdout: str, fallback_session_id: str | None) -> ClaudeResult:
     if len(result_text) > SLACK_MESSAGE_LIMIT:
         result_text = result_text[: SLACK_MESSAGE_LIMIT - 50] + "\n\n... (truncated, response too long)"
 
+    # Extract token usage and cost if present
+    input_tokens = data.get("input_tokens")
+    output_tokens = data.get("output_tokens")
+    cost_usd = data.get("cost_usd")
+    # Some CLI versions nest usage under a "usage" key
+    usage = data.get("usage")
+    if usage and isinstance(usage, dict):
+        input_tokens = input_tokens or usage.get("input_tokens")
+        output_tokens = output_tokens or usage.get("output_tokens")
+        cost_usd = cost_usd or usage.get("cost_usd")
+
     return ClaudeResult(
         text=result_text or "(empty response)",
         session_id=new_session_id,
+        input_tokens=int(input_tokens) if input_tokens is not None else None,
+        output_tokens=int(output_tokens) if output_tokens is not None else None,
+        cost_usd=float(cost_usd) if cost_usd is not None else None,
     )

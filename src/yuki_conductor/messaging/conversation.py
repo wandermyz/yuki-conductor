@@ -77,7 +77,13 @@ def handle_incoming_message(
         reply_text, reply_attachments = _split_response(result.text)
         platform.send(
             msg.conversation_key,
-            OutgoingMessage(text=reply_text, attachments=reply_attachments),
+            OutgoingMessage(
+                text=reply_text,
+                attachments=reply_attachments,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                cost_usd=result.cost_usd,
+            ),
         )
     finally:
         platform.set_processing(msg.conversation_key, msg.message_id, on=False)

@@ -6,6 +6,7 @@ import {
   deleteConversation,
   fetchStatuses,
   fetchProcessing,
+  fetchAllUsage,
   listConversations,
   listMessages,
   openChatSocket,
@@ -17,6 +18,7 @@ import type {
   AttachmentRef,
   ChatMessage,
   Conversation,
+  ConversationUsage,
   WSEvent,
 } from "./api";
 import "./chat.css";
@@ -74,6 +76,20 @@ function isImage(mime: string | null, filename: string): boolean {
 /* ---------- Conversation status helpers ---------- */
 
 type ConvStatus = "unread" | "read" | "done";
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + "B";
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
+  return String(n);
+}
+
+function formatUsage(u: ConversationUsage | undefined): string | null {
+  if (!u) return null;
+  if (u.cost_usd != null) return "$" + u.cost_usd.toFixed(2);
+  if (u.total_tokens > 0) return formatTokens(u.total_tokens) + " tok";
+  return null;
+}
 
 function getStatus(statuses: Record<string, ConvStatus>, id: string): ConvStatus {
   return statuses[id] ?? "read";
@@ -436,6 +452,7 @@ export default function Chat() {
   const [sessionIdModal, setSessionIdModal] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  const [usage, setUsage] = useState<Record<string, ConversationUsage>>({});
 
   // Keep a ref to `selected` so the WS handler can read the latest value
   const selectedRef = useRef(selected);
@@ -467,7 +484,11 @@ export default function Chat() {
           });
         }
       } else if (e.type === "processing") {
-        if (!e.on) playNotificationSound();
+        if (!e.on) {
+          playNotificationSound();
+          // Refresh usage after an assistant response completes
+          fetchAllUsage().then(setUsage).catch(console.error);
+        }
         setProcessingConvs((prev) => {
           const next = new Set(prev);
           if (e.on) next.add(cid);
@@ -492,6 +513,7 @@ export default function Chat() {
         fetchProcessing().then((p) => {
           setProcessingConvs(new Set(Object.keys(p)));
         }).catch(console.error);
+        fetchAllUsage().then(setUsage).catch(console.error);
         const sel = selectedRef.current;
         if (sel) {
           listMessages(sel).then((msgs) => {
@@ -507,6 +529,7 @@ export default function Chat() {
   useEffect(() => {
     listConversations().then(setConversations).catch(console.error);
     fetchStatuses().then((s) => setStatuses(s as Record<string, ConvStatus>)).catch(console.error);
+    fetchAllUsage().then(setUsage).catch(console.error);
   }, []);
 
   // Load messages when selecting a conversation
@@ -628,6 +651,11 @@ export default function Chat() {
                 </div>
                 <div className="chat-list-meta">
                   <span>{formatTime(c.updated_at)}</span>
+                  {formatUsage(usage[c.id]) && (
+                    <span className="chat-list-usage" title="Token usage / cost">
+                      {formatUsage(usage[c.id])}
+                    </span>
+                  )}
                   <div className="chat-list-actions">
                     <div className="menu-anchor">
                       <button
