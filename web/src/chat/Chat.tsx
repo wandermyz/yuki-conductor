@@ -320,7 +320,7 @@ function Composer({
           title="Attach files"
           aria-label="Attach files"
         >
-          📎
+          +
         </button>
         <input
           ref={fileRef}

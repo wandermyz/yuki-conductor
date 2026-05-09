@@ -445,12 +445,12 @@
   transition: background 0.15s;
 }
 
-.attach-btn {
+.action-btn.attach-btn {
   background: #40c057;
   color: #fff;
 }
 
-.attach-btn:hover {
+.action-btn.attach-btn:hover {
   background: #37b24d;
 }
 
