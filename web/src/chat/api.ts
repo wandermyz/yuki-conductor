@@ -113,6 +113,13 @@ export async function setConvStatus(convId: string, status: string): Promise<voi
   if (!r.ok) throw new Error("Failed to set status");
 }
 
+/** Returns map of conversation_id -> message_id for conversations currently being processed. */
+export async function fetchProcessing(): Promise<Record<string, string>> {
+  const r = await fetch("/api/chat/processing");
+  if (!r.ok) throw new Error("Failed to fetch processing state");
+  return r.json();
+}
+
 /**
  * Opens a chat WebSocket with automatic reconnection using exponential backoff.
  * Returns a handle with a `close()` method to permanently disconnect.

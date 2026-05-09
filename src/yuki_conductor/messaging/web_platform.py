@@ -35,6 +35,7 @@ class ConnectionManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._clients: list[tuple[object, asyncio.AbstractEventLoop]] = []
+        self._processing: dict[str, str] = {}  # conv_id -> message_id
 
     def add(self, ws, loop: asyncio.AbstractEventLoop) -> None:
         with self._lock:
@@ -53,6 +54,17 @@ class ConnectionManager:
                 asyncio.run_coroutine_threadsafe(ws.send_json(enriched), loop)
             except Exception:
                 logger.debug("WS broadcast failed", exc_info=True)
+
+    def set_processing(self, conv_id: str, message_id: str, on: bool) -> None:
+        with self._lock:
+            if on:
+                self._processing[conv_id] = message_id
+            else:
+                self._processing.pop(conv_id, None)
+
+    def get_processing(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self._processing)
 
 
 def _serialize_attachments(atts: list[StoredAttachment]) -> list[dict]:
@@ -122,6 +134,7 @@ class WebPlatform:
         )
 
     def set_processing(self, conversation_key: str, message_id: str, on: bool) -> None:
+        self._manager.set_processing(conversation_key, message_id, on)
         self._manager.broadcast(
             conversation_key,
             {"type": "processing", "on": on, "message_id": message_id},

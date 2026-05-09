@@ -333,6 +333,10 @@ def create_api() -> FastAPI:
             content_disposition_type="inline",
         )
 
+    @api.get("/api/chat/processing")
+    def get_processing():
+        return ws_manager.get_processing()
+
     @api.websocket("/ws/chat")
     async def chat_ws(websocket: WebSocket):
         await websocket.accept()

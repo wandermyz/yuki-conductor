@@ -5,6 +5,7 @@ import {
   createConversation,
   deleteConversation,
   fetchStatuses,
+  fetchProcessing,
   listConversations,
   listMessages,
   openChatSocket,
@@ -447,6 +448,7 @@ export default function Chat() {
 
   // Single global WS connection
   useEffect(() => {
+    let firstOpen = true;
     const handle = openChatSocket((e: WSEvent) => {
       const cid = e.conversation_id;
       if (e.type === "message") {
@@ -478,7 +480,25 @@ export default function Chat() {
         );
       }
     }, {
-      onOpen: () => setWsConnected(true),
+      onOpen: () => {
+        setWsConnected(true);
+        if (firstOpen) {
+          firstOpen = false;
+          return;
+        }
+        // Re-sync state after reconnect to pick up anything missed
+        listConversations().then(setConversations).catch(console.error);
+        fetchStatuses().then((s) => setStatuses(s as Record<string, ConvStatus>)).catch(console.error);
+        fetchProcessing().then((p) => {
+          setProcessingConvs(new Set(Object.keys(p)));
+        }).catch(console.error);
+        const sel = selectedRef.current;
+        if (sel) {
+          listMessages(sel).then((msgs) => {
+            setMessagesByConv((prev) => ({ ...prev, [sel]: msgs }));
+          }).catch(console.error);
+        }
+      },
       onClose: () => setWsConnected(false),
     });
     return () => handle.close();
