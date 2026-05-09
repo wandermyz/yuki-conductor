@@ -61,6 +61,16 @@ Required env var (only when `slack_socket` is enabled): `SLACK_CRON_CHANNEL` —
 - `cd web && pnpm dev` — start frontend dev server (proxies /api to port 2333)
 - `cd web && pnpm build` — build frontend for production (output: web/dist/)
 
+## Frontend Deployment Gotchas
+
+The production daemon serves the **built** frontend from `web/dist/`. Two things consistently go wrong:
+
+1. **Stale build**: Editing `web/src/` does nothing until you run `cd web && pnpm build`. The daemon serves whatever was last built into `web/dist/`, not the live source. Always rebuild after frontend changes.
+2. **Stale daemon**: The running process keeps the old code in memory. After rebuilding (or after any backend change), you must **restart the daemon** — and make sure the old process on port 2333 is actually dead first, or the new one silently fails to bind.
+3. **Worktree builds don't carry over**: If you build frontend in a git worktree, the hashed asset filenames (e.g. `index-BFz3Cwkn.js`) differ from the main branch. After merging, always rebuild in the main worktree.
+
+**Checklist after any frontend or backend change**: rebuild frontend → kill old process → start new daemon → verify endpoint.
+
 ## Pre-commit / Pre-PR Checks
 
 Before making any commit or creating a PR, you MUST run both:
