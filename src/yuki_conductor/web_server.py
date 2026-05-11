@@ -161,6 +161,14 @@ def create_api() -> FastAPI:
         project_store.add(body.name, body.path)
         return {"ok": True, "name": body.name, "path": body.path}
 
+    class ProjectReorder(BaseModel):
+        names: list[str]
+
+    @api.put("/api/projects/order")
+    def reorder_projects(body: ProjectReorder):
+        project_store.reorder(body.names)
+        return {"ok": True}
+
     @api.delete("/api/projects/{name}")
     def remove_project(name: str):
         if not project_store.remove(name):

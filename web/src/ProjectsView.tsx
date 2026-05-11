@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { addProject, browseDirectory, listProjects, removeProject } from "./chat/api";
+import { addProject, browseDirectory, listProjects, removeProject, reorderProjects } from "./chat/api";
 import type { BrowseResult, Project } from "./chat/api";
 
 function FolderPicker({
@@ -97,6 +97,8 @@ export default function ProjectsView() {
   const [showPicker, setShowPicker] = useState(false);
   const [loading, setLoading] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
+  const dragIdx = useRef<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   useEffect(() => {
     listProjects().then(setProjects).catch(console.error);
@@ -113,11 +115,7 @@ export default function ProjectsView() {
     setLoading(true);
     try {
       await addProject(trimName, trimPath);
-      setProjects((prev) =>
-        [...prev, { name: trimName, path: trimPath }].sort((a, b) =>
-          a.name.localeCompare(b.name),
-        ),
-      );
+      setProjects((prev) => [...prev, { name: trimName, path: trimPath }]);
       setName("");
       setPath("");
       setShowForm(false);
@@ -144,6 +142,56 @@ export default function ProjectsView() {
       const parts = dirPath.replace(/[\\/]+$/, "").split(/[\\/]/);
       const last = parts[parts.length - 1];
       if (last) setName(last);
+    }
+  };
+
+  const handleDragStart = (idx: number) => {
+    dragIdx.current = idx;
+  };
+
+  const handleDragOver = (e: React.DragEvent, idx: number) => {
+    e.preventDefault();
+    setDragOverIdx(idx);
+  };
+
+  const handleDrop = async (targetIdx: number) => {
+    const fromIdx = dragIdx.current;
+    dragIdx.current = null;
+    setDragOverIdx(null);
+    if (fromIdx === null || fromIdx === targetIdx) return;
+
+    const reordered = [...projects];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(targetIdx, 0, moved);
+    setProjects(reordered);
+
+    try {
+      await reorderProjects(reordered.map((p) => p.name));
+    } catch (e) {
+      console.error(e);
+      // Revert on failure
+      listProjects().then(setProjects).catch(console.error);
+    }
+  };
+
+  const handleDragEnd = () => {
+    dragIdx.current = null;
+    setDragOverIdx(null);
+  };
+
+  const moveProject = async (idx: number, direction: -1 | 1) => {
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= projects.length) return;
+
+    const reordered = [...projects];
+    [reordered[idx], reordered[targetIdx]] = [reordered[targetIdx], reordered[idx]];
+    setProjects(reordered);
+
+    try {
+      await reorderProjects(reordered.map((p) => p.name));
+    } catch (e) {
+      console.error(e);
+      listProjects().then(setProjects).catch(console.error);
     }
   };
 
@@ -238,20 +286,49 @@ export default function ProjectsView() {
       )}
 
       <ul className="projects-list">
-        {projects.map((p) => (
-          <li key={p.name} className="project-item">
+        {projects.map((p, idx) => (
+          <li
+            key={p.name}
+            className={`project-item${dragOverIdx === idx ? " project-drag-over" : ""}`}
+            draggable
+            onDragStart={() => handleDragStart(idx)}
+            onDragOver={(e) => handleDragOver(e, idx)}
+            onDrop={() => handleDrop(idx)}
+            onDragEnd={handleDragEnd}
+          >
+            <span className="project-drag-handle" title="Drag to reorder">&#x2630;</span>
             <div className="project-item-info">
               <span className="project-item-name">{p.name}</span>
               <span className="project-item-path">{p.path}</span>
             </div>
-            <button
-              className="project-remove-btn"
-              onClick={() => handleRemove(p.name)}
-              title="Remove project"
-              aria-label="Remove project"
-            >
-              &times;
-            </button>
+            <div className="project-item-actions">
+              <button
+                className="project-move-btn"
+                onClick={() => moveProject(idx, -1)}
+                disabled={idx === 0}
+                title="Move up"
+                aria-label="Move up"
+              >
+                &#x25B2;
+              </button>
+              <button
+                className="project-move-btn"
+                onClick={() => moveProject(idx, 1)}
+                disabled={idx === projects.length - 1}
+                title="Move down"
+                aria-label="Move down"
+              >
+                &#x25BC;
+              </button>
+              <button
+                className="project-remove-btn"
+                onClick={() => handleRemove(p.name)}
+                title="Remove project"
+                aria-label="Remove project"
+              >
+                &times;
+              </button>
+            </div>
           </li>
         ))}
       </ul>

@@ -311,8 +311,19 @@ class ProjectStore:
             try:
                 con.execute(
                     "CREATE TABLE IF NOT EXISTS projects "
-                    "(name TEXT PRIMARY KEY, path TEXT NOT NULL)"
+                    "(name TEXT PRIMARY KEY, path TEXT NOT NULL, "
+                    "sort_order INTEGER NOT NULL DEFAULT 0)"
                 )
+                # Migrate: add sort_order if missing
+                cols = [
+                    r[1]
+                    for r in con.execute("PRAGMA table_info(projects)").fetchall()
+                ]
+                if "sort_order" not in cols:
+                    con.execute(
+                        "ALTER TABLE projects ADD COLUMN "
+                        "sort_order INTEGER NOT NULL DEFAULT 0"
+                    )
                 con.commit()
             finally:
                 con.close()
@@ -322,7 +333,8 @@ class ProjectStore:
             con = self._connect()
             try:
                 rows = con.execute(
-                    "SELECT name, path FROM projects ORDER BY name"
+                    "SELECT name, path, sort_order FROM projects "
+                    "ORDER BY sort_order, name"
                 ).fetchall()
                 return [{"name": r[0], "path": r[1]} for r in rows]
             finally:
@@ -332,10 +344,30 @@ class ProjectStore:
         with self._lock:
             con = self._connect()
             try:
+                # New projects get sort_order after the current max
+                row = con.execute(
+                    "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM projects"
+                ).fetchone()
+                next_order = row[0] if row else 0
                 con.execute(
-                    "INSERT OR REPLACE INTO projects (name, path) VALUES (?, ?)",
-                    (name, path),
+                    "INSERT OR REPLACE INTO projects (name, path, sort_order) "
+                    "VALUES (?, ?, ?)",
+                    (name, path, next_order),
                 )
+                con.commit()
+            finally:
+                con.close()
+
+    def reorder(self, names: list[str]) -> None:
+        """Set sort_order based on the given list of project names."""
+        with self._lock:
+            con = self._connect()
+            try:
+                for i, name in enumerate(names):
+                    con.execute(
+                        "UPDATE projects SET sort_order = ? WHERE name = ?",
+                        (i, name),
+                    )
                 con.commit()
             finally:
                 con.close()

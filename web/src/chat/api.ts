@@ -168,6 +168,15 @@ export async function removeProject(name: string): Promise<void> {
   if (!r.ok) throw new Error("Failed to remove project");
 }
 
+export async function reorderProjects(names: string[]): Promise<void> {
+  const r = await fetch("/api/projects/order", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ names }),
+  });
+  if (!r.ok) throw new Error("Failed to reorder projects");
+}
+
 export interface BrowseResult {
   path: string;
   parent: string | null;
