@@ -13,12 +13,15 @@ from yuki_conductor.messaging.platform import (
     MessagingPlatform,
     OutgoingMessage,
 )
+from yuki_conductor.store import ModelStore, SessionStore
 
 __all__ = [
     "Attachment",
     "ChatAppReceiver",
     "IncomingMessage",
     "MessagingPlatform",
+    "ModelStore",
     "OutgoingMessage",
+    "SessionStore",
     "handle_incoming_message",
 ]

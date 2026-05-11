@@ -41,7 +41,7 @@ class OutgoingMessage:
 
 
 class MessagingPlatform(Protocol):
-    """Abstract messaging surface. Slack, Teams CLI, and the web chat all implement this."""
+    """Abstract messaging surface. Slack, web, and external plugins all implement this."""
 
     name: str
 
@@ -79,4 +79,12 @@ class ChatAppReceiver(Protocol):
 
     def start(self) -> None:
         """Start the receiver. Must not block; spawn threads as needed."""
+        ...
+
+    def on_startup_complete(self) -> None:
+        """Called after all receivers have started and web/cron are up."""
+        ...
+
+    def stop(self) -> None:
+        """Gracefully shut down (close connections, stop subprocesses)."""
         ...

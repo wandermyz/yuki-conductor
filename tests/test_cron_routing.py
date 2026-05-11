@@ -43,14 +43,13 @@ def _task(name="t1", chat_app=None):
 
 
 def test_pick_platform_explicit_match():
-    teams = FakePlatform("teams_cli")
-    assert _pick_platform(_task(chat_app="teams_cli"), {"teams_cli": teams}) is teams
+    plugin = FakePlatform("my_plugin")
+    assert _pick_platform(_task(chat_app="my_plugin"), {"my_plugin": plugin}) is plugin
 
 
 def test_pick_platform_explicit_missing_skips():
     slack = FakePlatform("slack")
-    # Explicit chat_app="teams_cli" but only slack is enabled → skip (None)
-    assert _pick_platform(_task(chat_app="teams_cli"), {"slack": slack}) is None
+    assert _pick_platform(_task(chat_app="teams_mcp"), {"slack": slack}) is None
 
 
 def test_pick_platform_slack_socket_alias():
@@ -59,34 +58,43 @@ def test_pick_platform_slack_socket_alias():
     assert _pick_platform(_task(chat_app="slack_socket"), {"slack": slack}) is slack
 
 
-def test_pick_platform_default_prefers_slack():
+def test_pick_platform_default_uses_chat_apps_order():
     slack = FakePlatform("slack")
-    teams = FakePlatform("teams_cli")
-    assert _pick_platform(_task(), {"slack": slack, "teams_cli": teams}) is slack
+    plugin = FakePlatform("my_plugin")
+    with patch("yuki_conductor.cron_scheduler.chat_apps", return_value=["slack_socket"]):
+        assert _pick_platform(_task(), {"slack": slack, "my_plugin": plugin}) is slack
 
 
-def test_pick_platform_default_falls_back_to_teams():
-    teams = FakePlatform("teams_cli")
-    assert _pick_platform(_task(), {"teams_cli": teams}) is teams
+def test_pick_platform_default_falls_back_to_plugin():
+    plugin = FakePlatform("my_plugin")
+    with patch("yuki_conductor.cron_scheduler.chat_apps", return_value=["my_plugin"]):
+        assert _pick_platform(_task(), {"my_plugin": plugin}) is plugin
+
+
+def test_pick_platform_default_falls_back_to_web():
+    web = FakePlatform("web")
+    with patch("yuki_conductor.cron_scheduler.chat_apps", return_value=[]):
+        assert _pick_platform(_task(), {"web": web}) is web
 
 
 def test_pick_platform_no_apps_returns_none():
-    assert _pick_platform(_task(), {}) is None
+    with patch("yuki_conductor.cron_scheduler.chat_apps", return_value=[]):
+        assert _pick_platform(_task(), {}) is None
 
 
 def test_run_cron_task_notify_routes_to_explicit_app():
-    teams = FakePlatform("teams_cli")
+    plugin = FakePlatform("my_plugin")
     slack = FakePlatform("slack")
     fake_result = ClaudeResult(text="hello world <notify>", session_id="sess-1")
 
     with patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result):
         _run_cron_task(
-            _task(chat_app="teams_cli"),
-            {"slack": slack, "teams_cli": teams},
+            _task(chat_app="my_plugin"),
+            {"slack": slack, "my_plugin": plugin},
         )
 
-    assert teams.threads == [("hello world", "desc t1")]
-    assert teams.session_writes == [("teams_cli-thread-0", "sess-1", "desc t1")]
+    assert plugin.threads == [("hello world", "desc t1")]
+    assert plugin.session_writes == [("my_plugin-thread-0", "sess-1", "desc t1")]
     assert slack.threads == []
 
 
@@ -94,7 +102,10 @@ def test_run_cron_task_silence_does_not_route():
     slack = FakePlatform("slack")
     fake_result = ClaudeResult(text="quiet check <silence>", session_id="sess-1")
 
-    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result):
+    with (
+        patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result),
+        patch("yuki_conductor.cron_scheduler.chat_apps", return_value=["slack_socket"]),
+    ):
         _run_cron_task(_task(), {"slack": slack})
 
     assert slack.threads == []
@@ -105,7 +116,7 @@ def test_run_cron_task_explicit_missing_app_is_skipped():
     fake_result = ClaudeResult(text="x <notify>", session_id="sess-1")
 
     with patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result):
-        _run_cron_task(_task(chat_app="teams_cli"), {"slack": slack})
+        _run_cron_task(_task(chat_app="teams_mcp"), {"slack": slack})
 
     assert slack.threads == []
 
@@ -113,7 +124,10 @@ def test_run_cron_task_explicit_missing_app_is_skipped():
 def test_run_cron_task_no_apps_logs_only(caplog):
     fake_result = ClaudeResult(text="reminder <notify>", session_id="sess-1")
 
-    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result):
+    with (
+        patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result),
+        patch("yuki_conductor.cron_scheduler.chat_apps", return_value=[]),
+    ):
         with caplog.at_level("INFO", logger="yuki_conductor.cron_scheduler"):
             _run_cron_task(_task(), {})
 

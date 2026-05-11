@@ -9,14 +9,10 @@ import yaml
 from croniter import croniter
 
 from yuki_conductor.claude_runner import run_claude
-from yuki_conductor.config import CRON_FILE, WORKSPACE_DIR
+from yuki_conductor.config import CRON_FILE, WORKSPACE_DIR, chat_apps
 from yuki_conductor.messaging import MessagingPlatform
 
 logger = logging.getLogger(__name__)
-
-# Preference order when a cron task does not specify chat_app and multiple
-# platforms are enabled.
-_PREFERRED_ORDER = ("slack", "teams_cli", "web")
 
 
 @dataclass
@@ -104,7 +100,9 @@ def _pick_platform(
             )
         return platform
 
-    for name in _PREFERRED_ORDER:
+    # Default: derive preference from CHAT_APPS order + "web" fallback
+    preferred = [_TASK_APP_ALIASES.get(a, a) for a in chat_apps()] + ["web"]
+    for name in preferred:
         if name in platforms_by_name:
             return platforms_by_name[name]
     return None
