@@ -7,13 +7,45 @@ forever.
 
 import importlib.metadata
 import logging
+import subprocess
 import threading
 
-from yuki_conductor.config import chat_apps
+from yuki_conductor.config import CLAUDE_WORKING_DIR, chat_apps
 from yuki_conductor.messaging import ChatAppReceiver, MessagingPlatform
 from yuki_conductor.store import ModelStore, SessionStore
 
 logger = logging.getLogger(__name__)
+
+
+def _get_commit_short() -> str:
+    try:
+        return (
+            subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=CLAUDE_WORKING_DIR,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            ).stdout.strip()
+            or "unknown"
+        )
+    except Exception:
+        return "unknown"
+
+
+def _broadcast_restart_notification(
+    platforms: dict[str, "MessagingPlatform"],
+) -> None:
+    """Send a daemon-restarted notification to every registered platform."""
+    commit = _get_commit_short()
+    text = f"yuki-conductor daemon restarted (commit `{commit}`)."
+    for name, platform in platforms.items():
+        try:
+            platform.send_notification(text)
+            logger.info("Restart notification sent to %s", name)
+        except Exception:
+            logger.warning("Failed to send restart notification to %s", name, exc_info=True)
 
 
 def _build_receiver(
@@ -38,9 +70,19 @@ def _build_receiver(
 
 
 def start() -> None:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
-    )
+    from yuki_conductor.config import LOG_FILE
+
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fmt = "%(asctime)s %(name)s %(levelname)s %(message)s"
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    # stdout
+    root.addHandler(logging.StreamHandler())
+    root.handlers[-1].setFormatter(logging.Formatter(fmt))
+    # file
+    fh = logging.FileHandler(str(LOG_FILE), encoding="utf-8")
+    fh.setFormatter(logging.Formatter(fmt))
+    root.addHandler(fh)
 
     apps = chat_apps()
     logger.info(
@@ -74,6 +116,8 @@ def start() -> None:
             logger.warning(
                 f"on_startup_complete failed for {rec.name}", exc_info=True
             )
+
+    _broadcast_restart_notification(platforms_by_name)
 
     if not receivers:
         logger.info("No chat apps enabled (CHAT_APPS empty); web + cron only")

@@ -65,7 +65,22 @@ def handle_incoming_message(
         )
 
         prompt = _build_prompt(msg.text, msg.attachments)
-        result = run_claude(prompt, session_id=session_id, model=msg.model, conversation_key=msg.conversation_key, cwd=msg.cwd)
+        logger.info(
+            "Running Claude for %s (session=%s, model=%s)",
+            msg.conversation_key, session_id, msg.model,
+        )
+        try:
+            result = run_claude(prompt, session_id=session_id, model=msg.model, conversation_key=msg.conversation_key, cwd=msg.cwd)
+        except Exception:
+            logger.error(
+                "Claude invocation failed for %s", msg.conversation_key, exc_info=True,
+            )
+            raise
+        logger.info(
+            "Claude finished for %s (tokens: %s in / %s out, cost: $%s)",
+            msg.conversation_key,
+            result.input_tokens, result.output_tokens, result.cost_usd,
+        )
 
         if result.session_id:
             platform.set_session_id(
@@ -75,15 +90,18 @@ def handle_incoming_message(
             )
 
         reply_text, reply_attachments = _split_response(result.text)
-        platform.send(
-            msg.conversation_key,
-            OutgoingMessage(
-                text=reply_text,
-                attachments=reply_attachments,
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
-                cost_usd=result.cost_usd,
-            ),
+        outgoing = OutgoingMessage(
+            text=reply_text,
+            attachments=reply_attachments,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            cost_usd=result.cost_usd,
         )
+        logger.info(
+            "Sending reply for %s (%d chars, %d attachments)",
+            msg.conversation_key, len(reply_text), len(reply_attachments),
+        )
+        platform.send(msg.conversation_key, outgoing)
+        logger.info("Reply sent for %s", msg.conversation_key)
     finally:
         platform.set_processing(msg.conversation_key, msg.message_id, on=False)
