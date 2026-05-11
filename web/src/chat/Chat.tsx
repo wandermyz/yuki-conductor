@@ -11,7 +11,7 @@ import {
   listConversations,
   listMessages,
   listProjects,
-  openChatSocket,
+  subscribeChatSocket,
   sendMessage,
   setConvStatus,
   uploadFile,
@@ -465,9 +465,16 @@ function ChatThread({
   );
 }
 
-export default function Chat() {
+export default function Chat({
+  selectedId,
+  onSelectId,
+}: {
+  selectedId: string | null;
+  onSelectId: (id: string | null) => void;
+}) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const selected = selectedId;
+  const setSelected = onSelectId;
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({});
   const [processingConvs, setProcessingConvs] = useState<Set<string>>(new Set());
   const [statuses, setStatuses] = useState<Record<string, ConvStatus>>({});
@@ -488,48 +495,49 @@ export default function Chat() {
     setConvStatus(id, s).catch(console.error);
   }, []);
 
-  // Single global WS connection
+  // Subscribe to the shared WS connection (stays alive across tab switches)
   useEffect(() => {
     let firstOpen = true;
-    const handle = openChatSocket((e: WSEvent) => {
-      if (e.type === "reload") {
-        window.location.reload();
-        return;
-      }
-      const cid = e.conversation_id;
-      if (e.type === "message") {
-        setMessagesByConv((prev) => {
-          const msgs = prev[cid] || [];
-          if (msgs.find((m) => m.id === e.message.id)) return prev;
-          return { ...prev, [cid]: [...msgs, e.message] };
-        });
-        // Mark as unread if this is an assistant message and the conversation is not currently selected
-        if (e.message.role === "assistant" && selectedRef.current !== cid) {
-          setStatuses((prev) => {
-            if (prev[cid] === "done") return prev; // don't override "done"
-            const next = { ...prev, [cid]: "unread" as ConvStatus };
-            setConvStatus(cid, "unread").catch(console.error);
+    const unsub = subscribeChatSocket({
+      onEvent: (e: WSEvent) => {
+        if (e.type === "reload") {
+          window.location.reload();
+          return;
+        }
+        const cid = e.conversation_id;
+        if (e.type === "message") {
+          setMessagesByConv((prev) => {
+            const msgs = prev[cid] || [];
+            if (msgs.find((m) => m.id === e.message.id)) return prev;
+            return { ...prev, [cid]: [...msgs, e.message] };
+          });
+          // Mark as unread if this is an assistant message and the conversation is not currently selected
+          if (e.message.role === "assistant" && selectedRef.current !== cid) {
+            setStatuses((prev) => {
+              if (prev[cid] === "done") return prev; // don't override "done"
+              const next = { ...prev, [cid]: "unread" as ConvStatus };
+              setConvStatus(cid, "unread").catch(console.error);
+              return next;
+            });
+          }
+        } else if (e.type === "processing") {
+          if (!e.on) {
+            playNotificationSound();
+            // Refresh usage after an assistant response completes
+            fetchAllUsage().then(setUsage).catch(console.error);
+          }
+          setProcessingConvs((prev) => {
+            const next = new Set(prev);
+            if (e.on) next.add(cid);
+            else next.delete(cid);
             return next;
           });
+        } else if (e.type === "title") {
+          setConversations((prev) =>
+            prev.map((c) => (c.id === cid ? { ...c, title: e.title } : c)),
+          );
         }
-      } else if (e.type === "processing") {
-        if (!e.on) {
-          playNotificationSound();
-          // Refresh usage after an assistant response completes
-          fetchAllUsage().then(setUsage).catch(console.error);
-        }
-        setProcessingConvs((prev) => {
-          const next = new Set(prev);
-          if (e.on) next.add(cid);
-          else next.delete(cid);
-          return next;
-        });
-      } else if (e.type === "title") {
-        setConversations((prev) =>
-          prev.map((c) => (c.id === cid ? { ...c, title: e.title } : c)),
-        );
-      }
-    }, {
+      },
       onOpen: () => {
         setWsConnected(true);
         if (firstOpen) {
@@ -552,7 +560,7 @@ export default function Chat() {
       },
       onClose: () => setWsConnected(false),
     });
-    return () => handle.close();
+    return () => unsub();
   }, []);
 
   useEffect(() => {

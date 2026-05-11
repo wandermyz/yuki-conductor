@@ -455,21 +455,46 @@ function SessionsView() {
   );
 }
 
-function App() {
-  const [tab, setTab] = useState<Tab>(() => {
-    const saved = window.localStorage.getItem("yuki-tab");
-    if (saved === "chat" || saved === "sessions" || saved === "projects") return saved;
-    return "chat";
-  });
+function parseHash(): { tab: Tab; chatId: string | null } {
+  const hash = window.location.hash.replace(/^#/, "");
+  if (hash.startsWith("chat/")) return { tab: "chat", chatId: hash.slice(5) || null };
+  if (hash === "chat") return { tab: "chat", chatId: null };
+  if (hash === "sessions") return { tab: "sessions", chatId: null };
+  if (hash === "projects") return { tab: "projects", chatId: null };
+  // Fall back to localStorage for users without a hash yet
+  const saved = window.localStorage.getItem("yuki-tab");
+  if (saved === "chat" || saved === "sessions" || saved === "projects") return { tab: saved, chatId: null };
+  return { tab: "chat", chatId: null };
+}
 
+function App() {
+  const [tab, setTab] = useState<Tab>(() => parseHash().tab);
+  const [chatId, setChatId] = useState<string | null>(() => parseHash().chatId);
+
+  // Sync hash -> state on popstate (back/forward)
   useEffect(() => {
+    const onHashChange = () => {
+      const parsed = parseHash();
+      setTab(parsed.tab);
+      setChatId(parsed.chatId);
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  // Sync state -> hash + localStorage
+  useEffect(() => {
+    const hash = tab === "chat" && chatId ? `chat/${chatId}` : tab;
+    if (window.location.hash !== `#${hash}`) {
+      window.location.hash = hash;
+    }
     window.localStorage.setItem("yuki-tab", tab);
-  }, [tab]);
+  }, [tab, chatId]);
 
   return (
     <div className="root">
       <div className="tab-content">
-        {tab === "chat" ? <Chat /> : tab === "projects" ? <ProjectsView /> : <SessionsView />}
+        {tab === "chat" ? <Chat selectedId={chatId} onSelectId={setChatId} /> : tab === "projects" ? <ProjectsView /> : <SessionsView />}
       </div>
       <nav className="tabbar" role="tablist">
         <button

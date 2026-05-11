@@ -181,55 +181,74 @@ export async function browseDirectory(path: string = ""): Promise<BrowseResult> 
 }
 
 /**
- * Opens a chat WebSocket with automatic reconnection using exponential backoff.
- * Returns a handle with a `close()` method to permanently disconnect.
+ * Module-level singleton WebSocket that stays alive across component
+ * mount/unmount cycles (e.g. tab switches). Subscribers are notified of
+ * events, open, and close. The connection is established on first subscribe
+ * and kept open as long as at least one subscriber exists.
  */
-export function openChatSocket(
-  onEvent: (e: WSEvent) => void,
-  opts: { onOpen?: () => void; onClose?: () => void } = {},
-): { close: () => void } {
-  const BASE_DELAY = 1000;
-  const MAX_DELAY = 30000;
-  let attempt = 0;
-  let ws: WebSocket | null = null;
-  let closed = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
 
-  function connect() {
-    if (closed) return;
-    const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    ws = new WebSocket(`${proto}://${window.location.host}/ws/chat`);
+export interface ChatSocketSubscriber {
+  onEvent: (e: WSEvent) => void;
+  onOpen?: () => void;
+  onClose?: () => void;
+}
 
-    ws.onopen = () => {
-      attempt = 0;
-      opts.onOpen?.();
-    };
+const subscribers = new Set<ChatSocketSubscriber>();
+let ws: WebSocket | null = null;
+let attempt = 0;
+let connected = false;
 
-    ws.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data) as WSEvent;
-        onEvent(data);
-      } catch {
-        /* ignore */
-      }
-    };
+const BASE_DELAY = 1000;
+const MAX_DELAY = 30000;
 
-    ws.onclose = () => {
-      opts.onClose?.();
-      if (closed) return;
-      const delay = Math.min(BASE_DELAY * 2 ** attempt, MAX_DELAY);
-      attempt++;
-      timer = setTimeout(connect, delay);
-    };
+function wsConnect() {
+  const proto = window.location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${window.location.host}/ws/chat`);
+
+  ws.onopen = () => {
+    attempt = 0;
+    connected = true;
+    for (const sub of subscribers) sub.onOpen?.();
+  };
+
+  ws.onmessage = (ev) => {
+    try {
+      const data = JSON.parse(ev.data) as WSEvent;
+      for (const sub of subscribers) sub.onEvent(data);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  ws.onclose = () => {
+    connected = false;
+    for (const sub of subscribers) sub.onClose?.();
+    const delay = Math.min(BASE_DELAY * 2 ** attempt, MAX_DELAY);
+    attempt++;
+    setTimeout(wsConnect, delay);
+  };
+}
+
+/**
+ * Subscribe to the shared chat WebSocket. The connection is created lazily on
+ * first subscribe. Returns an unsubscribe function — call it on unmount.
+ * New subscribers that join while the socket is already open get an immediate
+ * onOpen callback so they can sync state.
+ */
+export function subscribeChatSocket(sub: ChatSocketSubscriber): () => void {
+  subscribers.add(sub);
+
+  // Start the singleton connection on first subscriber
+  if (subscribers.size === 1 && !ws) {
+    wsConnect();
   }
 
-  connect();
+  // If already connected, notify the new subscriber immediately
+  if (connected) {
+    sub.onOpen?.();
+  }
 
-  return {
-    close() {
-      closed = true;
-      if (timer != null) clearTimeout(timer);
-      ws?.close();
-    },
+  return () => {
+    subscribers.delete(sub);
   };
 }
