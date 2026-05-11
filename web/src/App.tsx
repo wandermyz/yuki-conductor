@@ -476,7 +476,11 @@ function App() {
     const onHashChange = () => {
       const parsed = parseHash();
       setTab(parsed.tab);
-      setChatId(parsed.chatId);
+      // Only update chatId when navigating to a chat hash — switching to
+      // another tab shouldn't clear the remembered chat selection.
+      if (parsed.tab === "chat") {
+        setChatId(parsed.chatId);
+      }
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);

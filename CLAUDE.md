@@ -62,6 +62,19 @@ Required env var (only when `slack_socket` is enabled): `SLACK_CRON_CHANNEL` —
 - `cd web && pnpm dev` — start frontend dev server (proxies /api to port 2333)
 - `cd web && pnpm build` — build frontend for production (output: web/dist/)
 
+## Daemon Management
+
+On Windows, there is no LaunchAgent/daemon management. To restart the daemon, find the running `yuki-conductor` process, kill it, and spawn a new one in the background:
+
+```
+# Find and kill
+taskkill /f /im yuki-conductor.exe 2>/dev/null; tasklist | grep yuki
+# Or: Get-Process *yuki* | Stop-Process -Force
+
+# Start in background
+uv run yuki-conductor run &
+```
+
 ## Frontend Deployment Gotchas
 
 The production daemon serves the **built** frontend from `web/dist/`.
