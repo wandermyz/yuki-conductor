@@ -293,4 +293,73 @@ class ModelStore(_SqliteKVStore):
                 con.close()
 
 
+class ProjectStore:
+    """Stores project name -> local directory path mappings."""
+
+    def __init__(self, db_path: Path | None = None):
+        self._db_path = db_path or DB_FILE
+        self._lock = threading.Lock()
+        self._init_table()
+
+    def _connect(self) -> sqlite3.Connection:
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        return sqlite3.connect(str(self._db_path))
+
+    def _init_table(self) -> None:
+        with self._lock:
+            con = self._connect()
+            try:
+                con.execute(
+                    "CREATE TABLE IF NOT EXISTS projects "
+                    "(name TEXT PRIMARY KEY, path TEXT NOT NULL)"
+                )
+                con.commit()
+            finally:
+                con.close()
+
+    def list_all(self) -> list[dict]:
+        with self._lock:
+            con = self._connect()
+            try:
+                rows = con.execute(
+                    "SELECT name, path FROM projects ORDER BY name"
+                ).fetchall()
+                return [{"name": r[0], "path": r[1]} for r in rows]
+            finally:
+                con.close()
+
+    def add(self, name: str, path: str) -> None:
+        with self._lock:
+            con = self._connect()
+            try:
+                con.execute(
+                    "INSERT OR REPLACE INTO projects (name, path) VALUES (?, ?)",
+                    (name, path),
+                )
+                con.commit()
+            finally:
+                con.close()
+
+    def remove(self, name: str) -> bool:
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute("DELETE FROM projects WHERE name = ?", (name,))
+                con.commit()
+                return cur.rowcount > 0
+            finally:
+                con.close()
+
+    def get_path(self, name: str) -> str | None:
+        with self._lock:
+            con = self._connect()
+            try:
+                row = con.execute(
+                    "SELECT path FROM projects WHERE name = ?", (name,)
+                ).fetchone()
+                return row[0] if row else None
+            finally:
+                con.close()
+
+
 VALID_MODELS = {"sonnet", "opus", "haiku"}

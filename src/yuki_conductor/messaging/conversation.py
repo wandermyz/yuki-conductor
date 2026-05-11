@@ -65,7 +65,7 @@ def handle_incoming_message(
         )
 
         prompt = _build_prompt(msg.text, msg.attachments)
-        result = run_claude(prompt, session_id=session_id, model=msg.model, conversation_key=msg.conversation_key)
+        result = run_claude(prompt, session_id=session_id, model=msg.model, conversation_key=msg.conversation_key, cwd=msg.cwd)
 
         if result.session_id:
             platform.set_session_id(

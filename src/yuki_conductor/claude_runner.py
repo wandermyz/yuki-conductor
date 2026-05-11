@@ -98,6 +98,7 @@ def run_claude(
     timeout: int | None = None,
     model: str | None = None,
     conversation_key: str | None = None,
+    cwd: str | None = None,
 ) -> ClaudeResult:
     """Run claude CLI and return the result.
 
@@ -106,6 +107,7 @@ def run_claude(
         session_id: Optional session ID to resume.
         timeout: Timeout in seconds (defaults to CLAUDE_TIMEOUT).
         model: Optional model alias (e.g. "sonnet", "opus", "haiku").
+        cwd: Working directory for claude. Defaults to CLAUDE_WORKING_DIR.
     """
     args = [
         "-p",
@@ -140,7 +142,7 @@ def run_claude(
             encoding="utf-8",
             errors="replace",
             env=env,
-            cwd=CLAUDE_WORKING_DIR,
+            cwd=cwd or CLAUDE_WORKING_DIR,
         )
     except FileNotFoundError:
         return ClaudeResult(
@@ -155,10 +157,8 @@ def run_claude(
     try:
         stdout, stderr = proc.communicate(timeout=effective_timeout)
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.communicate()
         return ClaudeResult(
-            text="Claude timed out. Try a simpler prompt or increase CLAUDE_TIMEOUT.",
+            text="Claude timed out but is still running in the background. Increase CLAUDE_TIMEOUT to wait longer.",
             session_id=session_id,
             is_error=True,
         )

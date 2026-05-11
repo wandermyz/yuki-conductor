@@ -36,11 +36,11 @@ export async function listConversations(): Promise<Conversation[]> {
   return r.json();
 }
 
-export async function createConversation(title?: string): Promise<Conversation> {
+export async function createConversation(title?: string, project?: string): Promise<Conversation> {
   const r = await fetch("/api/conversations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title: title ?? null }),
+    body: JSON.stringify({ title: title ?? null, project: project ?? null }),
   });
   if (!r.ok) throw new Error("Failed to create conversation");
   return r.json();
@@ -138,6 +138,45 @@ export interface ConversationUsage {
 export async function fetchAllUsage(): Promise<Record<string, ConversationUsage>> {
   const r = await fetch("/api/chat/conversations/usage");
   if (!r.ok) throw new Error("Failed to fetch usage");
+  return r.json();
+}
+
+export interface Project {
+  name: string;
+  path: string;
+}
+
+export async function listProjects(): Promise<Project[]> {
+  const r = await fetch("/api/projects");
+  if (!r.ok) throw new Error("Failed to list projects");
+  return r.json();
+}
+
+export async function addProject(name: string, path: string): Promise<void> {
+  const r = await fetch("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, path }),
+  });
+  if (!r.ok) throw new Error("Failed to add project");
+}
+
+export async function removeProject(name: string): Promise<void> {
+  const r = await fetch(`/api/projects/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+  if (!r.ok) throw new Error("Failed to remove project");
+}
+
+export interface BrowseResult {
+  path: string;
+  parent: string | null;
+  dirs: { name: string; path: string }[];
+}
+
+export async function browseDirectory(path: string = ""): Promise<BrowseResult> {
+  const r = await fetch(`/api/browse?path=${encodeURIComponent(path)}`);
+  if (!r.ok) throw new Error("Failed to browse directory");
   return r.json();
 }
 

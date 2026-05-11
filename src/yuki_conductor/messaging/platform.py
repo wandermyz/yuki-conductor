@@ -26,6 +26,7 @@ class IncomingMessage:
     is_thread_start: bool = False
     title_hint: str | None = None
     model: str | None = None
+    cwd: str | None = None
 
 
 @dataclass

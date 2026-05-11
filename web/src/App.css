@@ -554,3 +554,264 @@
     margin-top: 8px;
   }
 }
+
+/* ---- Projects view ---- */
+
+.projects-view {
+  flex: 1;
+  padding: 24px 32px;
+  overflow-y: auto;
+  max-width: 640px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.projects-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.projects-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.project-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  background: var(--accent-bg);
+}
+
+.project-form-input {
+  font: inherit;
+  font-size: 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  outline: none;
+}
+
+.project-form-input:focus {
+  border-color: var(--accent);
+}
+
+.project-form-path {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 14px;
+}
+
+.project-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.project-cancel-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.projects-empty {
+  color: var(--text);
+  font-size: 14px;
+  font-style: italic;
+}
+
+.projects-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.project-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.project-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.project-item-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+.project-item-path {
+  font-size: 12px;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-remove-btn {
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.project-remove-btn:hover {
+  background: rgba(224, 49, 49, 0.15);
+  color: #e03131;
+}
+
+/* ---- Folder picker ---- */
+
+.project-path-row {
+  display: flex;
+  gap: 8px;
+}
+
+.project-path-row .project-form-path {
+  flex: 1;
+}
+
+.browse-btn {
+  background: none;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.browse-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.folder-picker {
+  min-width: 400px;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+}
+
+.folder-picker-path-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.folder-picker-path-input {
+  flex: 1;
+  font: inherit;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  outline: none;
+}
+
+.folder-picker-path-input:focus {
+  border-color: var(--accent);
+}
+
+.folder-picker-go {
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.folder-picker-up {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 4px;
+}
+
+.folder-picker-up:hover {
+  background: var(--accent-bg);
+}
+
+.folder-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.folder-picker-list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.folder-picker-dir {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--text-h);
+  font-size: 13px;
+  transition: background 0.1s;
+  font: inherit;
+}
+
+.folder-picker-dir:hover {
+  background: var(--accent-bg);
+}
+
+.folder-picker-loading,
+.folder-picker-empty {
+  padding: 12px;
+  color: var(--text);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.folder-picker-actions {
+  display: flex;
+  gap: 8px;
+}

@@ -10,6 +10,7 @@ import {
   fetchAllUsage,
   listConversations,
   listMessages,
+  listProjects,
   openChatSocket,
   sendMessage,
   setConvStatus,
@@ -20,6 +21,7 @@ import type {
   ChatMessage,
   Conversation,
   ConversationUsage,
+  Project,
   WSEvent,
 } from "./api";
 import "./chat.css";
@@ -474,6 +476,8 @@ export default function Chat() {
   const [wsConnected, setWsConnected] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [usage, setUsage] = useState<Record<string, ConversationUsage>>({});
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
 
   // Keep a ref to `selected` so the WS handler can read the latest value
   const selectedRef = useRef(selected);
@@ -555,6 +559,7 @@ export default function Chat() {
     listConversations().then(setConversations).catch(console.error);
     fetchStatuses().then((s) => setStatuses(s as Record<string, ConvStatus>)).catch(console.error);
     fetchAllUsage().then(setUsage).catch(console.error);
+    listProjects().then(setProjects).catch(console.error);
   }, []);
 
   // Load messages when selecting a conversation
@@ -566,14 +571,23 @@ export default function Chat() {
     });
   }, [selected, messagesByConv]);
 
-  const newChat = async () => {
+  const newChat = async (projectName?: string) => {
     try {
-      const c = await createConversation();
+      const c = await createConversation(undefined, projectName);
       setConversations((prev) => [c, ...prev]);
       setMessagesByConv((prev) => ({ ...prev, [c.id]: [] }));
       setSelected(c.id);
+      setShowProjectPicker(false);
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleNewChat = () => {
+    if (projects.length === 0) {
+      newChat();
+    } else {
+      setShowProjectPicker(true);
     }
   };
 
@@ -631,6 +645,30 @@ export default function Chat() {
       {sessionIdModal && (
         <SessionIdModal sessionId={sessionIdModal} onClose={() => setSessionIdModal(null)} />
       )}
+      {showProjectPicker && (
+        <div className="modal-overlay" onClick={() => setShowProjectPicker(false)}>
+          <div className="modal-content project-picker" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Select Project</h3>
+            <ul className="project-picker-list">
+              <li>
+                <button className="project-picker-item" onClick={() => newChat()}>
+                  <span className="project-picker-name">No project</span>
+                  <span className="project-picker-path">Default working directory</span>
+                </button>
+              </li>
+              {projects.map((p) => (
+                <li key={p.name}>
+                  <button className="project-picker-item" onClick={() => newChat(p.name)}>
+                    <span className="project-picker-name">{p.name}</span>
+                    <span className="project-picker-path">{p.path}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button className="modal-close-btn" onClick={() => setShowProjectPicker(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
       <aside className="chat-sidebar">
         <div className="chat-sidebar-header">
           <h2>Chats
@@ -639,7 +677,7 @@ export default function Chat() {
               title={wsConnected ? "Connected" : "Disconnected"}
             />
           </h2>
-          <button className="new-chat-btn" onClick={newChat}>
+          <button className="new-chat-btn" onClick={handleNewChat}>
             + New
           </button>
         </div>
@@ -673,6 +711,7 @@ export default function Chat() {
                   {st === "unread" && <span className="status-dot" title="Unread" />}
                   {st === "done" && <span className="status-check" title="Done">&#10003;</span>}
                   <span className="chat-list-title">{c.title || "New chat"}</span>
+                  {c.project && <span className="chat-list-project">{c.project}</span>}
                 </div>
                 <div className="chat-list-meta">
                   <span>{formatTime(c.updated_at)}</span>
@@ -729,7 +768,7 @@ export default function Chat() {
         ) : (
           <div className="chat-placeholder">
             <p>Pick a conversation, or start a new one.</p>
-            <button className="new-chat-btn" onClick={newChat}>
+            <button className="new-chat-btn" onClick={handleNewChat}>
               + New Chat
             </button>
           </div>

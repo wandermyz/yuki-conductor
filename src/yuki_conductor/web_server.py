@@ -33,7 +33,7 @@ from yuki_conductor.messaging.web_platform import (
     resolve_file,
     serialize_message,
 )
-from yuki_conductor.store import SessionStore
+from yuki_conductor.store import ProjectStore, SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,7 @@ _WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 
 store = SessionStore()
 conv_store = ConversationStore()
+project_store = ProjectStore()
 ws_manager = ConnectionManager()
 
 
@@ -144,6 +145,72 @@ def create_api() -> FastAPI:
         if not store.delete_session(thread_ts):
             raise HTTPException(status_code=404, detail="Session not found")
         return {"ok": True}
+
+    # ── Project management endpoints ──────────────────────────────────────
+
+    class ProjectCreate(BaseModel):
+        name: str
+        path: str
+
+    @api.get("/api/projects")
+    def list_projects():
+        return project_store.list_all()
+
+    @api.post("/api/projects")
+    def add_project(body: ProjectCreate):
+        project_store.add(body.name, body.path)
+        return {"ok": True, "name": body.name, "path": body.path}
+
+    @api.delete("/api/projects/{name}")
+    def remove_project(name: str):
+        if not project_store.remove(name):
+            raise HTTPException(status_code=404, detail="Project not found")
+        return {"ok": True}
+
+    @api.get("/api/browse")
+    def browse_directory(path: str = Query(default="")):
+        """List directories under a given path for the folder picker."""
+        import platform as _platform
+
+        if not path:
+            # Return filesystem roots
+            if _platform.system() == "Windows":
+                import string
+                drives = []
+                for letter in string.ascii_uppercase:
+                    drive = f"{letter}:\\"
+                    if os.path.isdir(drive):
+                        drives.append({"name": f"{letter}:", "path": drive})
+                return {"path": "", "parent": None, "dirs": drives}
+            else:
+                return {"path": "/", "parent": None, "dirs": [
+                    {"name": d, "path": f"/{d}"}
+                    for d in sorted(os.listdir("/"))
+                    if os.path.isdir(f"/{d}") and not d.startswith(".")
+                ]}
+
+        resolved = os.path.abspath(os.path.expanduser(path))
+        if not os.path.isdir(resolved):
+            raise HTTPException(status_code=400, detail="Not a directory")
+
+        parent = os.path.dirname(resolved)
+        if parent == resolved:
+            parent = ""  # at root
+
+        try:
+            entries = sorted(os.listdir(resolved))
+        except PermissionError:
+            entries = []
+
+        dirs = []
+        for e in entries:
+            if e.startswith("."):
+                continue
+            full = os.path.join(resolved, e)
+            if os.path.isdir(full):
+                dirs.append({"name": e, "path": full})
+
+        return {"path": resolved, "parent": parent, "dirs": dirs}
 
     if sys.platform == "win32":
         @api.websocket("/ws/terminal/{session_key:path}")
@@ -283,6 +350,10 @@ def create_api() -> FastAPI:
             ws_manager.broadcast(conv_id, {"type": "title", "title": title})
 
         platform = WebPlatform(conv_store, ws_manager)
+        # Resolve working directory from conversation's project
+        msg_cwd = None
+        if conv.project:
+            msg_cwd = project_store.get_path(conv.project)
         msg = IncomingMessage(
             platform="web",
             conversation_key=conv_id,
@@ -292,6 +363,7 @@ def create_api() -> FastAPI:
             is_thread_start=is_thread_start,
             title_hint=user_msg.text[:80] if is_thread_start else None,
             model=body.model,
+            cwd=msg_cwd,
         )
 
         threading.Thread(

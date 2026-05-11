@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import Chat from "./chat/Chat";
+import ProjectsView from "./ProjectsView";
 import Terminal from "./Terminal";
 import "./App.css";
 
-type Tab = "sessions" | "chat";
+type Tab = "sessions" | "chat" | "projects";
 
 interface Session {
   thread_ts: string;
@@ -457,7 +458,8 @@ function SessionsView() {
 function App() {
   const [tab, setTab] = useState<Tab>(() => {
     const saved = window.localStorage.getItem("yuki-tab");
-    return saved === "chat" ? "chat" : "sessions";
+    if (saved === "chat" || saved === "sessions" || saved === "projects") return saved;
+    return "chat";
   });
 
   useEffect(() => {
@@ -467,7 +469,7 @@ function App() {
   return (
     <div className="root">
       <div className="tab-content">
-        {tab === "chat" ? <Chat /> : <SessionsView />}
+        {tab === "chat" ? <Chat /> : tab === "projects" ? <ProjectsView /> : <SessionsView />}
       </div>
       <nav className="tabbar" role="tablist">
         <button
@@ -489,6 +491,26 @@ function App() {
             <path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z" />
           </svg>
           <span className="tab-label">Chat</span>
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "projects"}
+          className={`tab ${tab === "projects" ? "active" : ""}`}
+          onClick={() => setTab("projects")}
+        >
+          <svg
+            className="tab-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+          <span className="tab-label">Projects</span>
         </button>
         <button
           role="tab"

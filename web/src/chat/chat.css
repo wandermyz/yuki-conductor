@@ -737,6 +737,64 @@
   background: #c92a2a;
 }
 
+.chat-list-project {
+  font-size: 10px;
+  background: var(--accent-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--text);
+  flex-shrink: 0;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+/* ---- Project picker modal ---- */
+
+.project-picker {
+  min-width: 340px;
+  max-width: 440px;
+}
+
+.project-picker-list {
+  list-style: none;
+  margin: 0 0 12px 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.project-picker-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s;
+  color: inherit;
+  font: inherit;
+}
+
+.project-picker-item:hover {
+  background: var(--accent-bg);
+}
+
+.project-picker-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+.project-picker-path {
+  font-size: 11px;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--text);
+}
+
 /* ---- Mobile (<= 640px) ---- */
 
 @media (max-width: 640px) {
