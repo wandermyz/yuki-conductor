@@ -471,15 +471,18 @@ def create_api() -> FastAPI:
         finally:
             ws_manager.remove(websocket)
 
-    # Serve the React frontend (if built)
+    return api
+
+
+def mount_static(api: FastAPI) -> None:
+    """Mount the React frontend static files. Call after all API routes are registered."""
     if _WEB_DIST.is_dir():
         api.mount("/", StaticFiles(directory=str(_WEB_DIST), html=True), name="static")
-
-    return api
 
 
 # Module-level app for `uvicorn yuki_conductor.web_server:app`
 app = create_api()
+mount_static(app)
 
 
 def start_web_server() -> FastAPI:

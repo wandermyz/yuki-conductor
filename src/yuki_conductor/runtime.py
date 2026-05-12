@@ -101,7 +101,7 @@ def start() -> None:
         platforms_by_name[rec.platform.name] = rec.platform
 
     from yuki_conductor.cron_scheduler import start_cron_scheduler
-    from yuki_conductor.web_server import set_receivers, start_web_server
+    from yuki_conductor.web_server import mount_static, set_receivers, start_web_server
 
     set_receivers(receivers)
     web_app = start_web_server()
@@ -110,6 +110,10 @@ def start() -> None:
     for rec in receivers:
         if hasattr(rec, "register_api_routes"):
             rec.register_api_routes(web_app)
+
+    mount_static(web_app)
+
+    for rec in receivers:
         rec.start()
 
     for rec in receivers:
