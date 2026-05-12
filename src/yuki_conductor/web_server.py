@@ -37,6 +37,13 @@ from yuki_conductor.store import ProjectStore, SessionStore
 
 logger = logging.getLogger(__name__)
 
+_receivers: list = []
+
+
+def set_receivers(receivers: list) -> None:
+    global _receivers
+    _receivers = receivers
+
 WEB_PORT = int(os.environ.get("WEB_PORT", "2333"))
 SLACK_WORKSPACE = os.environ.get("SLACK_WORKSPACE", "wandermyz")
 
@@ -56,6 +63,16 @@ def _slack_thread_url(channel_id: str, thread_ts: str) -> str:
 
 def create_api() -> FastAPI:
     api = FastAPI(title="Agent Conductor")
+
+    @api.get("/api/status")
+    def plugin_status():
+        result = {}
+        for rec in _receivers:
+            try:
+                result[rec.name] = rec.status()
+            except Exception as exc:
+                result[rec.name] = {"status": "error", "message": str(exc)}
+        return result
 
     @api.get("/api/sessions")
     def list_sessions(days: int = Query(default=7, ge=1, le=365)):
@@ -465,8 +482,8 @@ def create_api() -> FastAPI:
 app = create_api()
 
 
-def start_web_server() -> None:
-    """Start the web server in a daemon thread (non-blocking)."""
+def start_web_server() -> FastAPI:
+    """Start the web server in a daemon thread (non-blocking). Returns the app."""
     app = create_api()
 
     def _run():
@@ -475,3 +492,4 @@ def start_web_server() -> None:
     thread = threading.Thread(target=_run, daemon=True, name="web-server")
     thread.start()
     logger.info(f"Web server started on port {WEB_PORT}")
+    return app

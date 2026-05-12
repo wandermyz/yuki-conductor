@@ -40,6 +40,11 @@ def main(argv: list[str] | None = None) -> None:
         help="Rebuild the frontend (hot-reload without restarting the daemon)",
     )
 
+    import importlib.metadata
+    for ep in importlib.metadata.entry_points(group="yuki_conductor.cli_plugins"):
+        register_fn = ep.load()
+        register_fn(sub)
+
     args = parser.parse_args(argv)
 
     if args.command is None:

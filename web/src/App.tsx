@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import Chat from "./chat/Chat";
 import ProjectsView from "./ProjectsView";
+import StatusView from "./StatusView";
 import Terminal from "./Terminal";
 import "./App.css";
 
-type Tab = "sessions" | "chat" | "projects";
+type Tab = "sessions" | "chat" | "projects" | "status";
 
 interface Session {
   thread_ts: string;
@@ -461,9 +462,10 @@ function parseHash(): { tab: Tab; chatId: string | null } {
   if (hash === "chat") return { tab: "chat", chatId: null };
   if (hash === "sessions") return { tab: "sessions", chatId: null };
   if (hash === "projects") return { tab: "projects", chatId: null };
+  if (hash === "status") return { tab: "status", chatId: null };
   // Fall back to localStorage for users without a hash yet
   const saved = window.localStorage.getItem("yuki-tab");
-  if (saved === "chat" || saved === "sessions" || saved === "projects") return { tab: saved, chatId: null };
+  if (saved === "chat" || saved === "sessions" || saved === "projects" || saved === "status") return { tab: saved, chatId: null };
   return { tab: "chat", chatId: null };
 }
 
@@ -498,7 +500,7 @@ function App() {
   return (
     <div className="root">
       <div className="tab-content">
-        {tab === "chat" ? <Chat selectedId={chatId} onSelectId={setChatId} /> : tab === "projects" ? <ProjectsView /> : <SessionsView />}
+        {tab === "chat" ? <Chat selectedId={chatId} onSelectId={setChatId} /> : tab === "projects" ? <ProjectsView /> : tab === "status" ? <StatusView /> : <SessionsView />}
       </div>
       <nav className="tabbar" role="tablist">
         <button
@@ -562,6 +564,27 @@ function App() {
             <path d="M8 4v5" />
           </svg>
           <span className="tab-label">Sessions</span>
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "status"}
+          className={`tab ${tab === "status" ? "active" : ""}`}
+          onClick={() => setTab("status")}
+        >
+          <svg
+            className="tab-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 6v6l4 2" />
+          </svg>
+          <span className="tab-label">Status</span>
         </button>
       </nav>
     </div>

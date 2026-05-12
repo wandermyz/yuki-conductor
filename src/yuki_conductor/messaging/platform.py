@@ -88,3 +88,7 @@ class ChatAppReceiver(Protocol):
     def stop(self) -> None:
         """Gracefully shut down (close connections, stop subprocesses)."""
         ...
+
+    def status(self) -> dict:
+        """Return plugin status. Keys: status (ok|error|auth_pending|stopped), message (str), details (optional dict)."""
+        ...
