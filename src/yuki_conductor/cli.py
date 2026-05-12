@@ -112,6 +112,8 @@ def main(argv: list[str] | None = None) -> None:
                 if not success:
                     sys.exit(1)
                 print("Frontend rebuilt. Restart the daemon to serve the new assets.")
+    elif hasattr(args, "func"):
+        args.func(args)
 
 
 if __name__ == "__main__":
