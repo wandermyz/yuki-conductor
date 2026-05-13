@@ -59,6 +59,11 @@ class MessagingPlatform(Protocol):
         """Persist the Claude session id (and optional initial title) for resume."""
         ...
 
+    def send_notification(self, text: str) -> None:
+        """Send a one-off notification (e.g. daemon restart) to the platform's
+        default notification channel. Best-effort — failures are logged, not raised."""
+        ...
+
     def start_thread(self, text: str, title: str | None = None) -> str:
         """Open a new conversation thread with an initial message and return its key.
 

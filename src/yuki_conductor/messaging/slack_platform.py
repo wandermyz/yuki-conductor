@@ -4,7 +4,7 @@ import logging
 import urllib.request
 from pathlib import Path
 
-from yuki_conductor.config import UPLOADS_DIR, slack_cron_channel
+from yuki_conductor.config import UPLOADS_DIR, slack_app_dm_channel, slack_cron_channel
 from yuki_conductor.formatting import markdown_to_mrkdwn
 from yuki_conductor.messaging.platform import Attachment, OutgoingMessage
 
@@ -89,6 +89,15 @@ class SlackPlatform:
         from yuki_conductor.store import SessionStore
 
         return SessionStore().get_channel(thread_ts)
+
+    def send_notification(self, text: str) -> None:
+        try:
+            self._client.chat_postMessage(
+                channel=slack_app_dm_channel(),
+                text=markdown_to_mrkdwn(text),
+            )
+        except Exception:
+            logger.warning("Failed to send Slack notification", exc_info=True)
 
     def start_thread(self, text: str, title: str | None = None) -> str:
         """Post a top-level message to the cron channel and return its `ts`."""

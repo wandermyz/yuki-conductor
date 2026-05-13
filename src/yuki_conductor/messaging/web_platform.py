@@ -171,6 +171,9 @@ class WebPlatform:
             conversation_key, claude_session_id=session_id
         )
 
+    def send_notification(self, text: str) -> None:
+        self._manager.broadcast_all({"type": "notification", "text": text})
+
     def start_thread(self, text: str, title: str | None = None) -> str:
         """Create a fresh web conversation seeded with `text` as the first
         assistant message, and return its id."""

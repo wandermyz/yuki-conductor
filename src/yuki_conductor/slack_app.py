@@ -18,7 +18,6 @@ from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import (
     CLAUDE_BIN,
     CLAUDE_WORKING_DIR,
-    slack_app_dm_channel,
     slack_app_token,
     slack_bot_token,
 )
@@ -242,27 +241,6 @@ class SlackSocketReceiver:
     def start(self) -> None:
         logger.info("Connection watchdog installed")
         logger.info("Starting Slack Socket Mode receiver...")
-        self._post_restart_notification()
         threading.Thread(
             target=self._handler.start, name="slack-socket", daemon=True
         ).start()
-
-    def _post_restart_notification(self) -> None:
-        try:
-            commit = (
-                subprocess.run(
-                    ["git", "rev-parse", "--short", "HEAD"],
-                    cwd=CLAUDE_WORKING_DIR,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                ).stdout.strip()
-                or "unknown"
-            )
-            self._app.client.chat_postMessage(
-                channel=slack_app_dm_channel(),
-                text=f":arrows_counterclockwise: yuki-conductor daemon restarted (commit `{commit}`).",
-            )
-        except Exception:
-            logger.warning("Failed to send restart notification", exc_info=True)
