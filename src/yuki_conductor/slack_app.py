@@ -237,6 +237,8 @@ class SlackSocketReceiver:
         self.platform = SlackPlatform(self._app.client, slack_bot_token())
         self._handler = SocketModeHandler(self._app, slack_app_token())
         self._handler.client.on_error_listeners.append(_connection_error_listener)
+        self._stopped = False
+        self._identity: dict[str, str] = {}
 
     def start(self) -> None:
         logger.info("Connection watchdog installed")
@@ -244,3 +246,57 @@ class SlackSocketReceiver:
         threading.Thread(
             target=self._handler.start, name="slack-socket", daemon=True
         ).start()
+
+    def on_startup_complete(self) -> None:
+        try:
+            auth = self._app.client.auth_test()
+            self._identity = {
+                "team": auth.get("team", ""),
+                "bot_user_id": auth.get("user_id", ""),
+            }
+            logger.info(
+                "Slack auth ok: team=%s bot=%s",
+                self._identity["team"],
+                self._identity["bot_user_id"],
+            )
+        except Exception:
+            logger.warning("Slack auth_test failed", exc_info=True)
+
+    def stop(self) -> None:
+        logger.info("Stopping Slack Socket Mode receiver...")
+        self._stopped = True
+        try:
+            self._handler.close()
+        except Exception:
+            logger.warning("Failed to close Slack Socket Mode handler", exc_info=True)
+
+    def status(self) -> dict:
+        details: dict = dict(self._identity)
+        details["recent_broken_pipes"] = len(_failures)
+
+        if self._stopped:
+            return {"status": "stopped", "message": "Receiver stopped", "details": details}
+
+        try:
+            connected = bool(self._handler.client.is_connected())
+        except Exception as exc:
+            return {
+                "status": "error",
+                "message": f"Could not read connection state: {exc}",
+                "details": details,
+            }
+
+        details["connected"] = connected
+        if connected:
+            team = self._identity.get("team")
+            suffix = f" to {team}" if team else ""
+            return {
+                "status": "ok",
+                "message": f"Socket Mode connected{suffix}",
+                "details": details,
+            }
+        return {
+            "status": "error",
+            "message": "Socket Mode not connected",
+            "details": details,
+        }
