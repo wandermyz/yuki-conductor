@@ -6,7 +6,7 @@ Bridge Slack messages to Claude Code CLI. Messages sent to the bot start a new C
 
 ### Prerequisites
 
-- macOS, or Windows 10/11 with PowerShell 7+ (foreground `run` only — daemon install is macOS-only for now; see [docs/plans/2026-05-02-windows-support.md](docs/plans/2026-05-02-windows-support.md))
+- macOS, or Windows 10/11 with PowerShell 7+ (both support `run` and `daemon install`)
 - [uv](https://docs.astral.sh/uv/) package manager
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 - A Slack workspace with admin access
@@ -46,8 +46,8 @@ Bridge Slack messages to Claude Code CLI. Messages sent to the bot start a new C
 
 ```
 yuki-conductor run                              # Start listener (foreground)
-yuki-conductor daemon install                   # Install + load LaunchAgent
-yuki-conductor daemon uninstall                 # Unload + remove LaunchAgent
+yuki-conductor daemon install                   # Install auto-start daemon (LaunchAgent on macOS, Task Scheduler on Windows)
+yuki-conductor daemon uninstall                 # Remove the daemon
 yuki-conductor daemon restart                   # Restart daemon
 yuki-conductor daemon status                    # Check if running
 yuki-conductor daemon log                       # Show log file paths + recent output
@@ -57,8 +57,7 @@ yuki-conductor simulate reply <ts> "follow up"  # Resume session
 
 ## Windows
 
-`yuki-conductor run` works on Windows; the macOS daemon installer
-(`yuki-conductor daemon ...`) does not. Use PowerShell:
+`yuki-conductor run` works on Windows. Use PowerShell:
 
 ```powershell
 mkdir $env:USERPROFILE\.yuki-conductor
@@ -66,6 +65,22 @@ copy .env.template $env:USERPROFILE\.yuki-conductor\.env
 # Edit the .env in your editor of choice
 uv run yuki-conductor run
 ```
+
+To run it as a background daemon that auto-starts at login, install it as a
+per-user Scheduled Task (the Windows equivalent of the macOS LaunchAgent):
+
+```powershell
+uv run yuki-conductor daemon install     # Register + start the "YukiConductor" task
+uv run yuki-conductor daemon status      # Check whether it's running
+uv run yuki-conductor daemon restart     # Rebuild the frontend + restart
+uv run yuki-conductor daemon uninstall   # Remove the task
+```
+
+The task uses a Logon trigger with `RestartOnFailure`, runs in your user
+session (so uv, claude, and your `.env` are all available), and needs no admin
+elevation. It launches `bin/yuki-conductor-daemon.ps1`, which redirects
+stdout/stderr to `daemon.log` / `daemon.err.log` in your data dir. Because the
+trigger is at logon, the daemon only runs while you are logged in.
 
 Caveats:
 
@@ -75,9 +90,6 @@ Caveats:
 - If your `%USERPROFILE%` is redirected into OneDrive, set
   `YUKI_CONDUCTOR_DATA_DIR` to a non-synced path to avoid SQLite
   corruption.
-
-A Windows-native daemon (Task Scheduler-based) is planned — see
-[docs/plans/2026-05-02-windows-support.md](docs/plans/2026-05-02-windows-support.md).
 
 ## Development
 

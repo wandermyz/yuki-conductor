@@ -64,7 +64,20 @@ Required env var (only when `slack_socket` is enabled): `SLACK_CRON_CHANNEL` —
 
 ## Daemon Management
 
-On Windows, there is no LaunchAgent/daemon management. To restart the daemon, find the running `yuki-conductor` process, kill it, and spawn a new one in the background:
+The `daemon` subcommand (`install`/`uninstall`/`restart`/`status`/`log`) is
+dispatched by platform in `daemon.py`:
+
+- macOS (`daemon_macos.py`) — a per-user LaunchAgent (`launchctl` + plist).
+- Windows (`daemon_windows.py`) — a per-user Task Scheduler task
+  (`schtasks` + a Logon-triggered task named `YukiConductor`) that launches
+  `bin/yuki-conductor-daemon.ps1`. No admin elevation required; runs only
+  while the user is logged in.
+
+Shared helpers (uv discovery, web build, log tailing) live in
+`daemon_common.py`.
+
+To restart the Windows daemon manually instead of via the task, find the
+running `yuki-conductor` process, kill it, and spawn a new one:
 
 ```
 # Find and kill

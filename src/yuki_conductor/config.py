@@ -8,8 +8,6 @@ from dotenv import load_dotenv
 DATA_DIR = Path(os.environ.get("YUKI_CONDUCTOR_DATA_DIR", Path.home() / ".yuki-conductor"))
 LOG_FILE = DATA_DIR / "daemon.log"
 ERR_LOG_FILE = DATA_DIR / "daemon.err.log"
-PLIST_LABEL = "com.user.yuki-conductor"
-PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{PLIST_LABEL}.plist"
 
 # .env lives next to the data dir (gitignored, contains secrets).
 load_dotenv(DATA_DIR / ".env", override=True)
