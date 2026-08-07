@@ -192,9 +192,9 @@ function ConvMenu({
   );
 }
 
-function MessageBubble({ msg }: { msg: ChatMessage }) {
+function MessageBubble({ msg, onRetry }: { msg: ChatMessage; onRetry: (msg: ChatMessage) => void }) {
   return (
-    <div className={`bubble ${msg.role}`}>
+    <div className={`bubble ${msg.role} ${msg.status ? `msg-${msg.status}` : ""}`}>
       {msg.text && (
         <div className="bubble-text markdown">
           <ReactMarkdown
@@ -224,7 +224,22 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           )}
         </div>
       )}
-      <div className="bubble-time">{formatTime(msg.created_at)}</div>
+      <div className="bubble-time">
+        {formatTime(msg.created_at)}
+        {msg.status === "sending" && <span className="msg-status"> · Sending…</span>}
+        {msg.status === "failed" && (
+          <span className="msg-status msg-status-failed">
+            {" "}· Not sent{" "}
+            <button
+              type="button"
+              className="msg-retry-btn"
+              onClick={() => onRetry(msg)}
+            >
+              Retry
+            </button>
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -385,6 +400,7 @@ function ChatThread({
   status,
   onBack,
   onSend,
+  onRetry,
   onStop,
   onShowSessionId,
   onSetStatus,
@@ -396,6 +412,7 @@ function ChatThread({
   status: ConvStatus;
   onBack: () => void;
   onSend: (text: string, files: AttachmentRef[]) => void;
+  onRetry: (msg: ChatMessage) => void;
   onStop: () => void;
   onShowSessionId: () => void;
   onSetStatus: (s: ConvStatus) => void;
@@ -454,7 +471,7 @@ function ChatThread({
           <p className="chat-empty">Send a message to start the conversation.</p>
         )}
         {messages.map((m) => (
-          <MessageBubble key={m.id} msg={m} />
+          <MessageBubble key={m.id} msg={m} onRetry={onRetry} />
         ))}
         {processing && (
           <div className="responding-shimmer">Claude is responding…</div>
@@ -509,7 +526,16 @@ export default function Chat({
           setMessagesByConv((prev) => {
             const msgs = prev[cid] || [];
             if (msgs.find((m) => m.id === e.message.id)) return prev;
-            return { ...prev, [cid]: [...msgs, e.message] };
+            // Reconcile any local optimistic placeholder for this same user
+            // message (matched by text) so it isn't shown twice.
+            const pruned =
+              e.message.role === "user"
+                ? msgs.filter(
+                    (m) =>
+                      !(m.id.startsWith("local-") && m.text === e.message.text),
+                  )
+                : msgs;
+            return { ...prev, [cid]: [...pruned, e.message] };
           });
           // Mark as unread if this is an assistant message and the conversation is not currently selected
           if (e.message.role === "assistant" && selectedRef.current !== cid) {
@@ -616,21 +642,57 @@ export default function Chat({
   };
 
   const handleSend = async (convId: string, text: string, files: AttachmentRef[]) => {
+    // Optimistically render the message immediately so nothing typed is lost,
+    // even if the network request fails. A temp id lets us update/dedupe later.
+    const tempId = `local-${crypto.randomUUID()}`;
+    const optimistic: ChatMessage = {
+      id: tempId,
+      conversation_id: convId,
+      role: "user",
+      text,
+      attachments: files,
+      created_at: Date.now() / 1000,
+      status: "sending",
+    };
+    setMessagesByConv((prev) => ({
+      ...prev,
+      [convId]: [...(prev[convId] || []), optimistic],
+    }));
+
     try {
       const userMsg = await sendMessage(
         convId,
         text,
         files.map((f) => f.id),
       );
-      // Optimistic render; WS will also broadcast — dedupe by id.
+      // Replace the optimistic placeholder with the server message. The WS
+      // broadcast may also deliver it — dedupe by real id.
       setMessagesByConv((prev) => {
-        const msgs = prev[convId] || [];
-        if (msgs.find((m) => m.id === userMsg.id)) return prev;
+        const msgs = (prev[convId] || []).filter((m) => m.id !== tempId);
+        if (msgs.find((m) => m.id === userMsg.id)) {
+          return { ...prev, [convId]: msgs };
+        }
         return { ...prev, [convId]: [...msgs, userMsg] };
       });
     } catch (e) {
       console.error(e);
+      // Keep the message visible and flag it as not sent so it can be retried.
+      setMessagesByConv((prev) => ({
+        ...prev,
+        [convId]: (prev[convId] || []).map((m) =>
+          m.id === tempId ? { ...m, status: "failed" } : m,
+        ),
+      }));
     }
+  };
+
+  const handleRetry = (convId: string, msg: ChatMessage) => {
+    // Drop the failed placeholder and re-send its contents.
+    setMessagesByConv((prev) => ({
+      ...prev,
+      [convId]: (prev[convId] || []).filter((m) => m.id !== msg.id),
+    }));
+    handleSend(convId, msg.text, msg.attachments);
   };
 
   const selectConv = (id: string) => {
@@ -768,6 +830,7 @@ export default function Chat({
             status={getStatus(statuses, active.id)}
             onBack={() => setSelected(null)}
             onSend={(text, files) => handleSend(active.id, text, files)}
+            onRetry={(msg) => handleRetry(active.id, msg)}
             onStop={() => cancelProcessing(active.id).catch(console.error)}
             onShowSessionId={() => setSessionIdModal(active.claude_session_id || "(no session yet)")}
             onSetStatus={(s) => setStatus(active.id, s)}

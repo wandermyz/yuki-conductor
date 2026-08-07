@@ -589,6 +589,33 @@
   text-align: right;
 }
 
+.bubble.msg-sending {
+  opacity: 0.6;
+}
+
+.bubble.msg-failed {
+  opacity: 0.9;
+}
+
+.msg-status {
+  opacity: 0.9;
+}
+
+.msg-status-failed {
+  color: #ffb4b4;
+  opacity: 1;
+}
+
+.msg-retry-btn {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+
 .responding-shimmer {
   align-self: flex-start;
   font-size: 14px;

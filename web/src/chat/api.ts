@@ -22,6 +22,9 @@ export interface ChatMessage {
   text: string;
   attachments: AttachmentRef[];
   created_at: number;
+  /** Client-only delivery state for optimistic user messages. Absent on
+   *  server-confirmed messages (treated as delivered). */
+  status?: "sending" | "failed";
 }
 
 export type WSEvent =
