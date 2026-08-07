@@ -1,0 +1,7 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "yuki-conductor",
+  "version": "0.1.0",
+  "description": "Skills injected by yuki-conductor into the Claude Code sessions it spawns, teaching it to use yuki-conductor's own cron scheduler and messaging surfaces.",
+  "skills": ["./skills"]
+}

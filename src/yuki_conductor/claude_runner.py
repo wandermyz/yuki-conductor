@@ -7,7 +7,8 @@ import subprocess
 import threading
 from dataclasses import dataclass
 
-from yuki_conductor.config import CLAUDE_BIN, CLAUDE_TIMEOUT, CLAUDE_WORKING_DIR
+from yuki_conductor.config import CLAUDE_BIN, CLAUDE_TIMEOUT, CLAUDE_WORKING_DIR, project_dir
+from yuki_conductor.skills import SYSTEM_PROMPT, skill_plugin_dirs
 
 SLACK_MESSAGE_LIMIT = 4000
 
@@ -113,7 +114,10 @@ def run_claude(
         "-p",
         "--dangerously-skip-permissions",
         "--output-format", "json",
+        "--append-system-prompt", SYSTEM_PROMPT,
     ]
+    for plugin_dir in skill_plugin_dirs():
+        args.extend(["--plugin-dir", plugin_dir])
     if model:
         args.extend(["--model", model])
     if session_id:
@@ -130,6 +134,8 @@ def run_claude(
 
     # Unset CLAUDECODE to avoid nested session errors
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    # Let injected skills locate the yuki-conductor project (e.g. to run its CLI).
+    env["YUKI_CONDUCTOR_PROJECT"] = str(project_dir())
 
     effective_timeout = timeout if timeout is not None else CLAUDE_TIMEOUT
 

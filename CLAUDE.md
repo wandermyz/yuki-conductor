@@ -8,6 +8,7 @@ src/yuki_conductor/
   config.py         — env loading, path constants, CHAT_APPS parsing
   store.py          — SQLite-backed session & model stores
   claude_runner.py  — subprocess wrapper for claude CLI
+  skills.py         — Claude Code skill-plugin injection for spawned sessions
   runtime.py        — process orchestrator (starts receivers + web + cron)
   slack_app.py      — Slack Bolt handlers + SlackSocketReceiver
   messaging/        — platform-agnostic messaging core
@@ -19,6 +20,8 @@ src/yuki_conductor/
   daemon.py         — macOS LaunchAgent management
   web_server.py     — FastAPI HTTP server (agent conductor web UI)
 web/                — React + Vite frontend (pnpm, TypeScript)
+plugins/
+  yuki-conductor/   — Claude Code plugin bundled in this repo (cron skill)
 ```
 
 ## Workspace
@@ -44,6 +47,27 @@ The daemon's chat surfaces are selected by `CHAT_APPS` (comma-separated):
 - empty / `none` — no chat receivers. Web server and cron scheduler still run; cron notifications are logged instead of posted.
 
 Multiple values may be combined: `CHAT_APPS=slack_socket,my_plugin`. Each session is platform-tagged so replies always route back to the originating chat app.
+
+## Skill Injection
+
+yuki-conductor spawns headless `claude -p` runs whose working directory often
+points at some other project. To teach those runs about yuki-conductor's own
+capabilities (cron scheduling, connected messaging surfaces), `claude_runner.py`
+injects Claude Code **plugins** per-session via `--plugin-dir`, plus an
+`--append-system-prompt` ("You are running as an agent spawned by
+yuki-conductor…"). Because these are session-scoped, they are invisible when the
+user runs Claude Code directly — nothing is written to `~/.claude/skills`.
+
+`skills.py` collects the plugin dirs:
+
+- the bundled `plugins/yuki-conductor` plugin (the cron skill);
+- any dirs contributed by installed packages through the
+  `yuki_conductor.skill_plugins` entry-point group (each entry point is a
+  zero-arg callable returning a plugin dir path). This lets an installed chat
+  plugin ship its own skill without this public repo naming it.
+
+The spawned run also gets `YUKI_CONDUCTOR_PROJECT` in its env so injected skills
+can locate and invoke the yuki-conductor CLI.
 
 ## Cron Scheduler
 
