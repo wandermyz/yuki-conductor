@@ -21,7 +21,7 @@ class CronTask:
     schedule: str
     description: str
     prompt: str
-    chat_app: str | None = None  # "slack" | "teams_cli" | None (default routing)
+    chat_app: str | None = None  # "slack" | plugin name | None (default routing)
 
 
 def _ensure_workspace() -> None:
@@ -207,7 +207,7 @@ def start_cron_scheduler(
     The scheduler reloads ~/.yuki-conductor/workspace/cron.yaml every 30 seconds, so changes
     take effect without restarting the daemon.
 
-    `platforms_by_name` maps a platform name (e.g. "slack", "teams_cli") to
+    `platforms_by_name` maps a platform name (e.g. "slack") to
     its `MessagingPlatform`. Pass an empty dict / None to run cron without
     any chat-app delivery (notifications are logged instead).
 

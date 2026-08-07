@@ -2,7 +2,7 @@
 
 ## Problem
 
-yuki-conductor currently has two chat platform implementations: a working Slack integration and a placeholder Teams CLI adapter. Supporting new platforms — especially company-internal ones backed by MCP servers — requires a design where:
+yuki-conductor currently has two chat platform implementations: a working Slack integration and a placeholder external-CLI adapter. Supporting new platforms — especially company-internal ones backed by MCP servers — requires a design where:
 
 1. Platform-specific implementation details live in **separate repositories**, not in yuki-conductor.
 2. Plugins can wrap an MCP server process and expose it as a standard chat platform.
@@ -14,7 +14,7 @@ yuki-conductor currently has two chat platform implementations: a working Slack 
 conversation.py (orchestrator)
     ↕ uses MessagingPlatform protocol
     ├── SlackPlatform       (built-in)
-    ├── TeamsCliPlatform    (built-in, placeholder)
+    ├── ExternalCliPlatform (built-in, placeholder)
     └── WebPlatform         (built-in, always on)
 ```
 
@@ -74,7 +74,7 @@ conversation.py (orchestrator, unchanged)
     ├── WebPlatform             (built-in, always on)
     ├── McpBridgePlatform       (built-in generic bridge)
     │     ↕ MCP client (stdio)
-    │     └── external-mcp-server  (installed separately, e.g. teams-mcp-server)
+    │     └── external-mcp-server  (installed separately, e.g. chat-mcp-server)
     └── [any future plugin via entry point]
 ```
 
@@ -87,7 +87,7 @@ Plugins register themselves using the standard `[project.entry-points]` mechanis
 ```toml
 # In the external plugin's pyproject.toml
 [project.entry-points."yuki_conductor.chat_plugins"]
-teams_mcp = "teams_mcp_plugin:create_receiver"
+example_mcp = "example_mcp_plugin:create_receiver"
 ```
 
 yuki-conductor discovers plugins at startup by iterating `importlib.metadata.entry_points(group="yuki_conductor.chat_plugins")`. Each entry point resolves to a factory function:
@@ -99,8 +99,8 @@ def create_receiver(store: SessionStore, model_store: ModelStore) -> ChatAppRece
 
 This means:
 - No source code from the plugin needs to exist in this repo.
-- Users install the plugin package into the same environment (`uv pip install teams-mcp-plugin`).
-- `CHAT_APPS=teams_mcp` activates the plugin by matching the entry point name.
+- Users install the plugin package into the same environment (`uv pip install example-mcp-plugin`).
+- `CHAT_APPS=example_mcp` activates the plugin by matching the entry point name.
 
 **2. `CHAT_APPS` becomes open-ended**
 
@@ -108,8 +108,7 @@ Currently `ChatApp` is a `StrEnum` with fixed members. Change this:
 
 - `slack_socket` and `web` remain as known built-in values.
 - Any other value in `CHAT_APPS` is looked up in the entry point registry.
-- Remove `teams_cli` as a built-in. It becomes the first external plugin.
-- Unknown names (not built-in, not in registry) raise a clear startup error.
+- Remove `teams_cli` as a built-in. It becomes the first external plugin.- Unknown names (not built-in, not in registry) raise a clear startup error.
 
 ```python
 # config.py
@@ -206,21 +205,21 @@ The bridge auto-detects the delivery model: if the server sends `new_message` no
 **MCP Bridge configuration** lives in the plugin's entry point factory or in `~/.yuki-conductor/.env`:
 
 ```env
-# Example: external teams plugin configured via env
-CHAT_APPS=teams_mcp
-TEAMS_MCP_SERVER_CMD=teams-mcp-server --team-id ABC --channel-id XYZ
+# Example: external chat plugin configured via env
+CHAT_APPS=example_mcp
+EXAMPLE_MCP_SERVER_CMD=example-mcp-server --team-id ABC --channel-id XYZ
 ```
 
 The plugin's `create_receiver` factory reads its own env vars and returns a configured `McpBridgeReceiver`:
 
 ```python
-# In the external teams-mcp-plugin package
+# In the external example-mcp-plugin package
 from yuki_conductor.messaging.mcp_bridge import McpBridgeReceiver
 
 def create_receiver(store, model_store):
     return McpBridgeReceiver(
-        name="teams_mcp",
-        server_cmd=os.environ["TEAMS_MCP_SERVER_CMD"].split(),
+        name="example_mcp",
+        server_cmd=os.environ["EXAMPLE_MCP_SERVER_CMD"].split(),
         store=store,
         poll_interval=5,
     )

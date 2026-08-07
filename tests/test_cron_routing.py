@@ -49,7 +49,7 @@ def test_pick_platform_explicit_match():
 
 def test_pick_platform_explicit_missing_skips():
     slack = FakePlatform("slack")
-    assert _pick_platform(_task(chat_app="teams_mcp"), {"slack": slack}) is None
+    assert _pick_platform(_task(chat_app="other_plugin"), {"slack": slack}) is None
 
 
 def test_pick_platform_slack_socket_alias():
@@ -116,7 +116,7 @@ def test_run_cron_task_explicit_missing_app_is_skipped():
     fake_result = ClaudeResult(text="x <notify>", session_id="sess-1")
 
     with patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result):
-        _run_cron_task(_task(chat_app="teams_mcp"), {"slack": slack})
+        _run_cron_task(_task(chat_app="other_plugin"), {"slack": slack})
 
     assert slack.threads == []
 

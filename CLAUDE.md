@@ -14,7 +14,6 @@ src/yuki_conductor/
     platform.py        — MessagingPlatform / ChatAppReceiver Protocols + types
     conversation.py    — handle_incoming_message: shared run_claude orchestration
     slack_platform.py  — Slack adapter
-    teams_cli_platform.py — Teams CLI adapter (placeholder until binary lands)
     web_platform.py    — Web chat adapter
   cron_scheduler.py — cron task scheduler (reads ~/.yuki-conductor/workspace/cron.yaml)
   daemon.py         — macOS LaunchAgent management
@@ -38,14 +37,17 @@ Key files:
 The daemon's chat surfaces are selected by `CHAT_APPS` (comma-separated):
 
 - `slack_socket` (default) — slack-bolt Socket Mode using `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN`.
-- `teams_cli` — Microsoft Teams via the (in-development) `teams-cli` binary. Currently a placeholder receiver: outbound messages log only.
+- any other name — resolved as an installed chat-app plugin via the
+  `yuki_conductor.chat_plugins` entry-point group (see
+  `docs/plans/chat-plugin-architecture.md`). Plugins live in separate packages;
+  install one into the same environment and enable it by its entry-point name.
 - empty / `none` — no chat receivers. Web server and cron scheduler still run; cron notifications are logged instead of posted.
 
-Multiple values may be combined: `CHAT_APPS=slack_socket,teams_cli`. Each session is platform-tagged so replies always route back to the originating chat app.
+Multiple values may be combined: `CHAT_APPS=slack_socket,my_plugin`. Each session is platform-tagged so replies always route back to the originating chat app.
 
 ## Cron Scheduler
 
-The daemon supports scheduled tasks via `~/.yuki-conductor/workspace/cron.yaml`. Each task specifies a cron expression, a description, a Claude prompt, and optionally `chat_app` (`slack_socket` or `teams_cli`) to control where the notification goes. When the cron fires, the routed platform opens a new thread and runs Claude Code with the prompt, posting the result. The thread is session-tracked, so follow-up replies in that thread continue the conversation.
+The daemon supports scheduled tasks via `~/.yuki-conductor/workspace/cron.yaml`. Each task specifies a cron expression, a description, a Claude prompt, and optionally `chat_app` (`slack_socket` or an installed chat plugin's name) to control where the notification goes. When the cron fires, the routed platform opens a new thread and runs Claude Code with the prompt, posting the result. The thread is session-tracked, so follow-up replies in that thread continue the conversation.
 
 Routing rule when `chat_app:` is omitted: pick the first enabled platform, with `slack` preferred. If `chat_app:` names a platform that isn't in `CHAT_APPS`, the task is skipped with a warning rather than misrouted.
 

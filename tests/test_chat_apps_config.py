@@ -25,18 +25,18 @@ def test_none_keyword(monkeypatch):
 
 
 def test_single_app(monkeypatch):
-    monkeypatch.setenv("CHAT_APPS", "teams_mcp")
-    assert chat_apps() == ["teams_mcp"]
+    monkeypatch.setenv("CHAT_APPS", "my_plugin")
+    assert chat_apps() == ["my_plugin"]
 
 
 def test_multiple_apps_preserves_order(monkeypatch):
-    monkeypatch.setenv("CHAT_APPS", "slack_socket,teams_mcp")
-    assert chat_apps() == ["slack_socket", "teams_mcp"]
+    monkeypatch.setenv("CHAT_APPS", "slack_socket,my_plugin")
+    assert chat_apps() == ["slack_socket", "my_plugin"]
 
 
 def test_whitespace_and_case(monkeypatch):
-    monkeypatch.setenv("CHAT_APPS", "  Slack_Socket , TEAMS_MCP  ")
-    assert chat_apps() == ["slack_socket", "teams_mcp"]
+    monkeypatch.setenv("CHAT_APPS", "  Slack_Socket , MY_PLUGIN  ")
+    assert chat_apps() == ["slack_socket", "my_plugin"]
 
 
 def test_arbitrary_plugin_names_accepted(monkeypatch):

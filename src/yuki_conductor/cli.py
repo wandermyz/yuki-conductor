@@ -7,7 +7,7 @@ import sys
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="yuki-conductor",
-        description="Bridge chat-app messages (Slack, Teams CLI, web) to Claude Code CLI",
+        description="Bridge chat-app messages (Slack, web, and plugins) to Claude Code CLI",
     )
     sub = parser.add_subparsers(dest="command")
 

@@ -69,8 +69,8 @@ class MessagingPlatform(Protocol):
 
         Used by the cron scheduler (and any other producer) to seed a thread
         the platform owns. Slack creates a top-level message and returns its
-        `thread_ts`; Teams CLI returns a fresh `teams:{uuid}`; web creates a
-        new conversation row.
+        `thread_ts`; web creates a new conversation row. A chat-app plugin
+        returns whatever conversation key it uses to route future replies.
         """
         ...
 
