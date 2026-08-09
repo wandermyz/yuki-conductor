@@ -107,7 +107,7 @@ def run_claude(
         prompt: The prompt text to send.
         session_id: Optional session ID to resume.
         timeout: Timeout in seconds (defaults to CLAUDE_TIMEOUT).
-        model: Optional model alias (e.g. "sonnet", "opus", "haiku").
+        model: Optional model alias (e.g. "opus", "opus[1m]", "sonnet").
         cwd: Working directory for claude. Defaults to CLAUDE_WORKING_DIR.
     """
     args = [

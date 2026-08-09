@@ -1,6 +1,8 @@
 """Configuration and path constants."""
 
 import os
+import shlex
+import subprocess
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -9,7 +11,53 @@ DATA_DIR = Path(os.environ.get("YUKI_CONDUCTOR_DATA_DIR", Path.home() / ".yuki-c
 LOG_FILE = DATA_DIR / "daemon.log"
 ERR_LOG_FILE = DATA_DIR / "daemon.err.log"
 
+# Claude Code auth/endpoint config, shared with interactive shells.
+CLAUDE_ENV_FILE = Path.home() / ".zshenv.d" / "claude.zsh"
+
+# Vars that always differ between a `zsh -f -c` child and this process; they
+# say nothing about what the sourced file set.
+_SHELL_NOISE_VARS = frozenset({"_", "SHLVL", "PWD", "OLDPWD"})
+
+
+def _load_claude_env() -> None:
+    """Import the vars exported by ``CLAUDE_ENV_FILE`` into ``os.environ``.
+
+    The LaunchAgent starts from launchd, which never reads zsh startup files,
+    so it would otherwise miss ANTHROPIC_AUTH_TOKEN and fall back to the login
+    keychain — which is locked on a rebooted machine with nobody logged in at
+    the console. The file is zsh rather than dotenv (it reads the token out of
+    ~/.yuki-conductor/.secrets), so run it under `zsh -f` and diff the
+    resulting environment instead of parsing it. Only this one file is
+    sourced — not the rest of .zshenv.d, and not .zshrc.
+
+    The endpoint is deliberately absent here: ANTHROPIC_BASE_URL lives in
+    ~/.claude/settings.json under "env", so Claude Code picks it up itself no
+    matter who spawned it.
+    """
+    if not CLAUDE_ENV_FILE.is_file():
+        return
+    try:
+        result = subprocess.run(
+            ["zsh", "-f", "-c", f"source {shlex.quote(str(CLAUDE_ENV_FILE))} && env -0"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"warning: could not load {CLAUDE_ENV_FILE}: {exc}")
+        return
+
+    for entry in result.stdout.split("\0"):
+        key, sep, value = entry.partition("=")
+        if sep and key not in _SHELL_NOISE_VARS and os.environ.get(key) != value:
+            os.environ[key] = value
+
+
+_load_claude_env()
+
 # .env lives next to the data dir (gitignored, contains secrets).
+# Loaded second so it can override the Claude env file when needed.
 load_dotenv(DATA_DIR / ".env", override=True)
 
 WORKSPACE_DIR = DATA_DIR / "workspace"

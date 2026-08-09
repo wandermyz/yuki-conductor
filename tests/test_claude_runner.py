@@ -36,6 +36,33 @@ def test_basic_call():
     assert "hi" in cmd_str
 
 
+def test_no_model_flag_when_unset():
+    """A channel with no pinned model must not get --model.
+
+    Omitting the flag is what lets the claude CLI apply its own default
+    (opus[1m]); passing an alias like "opus" resolves to the plain 200k
+    variant instead, silently giving up the 1M context window.
+    """
+    output = json.dumps({"result": "ok", "session_id": "s"})
+    mock_proc = _mock_popen(stdout=output)
+    with patch("subprocess.Popen", return_value=mock_proc) as mock_cls:
+        run_claude("hi", model=None)
+
+    cmd = mock_cls.call_args[0][0]
+    assert "--model" not in cmd
+
+
+def test_model_flag_when_pinned():
+    """Bracketed values must reach the CLI intact — they select the 1M variants."""
+    output = json.dumps({"result": "ok", "session_id": "s"})
+    mock_proc = _mock_popen(stdout=output)
+    with patch("subprocess.Popen", return_value=mock_proc) as mock_cls:
+        run_claude("hi", model="opus[1m]")
+
+    cmd = mock_cls.call_args[0][0]
+    assert cmd[cmd.index("--model") + 1] == "opus[1m]"
+
+
 def test_resume_session():
     output = json.dumps({"result": "Resumed!", "session_id": "sess_456"})
     mock_proc = _mock_popen(stdout=output)

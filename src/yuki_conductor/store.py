@@ -55,6 +55,19 @@ class _SqliteKVStore:
             finally:
                 con.close()
 
+    def clear(self, key: str) -> bool:
+        """Remove ``key``. Returns True if a row was actually deleted."""
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    f"DELETE FROM {self._table} WHERE key = ?", (key,)
+                )
+                con.commit()
+                return cur.rowcount > 0
+            finally:
+                con.close()
+
 
 class SessionStore:
     """Maps Slack thread_ts -> (session_id, channel_id, title).
@@ -394,4 +407,29 @@ class ProjectStore:
                 con.close()
 
 
-VALID_MODELS = {"sonnet", "opus", "haiku"}
+# /yuki-model argument -> value passed to `claude --model`.
+# The 1M-context variants are spelled without brackets because the command
+# arg is lowercased and "[1m]" is awkward to type in Slack; the resolved
+# value (with brackets) is what gets stored and passed to the CLI.
+#
+# Only models actually reachable through the configured ANTHROPIC_BASE_URL are
+# listed. Deliberately absent, both verified returning HTTP 400 against a
+# non-default endpoint:
+#   - haiku: Claude Code sends a dated model id (claude-haiku-4-5-20251001)
+#     that a gateway may publish only in undated form, so the ids never match
+#   - fable: not carried at all, so no gateway-side route fixes it
+# Both work against api.anthropic.com — re-add them if ANTHROPIC_BASE_URL ever
+# points back there.
+MODEL_ALIASES = {
+    "sonnet": "sonnet",
+    "sonnet1m": "sonnet[1m]",
+    "opus": "opus",
+    "opus1m": "opus[1m]",
+}
+
+# Passing no --model flag lets the claude CLI pick its own default, which is
+# whatever `model` is set to in ~/.claude/settings.json (currently opus[1m]).
+# The bare aliases resolve to the plain 200k variants, so pinning one silently
+# gives up the 1M context window — this is how a channel returns to the
+# CLI default.
+DEFAULT_MODEL_ARG = "default"

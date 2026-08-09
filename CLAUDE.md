@@ -29,7 +29,9 @@ plugins/
 The personal workspace lives outside the repo at `~/.yuki-conductor/` (override with `YUKI_CONDUCTOR_DATA_DIR`). This is where all personal information — cron task definitions, secrets, attachments, the SQLite DB — is stored. **Do not include any personal information in the repo itself** — anything in the repo can end up in git.
 
 Key files:
-- `~/.yuki-conductor/.env` — secrets and env overrides (loaded at startup)
+- `~/.yuki-conductor/.env` — secrets and env overrides (loaded at startup, overrides the Claude env file)
+- `~/.zshenv.d/claude.zsh` — exports `ANTHROPIC_AUTH_TOKEN` (read from `.secrets/claude-auth-token`), shared with interactive shells; `config.py` sources this one file under `zsh -f` at startup so the LaunchAgent authenticates the same way a terminal does. The endpoint is *not* here — `ANTHROPIC_BASE_URL` lives in `~/.claude/settings.json` under `env`, which applies to Claude Code only rather than every process that starts a zsh.
+- `~/.yuki-conductor/.secrets/` — one secret per file, mode 600 (referenced by the above; never in `workspace/`, which syncs to Obsidian)
 - `~/.yuki-conductor/workspace/yuki-conductor.db` — SQLite database for session and model tracking
 - `~/.yuki-conductor/workspace/cron.yaml` — Cron task definitions (see `cron.example.yaml` for format)
 - `~/.yuki-conductor/workspace/attachments/`, `uploads/` — runtime file storage

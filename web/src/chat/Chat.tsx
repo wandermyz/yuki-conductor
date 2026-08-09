@@ -98,15 +98,54 @@ function getStatus(statuses: Record<string, ConvStatus>, id: string): ConvStatus
   return statuses[id] ?? "read";
 }
 
+/* ---------- Insecure-context fallbacks ----------
+ *
+ * The web server binds 0.0.0.0 and is normally reached over plain HTTP at a
+ * Tailscale address, which is not a secure context. Secure-context-only APIs
+ * are undefined there rather than merely failing, so calling one throws and
+ * takes the whole handler with it. Only https:// and http://localhost get the
+ * real implementations.
+ */
+
+/** Local-only id for optimistic rendering: a dedupe key, not a security token. */
+function newTempId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `local-${crypto.randomUUID()}`;
+  }
+  return `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Copy to clipboard, falling back to a hidden textarea off secure contexts. */
+async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    if (!document.execCommand("copy")) {
+      throw new Error("copy command was rejected");
+    }
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
 /* ---------- Session ID Modal ---------- */
 
 function SessionIdModal({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    navigator.clipboard.writeText(sessionId).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
+    copyText(sessionId)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch((e) => console.error("copy failed", e));
   };
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -644,7 +683,7 @@ export default function Chat({
   const handleSend = async (convId: string, text: string, files: AttachmentRef[]) => {
     // Optimistically render the message immediately so nothing typed is lost,
     // even if the network request fails. A temp id lets us update/dedupe later.
-    const tempId = `local-${crypto.randomUUID()}`;
+    const tempId = newTempId();
     const optimistic: ChatMessage = {
       id: tempId,
       conversation_id: convId,

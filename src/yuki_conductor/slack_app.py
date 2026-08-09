@@ -28,7 +28,7 @@ from yuki_conductor.messaging.slack_platform import (
     SlackPlatform,
     download_slack_files,
 )
-from yuki_conductor.store import VALID_MODELS, ModelStore, SessionStore
+from yuki_conductor.store import DEFAULT_MODEL_ARG, MODEL_ALIASES, ModelStore, SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -44,20 +44,25 @@ def create_app() -> App:
         ack()
         channel = command["channel_id"]
         arg = command.get("text", "").strip().lower()
+        options = ", ".join([DEFAULT_MODEL_ARG, *MODEL_ALIASES])
 
         if not arg:
-            current = model_store.get(channel) or "default (set by CLI)"
-            models_list = ", ".join(sorted(VALID_MODELS))
-            respond(f"Current model: *{current}*\nUsage: `/yuki-model [{models_list}]`")
+            current = model_store.get(channel) or f"{DEFAULT_MODEL_ARG} (whatever the claude CLI is configured to use)"
+            respond(f"Current model: *{current}*\nUsage: `/yuki-model [{options}]`")
             return
 
-        if arg not in VALID_MODELS:
-            models_list = ", ".join(sorted(VALID_MODELS))
-            respond(f"Unknown model `{arg}`. Valid options: {models_list}")
+        if arg == DEFAULT_MODEL_ARG:
+            model_store.clear(channel)
+            respond("Model reset to the claude CLI default for this channel.")
             return
 
-        model_store.set(channel, arg)
-        respond(f"Model switched to *{arg}* for this channel.")
+        if arg not in MODEL_ALIASES:
+            respond(f"Unknown model `{arg}`. Valid options: {options}")
+            return
+
+        resolved = MODEL_ALIASES[arg]
+        model_store.set(channel, resolved)
+        respond(f"Model switched to *{resolved}* for this channel.")
 
     @app.command("/yuki-title")
     def handle_title_command(ack, command, respond):
