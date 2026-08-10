@@ -1,6 +1,7 @@
 """Slack adapter for the messaging platform protocol."""
 
 import logging
+import threading
 import urllib.request
 from pathlib import Path
 
@@ -12,6 +13,11 @@ logger = logging.getLogger(__name__)
 
 SESSION_TYPE = "slack"
 
+# Shimmering "<app name> is thinking..." line under the user's message. Slack drops
+# the status after two minutes of silence, so a background thread re-sets it.
+STATUS_TEXT = "is thinking..."
+STATUS_REFRESH_SECONDS = 60
+
 
 class SlackPlatform:
     """Implements MessagingPlatform on top of slack-bolt's Web API client."""
@@ -21,6 +27,8 @@ class SlackPlatform:
     def __init__(self, client, bot_token: str):
         self._client = client
         self._bot_token = bot_token
+        self._refreshers: dict[str, tuple[threading.Event, threading.Thread]] = {}
+        self._refreshers_lock = threading.Lock()
 
     def send(self, conversation_key: str, msg: OutgoingMessage) -> None:
         """Post a reply to a thread, uploading any attachments first."""
@@ -48,10 +56,66 @@ class SlackPlatform:
             )
 
     def set_processing(self, conversation_key: str, message_id: str, on: bool) -> None:
-        """Toggle the hourglass reaction on the source message."""
+        """Show the shimmering assistant status while Claude runs.
+
+        Falls back to an hourglass reaction if the status API is unavailable
+        (e.g. the app lacks the scope, or the thread isn't one Slack accepts).
+        """
         channel = self._lookup_channel(conversation_key)
         if channel is None:
             return
+
+        if on:
+            if self._set_status(channel, conversation_key, STATUS_TEXT):
+                self._start_status_refresh(channel, conversation_key)
+            else:
+                self._toggle_reaction(channel, message_id, on=True)
+            return
+
+        if self._stop_status_refresh(conversation_key):
+            # Posting the reply already clears the status; this covers runs that
+            # produced no message (errors, attachment-only replies that failed).
+            self._set_status(channel, conversation_key, "")
+        else:
+            self._toggle_reaction(channel, message_id, on=False)
+
+    def _set_status(self, channel: str, thread_ts: str, status: str) -> bool:
+        try:
+            self._client.assistant_threads_setStatus(
+                channel_id=channel, thread_ts=thread_ts, status=status
+            )
+            return True
+        except Exception:
+            logger.debug("Assistant status update failed", exc_info=True)
+            return False
+
+    def _start_status_refresh(self, channel: str, thread_ts: str) -> None:
+        stop = threading.Event()
+
+        def refresh() -> None:
+            while not stop.wait(STATUS_REFRESH_SECONDS):
+                if not self._set_status(channel, thread_ts, STATUS_TEXT):
+                    return
+
+        thread = threading.Thread(
+            target=refresh, name=f"slack-status-{thread_ts}", daemon=True
+        )
+        with self._refreshers_lock:
+            self._refreshers[thread_ts] = (stop, thread)
+        thread.start()
+
+    def _stop_status_refresh(self, thread_ts: str) -> bool:
+        """Stop the refresh loop. Returns False if this thread never had a status."""
+        with self._refreshers_lock:
+            entry = self._refreshers.pop(thread_ts, None)
+        if entry is None:
+            return False
+        stop, thread = entry
+        stop.set()
+        thread.join(timeout=5)
+        return True
+
+    def _toggle_reaction(self, channel: str, message_id: str, on: bool) -> None:
         try:
             if on:
                 self._client.reactions_add(

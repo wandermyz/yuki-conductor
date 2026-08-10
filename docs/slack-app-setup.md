@@ -17,13 +17,18 @@
 
 Go to **OAuth & Permissions** > **Scopes** > **Bot Token Scopes** and add:
 
-- `chat:write` — Send messages
+- `chat:write` — Send messages, and set the shimmering "is thinking..." thread status
 - `channels:history` — Read public channel messages
 - `groups:history` — Read private channel messages
 - `im:history` — Read DMs
 - `mpim:history` — Read group DMs
-- `reactions:write` — Add/remove emoji reactions
+- `reactions:write` — Add/remove emoji reactions (fallback busy indicator)
 - `commands` — Add slash commands
+
+While Claude is running, yuki shows a shimmering `yuki is thinking...` status under
+the message via `assistant.threads.setStatus`. If that call fails, it falls back to
+an ⏳ reaction on the source message. If the status never renders, enable
+**Features** > **Agents & AI Apps** for the app and reinstall.
 
 ## 4. Add Slash Commands
 
