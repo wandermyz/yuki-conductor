@@ -82,3 +82,46 @@ def test_entry_point_plugin_discovery():
 
     assert result is fake
     mock_ep.load.assert_called_once()
+
+
+def test_open_log_handler_retries_then_gives_up(tmp_path, capsys):
+    """A locked log must not kill startup — the restart notification still matters."""
+    from yuki_conductor.runtime import _open_log_handler
+
+    log = tmp_path / "daemon.log"
+    with patch("logging.FileHandler", side_effect=PermissionError(13, "locked")):
+        handler = _open_log_handler(log, attempts=3, delay=0)
+
+    assert handler is None
+    assert "locked by another process" in capsys.readouterr().err
+
+
+def test_open_log_handler_succeeds_after_transient_lock(tmp_path):
+    from yuki_conductor.runtime import _open_log_handler
+
+    log = tmp_path / "daemon.log"
+    sentinel = MagicMock()
+    with patch(
+        "logging.FileHandler",
+        side_effect=[PermissionError(13, "locked"), sentinel],
+    ):
+        assert _open_log_handler(log, attempts=3, delay=0) is sentinel
+
+
+def test_start_sends_restart_notification():
+    fake = FakeReceiver("teams_mcp")
+    with (
+        _patch_block_forever(),
+        patch("yuki_conductor.runtime.chat_apps", return_value=["teams_mcp"]),
+        patch("yuki_conductor.runtime._build_receiver", return_value=fake),
+        patch("yuki_conductor.runtime._get_commit_short", return_value="abc1234"),
+        patch("yuki_conductor.web_server.start_web_server"),
+        patch("yuki_conductor.cron_scheduler.start_cron_scheduler"),
+    ):
+        fake.platform.send_notification = MagicMock()
+        from yuki_conductor.runtime import start
+
+        start()
+
+    fake.platform.send_notification.assert_called_once()
+    assert "abc1234" in fake.platform.send_notification.call_args[0][0]

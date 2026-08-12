@@ -8,7 +8,9 @@ forever.
 import importlib.metadata
 import logging
 import subprocess
+import sys
 import threading
+import time
 
 from yuki_conductor.config import CLAUDE_WORKING_DIR, chat_apps
 from yuki_conductor.messaging import ChatAppReceiver, MessagingPlatform
@@ -69,6 +71,29 @@ def _build_receiver(
     )
 
 
+def _open_log_handler(log_file, attempts: int = 20, delay: float = 0.5):
+    """Open the rotating stdout log, retrying while a previous daemon holds it.
+
+    On Windows a still-running old daemon keeps an exclusive handle on the log
+    file; opening it raises PermissionError. Retry briefly, then give up on the
+    file handler rather than killing the whole process — stdout logging and the
+    restart notification still work without it.
+    """
+    for attempt in range(attempts):
+        try:
+            return logging.FileHandler(str(log_file), encoding="utf-8")
+        except PermissionError:
+            if attempt == attempts - 1:
+                print(
+                    f"WARNING: cannot open {log_file} (locked by another process); "
+                    "continuing with stdout logging only",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return None
+            time.sleep(delay)
+
+
 def start() -> None:
     from yuki_conductor.config import LOG_FILE
 
@@ -80,9 +105,10 @@ def start() -> None:
     root.addHandler(logging.StreamHandler())
     root.handlers[-1].setFormatter(logging.Formatter(fmt))
     # file
-    fh = logging.FileHandler(str(LOG_FILE), encoding="utf-8")
-    fh.setFormatter(logging.Formatter(fmt))
-    root.addHandler(fh)
+    fh = _open_log_handler(LOG_FILE)
+    if fh is not None:
+        fh.setFormatter(logging.Formatter(fmt))
+        root.addHandler(fh)
 
     apps = chat_apps()
     logger.info(
