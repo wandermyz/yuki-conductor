@@ -435,6 +435,16 @@ def create_api() -> FastAPI:
     def get_processing():
         return ws_manager.get_processing()
 
+    @api.get("/api/chat/steps")
+    def get_steps():
+        """Buffered intermediate steps per in-flight conversation.
+
+        A browser that connects or reconnects mid-run calls this to replay the
+        step stream it missed; steps are memory-only and vanish once the run
+        finishes.
+        """
+        return ws_manager.get_steps()
+
     @api.post("/api/conversations/{conv_id}/cancel")
     def cancel_conversation(conv_id: str):
         """Stop the running Claude process for a conversation."""

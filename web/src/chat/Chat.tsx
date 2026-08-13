@@ -7,6 +7,7 @@ import {
   deleteConversation,
   fetchStatuses,
   fetchProcessing,
+  fetchSteps,
   fetchAllUsage,
   listConversations,
   listMessages,
@@ -22,6 +23,7 @@ import type {
   Conversation,
   ConversationUsage,
   Project,
+  StreamStep,
   WSEvent,
 } from "./api";
 import "./chat.css";
@@ -283,6 +285,38 @@ function MessageBubble({ msg, onRetry }: { msg: ChatMessage; onRetry: (msg: Chat
   );
 }
 
+/* ---------- Live step stream ---------- */
+
+const STEP_ICONS: Record<StreamStep["kind"], string> = {
+  init: "●",
+  text: "✎",
+  thinking: "…",
+  tool_use: "▸",
+  tool_result: "↳",
+};
+
+/** How many trailing steps stay visible; older ones collapse away. */
+const VISIBLE_STEPS = 8;
+
+function StepList({ steps, running }: { steps: StreamStep[]; running: boolean }) {
+  const visible = steps.slice(-VISIBLE_STEPS);
+  const hidden = steps.length - visible.length;
+  return (
+    <div className={running ? "step-list" : "step-list step-list-done"}>
+      {hidden > 0 && (
+        <div className="step-hidden">…{hidden} earlier step{hidden === 1 ? "" : "s"}</div>
+      )}
+      {visible.map((s) => (
+        <div key={s.seq} className={`step step-${s.kind}`}>
+          <span className="step-icon">{STEP_ICONS[s.kind] ?? "·"}</span>
+          <span className="step-label">{s.label}</span>
+        </div>
+      ))}
+      {running && <div className="responding-shimmer">Claude is responding…</div>}
+    </div>
+  );
+}
+
 function Composer({
   conversationId,
   onSend,
@@ -436,6 +470,7 @@ function ChatThread({
   conv,
   messages,
   processing,
+  steps,
   status,
   onBack,
   onSend,
@@ -448,6 +483,7 @@ function ChatThread({
   conv: Conversation;
   messages: ChatMessage[];
   processing: boolean;
+  steps: StreamStep[];
   status: ConvStatus;
   onBack: () => void;
   onSend: (text: string, files: AttachmentRef[]) => void;
@@ -459,6 +495,13 @@ function ChatThread({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+
+  // Steps belong to the turn that produced the last assistant message, so once
+  // the run finishes that message renders below the trace rather than above it.
+  const last = messages[messages.length - 1];
+  const finalMessage =
+    !processing && steps.length > 0 && last?.role === "assistant" ? last : null;
+  const headMessages = finalMessage ? messages.slice(0, -1) : messages;
 
   const isNearBottomRef = useRef(true);
 
@@ -476,7 +519,7 @@ function ChatThread({
   useEffect(() => {
     const el = scrollRef.current;
     if (el && isNearBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages, processing]);
+  }, [messages, processing, steps]);
 
   return (
     <div className="chat-thread">
@@ -509,12 +552,11 @@ function ChatThread({
         {messages.length === 0 && !processing && (
           <p className="chat-empty">Send a message to start the conversation.</p>
         )}
-        {messages.map((m) => (
+        {headMessages.map((m) => (
           <MessageBubble key={m.id} msg={m} onRetry={onRetry} />
         ))}
-        {processing && (
-          <div className="responding-shimmer">Claude is responding…</div>
-        )}
+        {(processing || steps.length > 0) && <StepList steps={steps} running={processing} />}
+        {finalMessage && <MessageBubble key={finalMessage.id} msg={finalMessage} onRetry={onRetry} />}
       </div>
       <Composer conversationId={conv.id} onSend={onSend} onStop={onStop} disabled={processing} />
     </div>
@@ -533,6 +575,7 @@ export default function Chat({
   const setSelected = onSelectId;
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({});
   const [processingConvs, setProcessingConvs] = useState<Set<string>>(new Set());
+  const [stepsByConv, setStepsByConv] = useState<Record<string, StreamStep[]>>({});
   const [statuses, setStatuses] = useState<Record<string, ConvStatus>>({});
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [sessionIdModal, setSessionIdModal] = useState<string | null>(null);
@@ -585,12 +628,26 @@ export default function Chat({
               return next;
             });
           }
+        } else if (e.type === "step") {
+          // Steps are ephemeral progress for the in-flight turn. Dedupe by seq
+          // so a reconnect replay can't double-render what's already shown.
+          setStepsByConv((prev) => {
+            const cur = prev[cid] || [];
+            if (cur.some((s) => s.seq === e.step.seq)) return prev;
+            return { ...prev, [cid]: [...cur, e.step] };
+          });
         } else if (e.type === "processing") {
           if (!e.on) {
             playNotificationSound();
             // Refresh usage after an assistant response completes
             fetchAllUsage().then(setUsage).catch(console.error);
           }
+          setStepsByConv((prev) => {
+            // A new turn starts fresh; a finished turn keeps its steps on
+            // screen alongside the final message.
+            if (!e.on) return prev;
+            return { ...prev, [cid]: [] };
+          });
           setProcessingConvs((prev) => {
             const next = new Set(prev);
             if (e.on) next.add(cid);
@@ -615,6 +672,10 @@ export default function Chat({
         fetchProcessing().then((p) => {
           setProcessingConvs(new Set(Object.keys(p)));
         }).catch(console.error);
+        // Resume the step stream: replace buffers wholesale with the server's
+        // snapshot, so a run that started while we were disconnected still
+        // shows its progress instead of an empty list.
+        fetchSteps().then(setStepsByConv).catch(console.error);
         fetchAllUsage().then(setUsage).catch(console.error);
         const sel = selectedRef.current;
         if (sel) {
@@ -633,6 +694,9 @@ export default function Chat({
     fetchStatuses().then((s) => setStatuses(s as Record<string, ConvStatus>)).catch(console.error);
     fetchAllUsage().then(setUsage).catch(console.error);
     listProjects().then(setProjects).catch(console.error);
+    // A run may already be in flight from before this page loaded.
+    fetchProcessing().then((p) => setProcessingConvs(new Set(Object.keys(p)))).catch(console.error);
+    fetchSteps().then(setStepsByConv).catch(console.error);
   }, []);
 
   // Load messages when selecting a conversation
@@ -866,6 +930,7 @@ export default function Chat({
             conv={active}
             messages={messagesByConv[active.id] || []}
             processing={processingConvs.has(active.id)}
+            steps={stepsByConv[active.id] || []}
             status={getStatus(statuses, active.id)}
             onBack={() => setSelected(null)}
             onSend={(text, files) => handleSend(active.id, text, files)}

@@ -2,6 +2,7 @@
 
 import logging
 import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -17,6 +18,33 @@ SESSION_TYPE = "slack"
 # the status after two minutes of silence, so a background thread re-sets it.
 STATUS_TEXT = "is thinking..."
 STATUS_REFRESH_SECONDS = 60
+# How often the updater thread checks for a new step label. Slack rate-limits
+# setStatus, so steps are coalesced into at most one call per interval rather
+# than one call per event.
+STATUS_POLL_SECONDS = 2
+
+# Slack renders the status inline, so keep step labels short.
+STATUS_LABEL_LIMIT = 80
+
+
+def _status_for(event) -> str | None:
+    """Render a stream event as a Slack status line, or None to keep the last one.
+
+    Tool results and plain init events aren't worth a status change — they'd
+    make the line flicker without telling the user anything new.
+    """
+    if event.kind == "tool_use":
+        name = event.detail.get("name") or "tool"
+        summary = event.detail.get("summary") or ""
+        text = f"is running {name}: {summary}" if summary else f"is running {name}"
+    elif event.kind == "text":
+        text = "is writing: " + (event.detail.get("text") or event.label)
+    elif event.kind == "thinking":
+        text = "is thinking: " + (event.detail.get("text") or event.label)
+    else:
+        return None
+    text = " ".join(text.split())
+    return text if len(text) <= STATUS_LABEL_LIMIT else text[: STATUS_LABEL_LIMIT - 1] + "…"
 
 
 class SlackPlatform:
@@ -29,6 +57,8 @@ class SlackPlatform:
         self._bot_token = bot_token
         self._refreshers: dict[str, tuple[threading.Event, threading.Thread]] = {}
         self._refreshers_lock = threading.Lock()
+        # Latest status label per thread, published by the updater thread.
+        self._pending_status: dict[str, str] = {}
 
     def send(self, conversation_key: str, msg: OutgoingMessage) -> None:
         """Post a reply to a thread, uploading any attachments first."""
@@ -79,6 +109,19 @@ class SlackPlatform:
         else:
             self._toggle_reaction(channel, message_id, on=False)
 
+    def on_stream_event(self, conversation_key: str, event) -> None:
+        """Fold an intermediate step into the thread's shimmering status line.
+
+        Nothing is posted as a message — the status is the only surface used
+        until the final reply lands.
+        """
+        status = _status_for(event)
+        if status is None:
+            return
+        with self._refreshers_lock:
+            if conversation_key in self._refreshers:
+                self._pending_status[conversation_key] = status
+
     def _set_status(self, channel: str, thread_ts: str, status: str) -> bool:
         try:
             self._client.assistant_threads_setStatus(
@@ -93,9 +136,18 @@ class SlackPlatform:
         stop = threading.Event()
 
         def refresh() -> None:
-            while not stop.wait(STATUS_REFRESH_SECONDS):
-                if not self._set_status(channel, thread_ts, STATUS_TEXT):
+            last_pushed = STATUS_TEXT
+            last_push_at = time.monotonic()
+            while not stop.wait(STATUS_POLL_SECONDS):
+                with self._refreshers_lock:
+                    desired = self._pending_status.get(thread_ts, last_pushed)
+                stale = time.monotonic() - last_push_at >= STATUS_REFRESH_SECONDS
+                if desired == last_pushed and not stale:
+                    continue
+                if not self._set_status(channel, thread_ts, desired):
                     return
+                last_pushed = desired
+                last_push_at = time.monotonic()
 
         thread = threading.Thread(
             target=refresh, name=f"slack-status-{thread_ts}", daemon=True
@@ -108,6 +160,7 @@ class SlackPlatform:
         """Stop the refresh loop. Returns False if this thread never had a status."""
         with self._refreshers_lock:
             entry = self._refreshers.pop(thread_ts, None)
+            self._pending_status.pop(thread_ts, None)
         if entry is None:
             return False
         stop, thread = entry

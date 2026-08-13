@@ -34,6 +34,19 @@ def test_generate_task_xml_contains_key_fields():
     assert "IgnoreNew" in xml
 
 
+def test_task_xml_has_repeating_recovery_trigger():
+    """A repeating trigger is the safety net for a dead supervisor."""
+    xml = daemon_windows._generate_task_xml()
+    assert "<TimeTrigger>" in xml
+    assert "<Interval>PT5M</Interval>" in xml
+
+
+def test_task_xml_window_is_visible():
+    """The console is the live log view, so it must not be launched hidden."""
+    xml = daemon_windows._generate_task_xml()
+    assert "-WindowStyle Hidden" not in xml
+
+
 def test_install_creates_and_runs_task():
     with mock.patch.object(daemon_windows, "_schtasks") as sch:
         sch.return_value = mock.Mock(returncode=0, stdout="")
@@ -61,12 +74,18 @@ def test_uninstall_deletes_task():
     assert any(a[:2] == ["/Delete", "/TN"] for a in calls)
 
 
-def test_status_running(capsys):
-    out = "TaskName: \\YukiConductor\nStatus:                Running\n"
-    with mock.patch.object(daemon_windows, "_schtasks") as sch:
-        sch.return_value = mock.Mock(returncode=0, stdout=out)
-        daemon_windows._status()
-    assert "Running" in capsys.readouterr().out
+def test_status_ignores_schtasks_ready_text(monkeypatch, capsys):
+    """"Ready" from schtasks means installed-but-down, not healthy.
+
+    This previously scraped the Status: field, so a dead daemon reported
+    "Ready" and read as healthy. Liveness now comes from the process list.
+    """
+    monkeypatch.setattr(daemon_windows, "_task_installed", lambda: True)
+    monkeypatch.setattr(daemon_windows, "_classify_daemon_pids", lambda: ([], []))
+    daemon_windows._status()
+    out = capsys.readouterr().out
+    assert "Ready" not in out
+    assert "NOT running" in out
 
 
 def test_status_not_installed(capsys):
@@ -170,6 +189,54 @@ def test_wait_for_log_release_returns_when_openable(monkeypatch, tmp_path):
     log.write_text("x")
     monkeypatch.setattr(daemon_windows, "LOG_FILE", log)
     assert daemon_windows._wait_for_log_release(timeout=1.0) is True
+
+
+def test_stop_writes_sentinel_before_killing(monkeypatch, tmp_path):
+    """The supervisor must learn the stop is intentional before the kill lands.
+
+    If the sentinel appeared after the kill, the supervisor would already have
+    relaunched the daemon underneath us.
+    """
+    stop = tmp_path / "daemon.stop"
+    monkeypatch.setattr(daemon_windows, "STOP_FILE", stop)
+    order = []
+
+    def kill():
+        order.append(("kill", stop.exists()))
+        return 0
+
+    monkeypatch.setattr(daemon_windows, "_kill_daemon_processes", kill)
+    with mock.patch.object(daemon_windows, "_schtasks") as sch:
+        sch.return_value = mock.Mock(returncode=0, stdout="")
+        daemon_windows._stop_daemon()
+    assert order == [("kill", True)]
+
+
+def test_stop_removes_sentinel_afterwards(monkeypatch, tmp_path):
+    """A leftover sentinel would make the supervisor exit on its next start."""
+    stop = tmp_path / "daemon.stop"
+    monkeypatch.setattr(daemon_windows, "STOP_FILE", stop)
+    monkeypatch.setattr(daemon_windows, "_kill_daemon_processes", lambda: 0)
+    with mock.patch.object(daemon_windows, "_schtasks") as sch:
+        sch.return_value = mock.Mock(returncode=0, stdout="")
+        daemon_windows._stop_daemon()
+    assert not stop.exists()
+
+
+def test_status_reports_down_when_no_process(monkeypatch, capsys):
+    """schtasks says "Ready" for a dead daemon; status must not repeat that."""
+    monkeypatch.setattr(daemon_windows, "_task_installed", lambda: True)
+    monkeypatch.setattr(daemon_windows, "_classify_daemon_pids", lambda: ([], []))
+    daemon_windows._status()
+    assert "NOT running" in capsys.readouterr().out
+
+
+def test_status_reports_running_pids(monkeypatch, capsys):
+    monkeypatch.setattr(daemon_windows, "_task_installed", lambda: True)
+    monkeypatch.setattr(daemon_windows, "_classify_daemon_pids", lambda: ([42], [7]))
+    daemon_windows._status()
+    out = capsys.readouterr().out
+    assert "Running" in out and "7, 42" in out
 
 
 def test_wait_for_log_release_times_out(monkeypatch, tmp_path):

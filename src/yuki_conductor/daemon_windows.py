@@ -20,6 +20,10 @@ from yuki_conductor.daemon_common import build_web_frontend, print_logs, project
 
 TASK_NAME = "YukiConductor"
 
+# Handshake telling the launcher's supervisor loop that an exit is intentional
+# and it should not relaunch. Must match $StopFile in yuki-conductor-daemon.ps1.
+STOP_FILE = DATA_DIR / "daemon.stop"
+
 # How long to wait for the old daemon to release its grip on daemon.log before
 # relaunching. The new process opens the log with a plain FileHandler, which
 # fails outright on Windows while another process holds the handle.
@@ -58,7 +62,11 @@ def _generate_task_xml() -> str:
     pwsh = _pwsh()
     script = _launcher_script()
     repo = str(project_dir())
-    arguments = f'-NoProfile -WindowStyle Hidden -File "{script}"'
+    # Normal (not Hidden) window: the console is the daemon's live log view.
+    # -WindowStyle Hidden never actually suppressed the window anyway — pwsh is
+    # a console app, so Windows creates and shows the console before PowerShell
+    # parses the flag, producing a blank flash on every launch.
+    arguments = f'-NoProfile -NoExit -File "{script}"'
     return (
         '<?xml version="1.0" encoding="UTF-16"?>\n'
         '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n'
@@ -70,6 +78,17 @@ def _generate_task_xml() -> str:
         "      <Enabled>true</Enabled>\n"
         f"      <UserId>{user}</UserId>\n"
         "    </LogonTrigger>\n"
+        # Safety net for the one case the in-script supervisor cannot cover:
+        # the supervisor itself dying (closed console, killed tree). Combined
+        # with IgnoreNew below this is a no-op whenever the daemon is alive.
+        "    <TimeTrigger>\n"
+        "      <Enabled>true</Enabled>\n"
+        "      <StartBoundary>2000-01-01T00:00:00</StartBoundary>\n"
+        "      <Repetition>\n"
+        "        <Interval>PT5M</Interval>\n"
+        "        <StopAtDurationEnd>false</StopAtDurationEnd>\n"
+        "      </Repetition>\n"
+        "    </TimeTrigger>\n"
         "  </Triggers>\n"
         "  <Principals>\n"
         '    <Principal id="Author">\n'
@@ -236,11 +255,24 @@ def _wait_for_log_release(timeout: float = LOG_RELEASE_TIMEOUT) -> bool:
 
 
 def _stop_daemon() -> None:
-    """End the scheduled task and kill any surviving daemon processes."""
-    _schtasks(["/End", "/TN", TASK_NAME], check=False)
-    killed = _kill_daemon_processes()
-    if killed:
-        print(f"Killed {killed} lingering daemon process(es)")
+    """End the scheduled task and kill any surviving daemon processes.
+
+    The launcher script supervises and relaunches the daemon on exit, so it
+    must be told this stop is intentional — otherwise it would immediately
+    start a new instance on top of the one we just killed. The sentinel file is
+    the handshake; the supervisor consumes it and exits its loop.
+    """
+    STOP_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STOP_FILE.touch()
+    try:
+        _schtasks(["/End", "/TN", TASK_NAME], check=False)
+        killed = _kill_daemon_processes()
+        if killed:
+            print(f"Killed {killed} lingering daemon process(es)")
+    finally:
+        # Killing the tree usually denies the supervisor its chance to consume
+        # the sentinel; a leftover file would block the next start.
+        STOP_FILE.unlink(missing_ok=True)
 
 
 def _install():
@@ -285,16 +317,21 @@ def _restart():
 
 
 def _status():
-    result = _schtasks(["/Query", "/TN", TASK_NAME, "/FO", "LIST"], check=False)
-    if result.returncode != 0:
+    """Report whether the daemon is actually alive, not merely installed.
+
+    schtasks' own `Status:` field reports the *task* state, where "Ready" means
+    installed-but-not-running — i.e. the daemon is down. Reporting that verbatim
+    made a dead daemon look healthy, so liveness comes from the process list.
+    """
+    if not _task_installed():
         print("Not installed")
         return
-    for line in result.stdout.splitlines():
-        if line.strip().startswith("Status:"):
-            status = line.split(":", 1)[1].strip()
-            print(f"Status: {status}")
-            return
-    print("Installed (status unknown)")
+    pids = sorted(sum(_classify_daemon_pids(), []))
+    if pids:
+        print(f"Running (pid {', '.join(str(p) for p in pids)})")
+    else:
+        print("Installed but NOT running")
+        print(f"Check {LOG_FILE} / run 'daemon restart'")
 
 
 def _log():

@@ -1,14 +1,18 @@
 """Subprocess wrapper for the Claude Code CLI."""
 
-import json
+import logging
 import os
 import shutil
 import subprocess
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from yuki_conductor.config import CLAUDE_BIN, CLAUDE_TIMEOUT, CLAUDE_WORKING_DIR, project_dir
 from yuki_conductor.skills import SYSTEM_PROMPT, skill_plugin_dirs
+from yuki_conductor.stream_events import StreamEvent, parse_stream_line
+
+logger = logging.getLogger(__name__)
 
 SLACK_MESSAGE_LIMIT = 4000
 
@@ -83,6 +87,27 @@ def _ps_quote(arg: str) -> str:
     return "'" + arg.replace("'", "''") + "'"
 
 
+def _git_bash() -> str:
+    """Locate Git Bash.
+
+    `shutil.which("bash")` is not enough: on Windows it often resolves to
+    C:\\Windows\\System32\\bash.exe, the WSL launcher, which cannot execute a
+    Windows-path script and fails with "No such file or directory".
+    """
+    candidates = [
+        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "bin", "bash.exe"),
+        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "usr", "bin", "bash.exe"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Git", "bin", "bash.exe"),
+    ]
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    found = shutil.which("bash")
+    if found and "system32" not in found.lower():
+        return found
+    return "bash"
+
+
 @dataclass
 class ClaudeResult:
     text: str
@@ -100,8 +125,14 @@ def run_claude(
     model: str | None = None,
     conversation_key: str | None = None,
     cwd: str | None = None,
+    on_event: Callable[[StreamEvent], None] | None = None,
 ) -> ClaudeResult:
     """Run claude CLI and return the result.
+
+    The CLI is invoked with `--output-format stream-json --verbose`, so stdout
+    is NDJSON: one record per intermediate step, ending in a `result` record.
+    Each step is normalized into a `StreamEvent` and handed to `on_event` as it
+    arrives; only the final result is returned.
 
     Args:
         prompt: The prompt text to send.
@@ -109,11 +140,15 @@ def run_claude(
         timeout: Timeout in seconds (defaults to CLAUDE_TIMEOUT).
         model: Optional model alias (e.g. "opus", "opus[1m]", "sonnet").
         cwd: Working directory for claude. Defaults to CLAUDE_WORKING_DIR.
+        on_event: Called from the reader thread for every intermediate step.
+            Exceptions raised by the callback are logged and swallowed so a
+            broken UI subscriber can't kill the run.
     """
     args = [
         "-p",
         "--dangerously-skip-permissions",
-        "--output-format", "json",
+        "--output-format", "stream-json",
+        "--verbose",
         "--append-system-prompt", SYSTEM_PROMPT,
     ]
     for plugin_dir in skill_plugin_dirs():
@@ -127,8 +162,7 @@ def run_claude(
     if CLAUDE_BIN.endswith(".ps1"):
         cmd = ["powershell", "-Command", f"& '{CLAUDE_BIN}' {' '.join(_ps_quote(a) for a in args)}"]
     elif CLAUDE_BIN.endswith(".sh"):
-        git_bash = shutil.which("bash") or "bash"
-        cmd = [git_bash, CLAUDE_BIN, *args]
+        cmd = [_git_bash(), CLAUDE_BIN, *args]
     else:
         cmd = [CLAUDE_BIN, *args]
 
@@ -161,16 +195,19 @@ def run_claude(
         register_process(conversation_key, proc)
 
     try:
-        stdout, stderr = proc.communicate(timeout=effective_timeout)
-    except subprocess.TimeoutExpired:
-        return ClaudeResult(
-            text="Claude timed out but is still running in the background. Increase CLAUDE_TIMEOUT to wait longer.",
-            session_id=session_id,
-            is_error=True,
+        final, raw_stdout, stderr, timed_out = _consume_stream(
+            proc, effective_timeout, on_event
         )
     finally:
         if conversation_key:
             unregister_process(conversation_key)
+
+    if timed_out:
+        return ClaudeResult(
+            text="Claude timed out and was stopped. Increase CLAUDE_TIMEOUT to wait longer.",
+            session_id=session_id,
+            is_error=True,
+        )
 
     if proc.returncode != 0:
         if conversation_key and was_cancelled(conversation_key):
@@ -180,43 +217,97 @@ def run_claude(
                 session_id=session_id,
                 is_error=False,
             )
-        error_text = stderr.strip() or stdout.strip() or f"claude exited with code {proc.returncode}"
+        error_text = stderr.strip() or raw_stdout.strip() or f"claude exited with code {proc.returncode}"
         return ClaudeResult(text=error_text, session_id=session_id, is_error=True)
 
-    return _parse_output(stdout, session_id)
+    return _build_result(final, raw_stdout, session_id)
 
 
-def _parse_output(stdout: str, fallback_session_id: str | None) -> ClaudeResult:
-    """Parse JSON output from claude CLI."""
+def _consume_stream(
+    proc: subprocess.Popen,
+    timeout: int,
+    on_event: Callable[[StreamEvent], None] | None,
+) -> tuple[dict | None, str, str, bool]:
+    """Read NDJSON from `proc` until it exits.
+
+    stderr is drained on a helper thread so a chatty CLI can't deadlock on a
+    full pipe while we're blocked reading stdout. Because that read blocks
+    indefinitely on a hung CLI, a watchdog timer kills the process tree at
+    `timeout`, which closes the pipe and unblocks us.
+
+    Returns `(final_result_record, raw_stdout, stderr, timed_out)`.
+    """
+    stderr_chunks: list[str] = []
+
+    def drain_stderr() -> None:
+        if proc.stderr is None:
+            return
+        for line in proc.stderr:
+            stderr_chunks.append(line)
+
+    stderr_thread = threading.Thread(target=drain_stderr, name="claude-stderr", daemon=True)
+    stderr_thread.start()
+
+    timed_out = threading.Event()
+
+    def on_timeout() -> None:
+        timed_out.set()
+        _kill_tree(proc)
+
+    watchdog = threading.Timer(timeout, on_timeout)
+    watchdog.daemon = True
+    watchdog.start()
+
+    final: dict | None = None
+    raw_lines: list[str] = []
     try:
-        data = json.loads(stdout)
-    except json.JSONDecodeError:
-        # Fall back to raw text if JSON parsing fails
-        text = stdout.strip()
+        if proc.stdout is not None:
+            for line in proc.stdout:
+                raw_lines.append(line)
+                events, result = parse_stream_line(line)
+                if on_event is not None:
+                    for event in events:
+                        try:
+                            on_event(event)
+                        except Exception:
+                            logger.debug("Stream event callback failed", exc_info=True)
+                if result is not None:
+                    final = result
+        proc.wait()
+    finally:
+        watchdog.cancel()
+
+    stderr_thread.join(timeout=5)
+    return final, "".join(raw_lines), "".join(stderr_chunks), timed_out.is_set()
+
+
+def _build_result(
+    final: dict | None, raw_stdout: str, fallback_session_id: str | None
+) -> ClaudeResult:
+    """Turn the terminal `result` record into a ClaudeResult."""
+    if final is None:
+        # No result record — the CLI printed something we don't understand.
+        text = raw_stdout.strip()
         if len(text) > SLACK_MESSAGE_LIMIT:
             text = text[: SLACK_MESSAGE_LIMIT - 50] + "\n\n... (truncated, response too long)"
         return ClaudeResult(text=text or "(empty response)", session_id=fallback_session_id)
 
-    result_text = data.get("result", "")
-    new_session_id = data.get("session_id") or fallback_session_id
+    result_text = final.get("result") or ""
+    new_session_id = final.get("session_id") or fallback_session_id
 
     if len(result_text) > SLACK_MESSAGE_LIMIT:
         result_text = result_text[: SLACK_MESSAGE_LIMIT - 50] + "\n\n... (truncated, response too long)"
 
-    # Extract token usage and cost if present
-    input_tokens = data.get("input_tokens")
-    output_tokens = data.get("output_tokens")
-    cost_usd = data.get("cost_usd")
-    # Some CLI versions nest usage under a "usage" key
-    usage = data.get("usage")
-    if usage and isinstance(usage, dict):
-        input_tokens = input_tokens or usage.get("input_tokens")
-        output_tokens = output_tokens or usage.get("output_tokens")
-        cost_usd = cost_usd or usage.get("cost_usd")
+    usage = final.get("usage")
+    usage = usage if isinstance(usage, dict) else {}
+    input_tokens = final.get("input_tokens") or usage.get("input_tokens")
+    output_tokens = final.get("output_tokens") or usage.get("output_tokens")
+    cost_usd = final.get("total_cost_usd") or final.get("cost_usd") or usage.get("cost_usd")
 
     return ClaudeResult(
         text=result_text or "(empty response)",
         session_id=new_session_id,
+        is_error=bool(final.get("is_error")),
         input_tokens=int(input_tokens) if input_tokens is not None else None,
         output_tokens=int(output_tokens) if output_tokens is not None else None,
         cost_usd=float(cost_usd) if cost_usd is not None else None,

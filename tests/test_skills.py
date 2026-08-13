@@ -12,7 +12,9 @@ from yuki_conductor.config import project_dir
 
 def _mock_popen(stdout="", stderr="", returncode=0):
     mock = MagicMock(spec=subprocess.Popen)
-    mock.communicate.return_value = (stdout, stderr)
+    mock.stdout = iter(stdout.splitlines(keepends=True))
+    mock.stderr = iter(stderr.splitlines(keepends=True))
+    mock.wait.return_value = returncode
     mock.returncode = returncode
     mock.pid = 99999
     return mock
@@ -59,7 +61,7 @@ def test_skill_plugin_dirs_skips_invalid_entry_point(tmp_path):
 
 
 def test_run_claude_injects_plugin_dirs_and_system_prompt():
-    output = json.dumps({"result": "ok", "session_id": "s1"})
+    output = json.dumps({"type": "result", "result": "ok", "session_id": "s1"}) + "\n"
     mock_proc = _mock_popen(stdout=output)
     fake_dirs = ["C:/plug/a", "C:/plug/b"]
 

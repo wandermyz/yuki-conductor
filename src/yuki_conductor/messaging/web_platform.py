@@ -22,6 +22,9 @@ from yuki_conductor.messaging.platform import OutgoingMessage
 
 logger = logging.getLogger(__name__)
 
+# Upper bound on per-conversation step history kept for WS replay.
+MAX_BUFFERED_STEPS = 200
+
 
 class ConnectionManager:
     """Tracks global WebSocket subscribers and broadcasts conversation events.
@@ -30,12 +33,18 @@ class ConnectionManager:
     includes ``conversation_id``).  Threads call `broadcast()` from worker
     threads; we marshal the actual `send_json` onto the asyncio loop the
     socket lives on.
+
+    Intermediate Claude steps are also buffered per in-flight conversation so
+    a client that connects (or reconnects) mid-run can replay what it missed —
+    they are deliberately not persisted, and are dropped when the run ends.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._clients: list[tuple[object, asyncio.AbstractEventLoop]] = []
         self._processing: dict[str, str] = {}  # conv_id -> message_id
+        self._steps: dict[str, list[dict]] = {}  # conv_id -> buffered step events
+        self._step_seq: dict[str, int] = {}  # conv_id -> next step sequence number
 
     def add(self, ws, loop: asyncio.AbstractEventLoop) -> None:
         with self._lock:
@@ -69,12 +78,42 @@ class ConnectionManager:
         with self._lock:
             if on:
                 self._processing[conv_id] = message_id
+                self._steps[conv_id] = []
+                self._step_seq[conv_id] = 0
             else:
                 self._processing.pop(conv_id, None)
+                # Steps outlive the run: the finished turn keeps its trace until
+                # the next turn on this conversation resets it.
 
     def get_processing(self) -> dict[str, str]:
         with self._lock:
             return dict(self._processing)
+
+    def add_step(self, conv_id: str, step: dict) -> None:
+        """Buffer an intermediate step and broadcast it.
+
+        Each step gets a per-conversation sequence number so a client replaying
+        the buffer after a reconnect can drop steps it already rendered.
+        """
+        with self._lock:
+            buf = self._steps.get(conv_id)
+            if buf is None:
+                # Run already finished (or never started) — nothing to attach to.
+                return
+            seq = self._step_seq.get(conv_id, 0)
+            self._step_seq[conv_id] = seq + 1
+            step = {**step, "seq": seq}
+            buf.append(step)
+            # Long agentic runs emit hundreds of steps; the UI only shows a
+            # tail, so keep the buffer bounded rather than growing forever.
+            if len(buf) > MAX_BUFFERED_STEPS:
+                del buf[: len(buf) - MAX_BUFFERED_STEPS]
+        self.broadcast(conv_id, {"type": "step", "step": step})
+
+    def get_steps(self) -> dict[str, list[dict]]:
+        """Snapshot of buffered steps for every in-flight conversation."""
+        with self._lock:
+            return {cid: list(steps) for cid, steps in self._steps.items()}
 
 
 def _serialize_attachments(atts: list[StoredAttachment]) -> list[dict]:
@@ -156,6 +195,10 @@ class WebPlatform:
             conversation_key,
             {"type": "processing", "on": on, "message_id": message_id},
         )
+
+    def on_stream_event(self, conversation_key: str, event) -> None:
+        """Push an intermediate step to subscribed browsers (not persisted)."""
+        self._manager.add_step(conversation_key, event.to_dict())
 
     def get_session_id(self, conversation_key: str) -> str | None:
         conv = self._store.get_conversation(conversation_key)

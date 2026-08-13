@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from yuki_conductor.stream_events import StreamEvent
+
 
 @dataclass
 class Attachment:
@@ -48,6 +50,15 @@ class MessagingPlatform(Protocol):
     def send(self, conversation_key: str, msg: OutgoingMessage) -> None: ...
 
     def set_processing(self, conversation_key: str, message_id: str, on: bool) -> None: ...
+
+    def on_stream_event(self, conversation_key: str, event: StreamEvent) -> None:
+        """Report one intermediate step of the running Claude turn.
+
+        Called from the Claude reader thread, possibly many times per turn.
+        Implementations must be cheap and must not raise. Platforms with no
+        progress surface can leave this as a no-op.
+        """
+        ...
 
     def get_session_id(self, conversation_key: str) -> str | None:
         """Return the Claude session id to resume, or None to start fresh."""

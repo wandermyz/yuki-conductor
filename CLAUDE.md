@@ -7,7 +7,8 @@ src/yuki_conductor/
   cli.py            — argparse entry point (run, daemon, simulate)
   config.py         — env loading, path constants, CHAT_APPS parsing
   store.py          — SQLite-backed session & model stores
-  claude_runner.py  — subprocess wrapper for claude CLI
+  claude_runner.py  — subprocess wrapper for claude CLI (stream-json reader)
+  stream_events.py  — normalizes stream-json records into UI progress events
   skills.py         — Claude Code skill-plugin injection for spawned sessions
   runtime.py        — process orchestrator (starts receivers + web + cron)
   slack_app.py      — Slack Bolt handlers + SlackSocketReceiver
@@ -157,7 +158,8 @@ Keep the code clean. **No backward compatibility is required.** This project has
 - **Session tracking**: SQLite database at `~/.yuki-conductor/workspace/yuki-conductor.db` maps `thread_ts → (session_id, channel_id)` and `channel_id → model`
 - **Web server**: FastAPI on port 2333 (env: `WEB_PORT`), serves React frontend and `/api/sessions` + chat endpoints. Starts in a daemon thread alongside any enabled chat-app receivers.
 - **Concurrency**: slack-bolt's default thread pool (10 threads); each handler blocks on `subprocess.run`
-- **Claude invocation**: `claude -p --dangerously-skip-permissions --output-format json [-r session_id] "prompt"`
+- **Claude invocation**: `claude -p --dangerously-skip-permissions --output-format stream-json --verbose [-r session_id] "prompt"`. stdout is NDJSON; `stream_events.py` normalizes each record into a `StreamEvent` (tool calls, text, thinking, tool results) which `run_claude(on_event=...)` delivers live, and the terminal `result` record becomes the returned `ClaudeResult`.
+- **Progress surfaces**: platforms opt into live steps by implementing `on_stream_event`. Web buffers steps in `ConnectionManager` (memory only — never persisted) and broadcasts `{"type": "step"}`; `GET /api/chat/steps` replays the buffer so a reconnecting browser resumes mid-run. Slack folds steps into the shimmering assistant status (coalesced to one `setStatus` call per couple of seconds) and posts nothing until the final reply. Platforms without the hook just get the final response.
 - **Environment**: Must unset `CLAUDECODE` env var in subprocess to avoid nested session errors
 
 ## Testing

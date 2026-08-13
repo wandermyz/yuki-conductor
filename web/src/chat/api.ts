@@ -27,9 +27,18 @@ export interface ChatMessage {
   status?: "sending" | "failed";
 }
 
+/** One intermediate step of a running Claude turn. Memory-only — never persisted. */
+export interface StreamStep {
+  kind: "init" | "text" | "thinking" | "tool_use" | "tool_result";
+  label: string;
+  detail: Record<string, unknown>;
+  seq: number;
+}
+
 export type WSEvent =
   | { type: "message"; conversation_id: string; message: ChatMessage }
   | { type: "processing"; conversation_id: string; on: boolean; message_id: string }
+  | { type: "step"; conversation_id: string; step: StreamStep }
   | { type: "title"; conversation_id: string; title: string }
   | { type: "reload" };
 
@@ -128,6 +137,16 @@ export async function cancelProcessing(convId: string): Promise<void> {
 export async function fetchProcessing(): Promise<Record<string, string>> {
   const r = await fetch("/api/chat/processing");
   if (!r.ok) throw new Error("Failed to fetch processing state");
+  return r.json();
+}
+
+/**
+ * Buffered intermediate steps for every in-flight conversation. Called on
+ * (re)connect so the step list resumes instead of starting blank mid-run.
+ */
+export async function fetchSteps(): Promise<Record<string, StreamStep[]>> {
+  const r = await fetch("/api/chat/steps");
+  if (!r.ok) throw new Error("Failed to fetch steps");
   return r.json();
 }
 

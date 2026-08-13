@@ -48,6 +48,25 @@ def _split_response(text: str) -> tuple[str, list[Attachment]]:
     return cleaned, attachments
 
 
+def _event_sink(platform: MessagingPlatform, conversation_key: str):
+    """Adapt a platform's optional `on_stream_event` into a run_claude callback.
+
+    Platforms predating streaming (and test stubs) may not implement the hook;
+    those runs simply produce no intermediate updates.
+    """
+    handler = getattr(platform, "on_stream_event", None)
+    if handler is None:
+        return None
+
+    def sink(event) -> None:
+        try:
+            handler(conversation_key, event)
+        except Exception:
+            logger.debug("Stream event delivery failed", exc_info=True)
+
+    return sink
+
+
 def handle_incoming_message(
     platform: MessagingPlatform,
     msg: IncomingMessage,
@@ -70,7 +89,14 @@ def handle_incoming_message(
             msg.conversation_key, session_id, msg.model,
         )
         try:
-            result = run_claude(prompt, session_id=session_id, model=msg.model, conversation_key=msg.conversation_key, cwd=msg.cwd)
+            result = run_claude(
+                prompt,
+                session_id=session_id,
+                model=msg.model,
+                conversation_key=msg.conversation_key,
+                cwd=msg.cwd,
+                on_event=_event_sink(platform, msg.conversation_key),
+            )
         except Exception:
             logger.error(
                 "Claude invocation failed for %s", msg.conversation_key, exc_info=True,
