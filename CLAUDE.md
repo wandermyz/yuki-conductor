@@ -35,6 +35,7 @@ Key files:
 - `~/.yuki-conductor/.secrets/` — one secret per file, mode 600 (referenced by the above; never in `workspace/`, which syncs to Obsidian)
 - `~/.yuki-conductor/workspace/yuki-conductor.db` — SQLite database for session and model tracking
 - `~/.yuki-conductor/workspace/cron.yaml` — Cron task definitions (see `cron.example.yaml` for format)
+- `~/.yuki-conductor/workspace/system-prompt.md` — optional personal system prompt appended to every spawned Claude run (see Skill Injection)
 - `~/.yuki-conductor/workspace/attachments/`, `uploads/` — runtime file storage
 - `~/.yuki-conductor/daemon.log`, `daemon.err.log` — LaunchAgent logs
 
@@ -55,19 +56,39 @@ Multiple values may be combined: `CHAT_APPS=slack_socket,my_plugin`. Each sessio
 
 yuki-conductor spawns headless `claude -p` runs whose working directory often
 points at some other project. To teach those runs about yuki-conductor's own
-capabilities (cron scheduling, connected messaging surfaces), `claude_runner.py`
-injects Claude Code **plugins** per-session via `--plugin-dir`, plus an
-`--append-system-prompt` ("You are running as an agent spawned by
-yuki-conductor…"). Because these are session-scoped, they are invisible when the
-user runs Claude Code directly — nothing is written to `~/.claude/skills`.
+capabilities (cron scheduling, connected messaging surfaces),
+`claude_runner.py` injects Claude Code **plugins** per-session via `--plugin-dir`,
+plus an `--append-system-prompt`. Because these are session-scoped, they are
+invisible when the user runs Claude Code directly — nothing is written to
+`~/.claude/skills`.
+
+**A headless `claude -p` run does not receive the available-skills listing that
+interactive sessions get.** Plugin skills resolve by name via the `Skill` tool,
+but the model never discovers them on its own — asked "what skills do you have",
+it will truthfully answer "none". So `skills.system_prompt()` builds the appended
+prompt dynamically: it reads the `name` and `description` frontmatter from every
+discovered `skills/*/SKILL.md` and lists them, with an explicit routing rule
+(`yuki-conductor-cron` for all scheduling). Entry-point plugins are picked up
+automatically — no hardcoded names.
+
+A headless run also loads no settings by default, so `run_claude` passes
+`--setting-sources user,project,local`. That makes user-scope skills in
+`~/.claude/skills` resolvable by name — though, like plugin skills, still not
+*discoverable*, so anything you want used must be named in the prompt.
 
 `skills.py` collects the plugin dirs:
 
-- the bundled `plugins/yuki-conductor` plugin (the cron skill);
+- the bundled `plugins/yuki-conductor` plugin (`yuki-conductor-cron` for the cron
+  scheduler);
 - any dirs contributed by installed packages through the
   `yuki_conductor.skill_plugins` entry-point group (each entry point is a
   zero-arg callable returning a plugin dir path). This lets an installed chat
   plugin ship its own skill without this public repo naming it.
+
+Finally, if `~/.yuki-conductor/workspace/system-prompt.md` exists, its contents
+are appended verbatim. That file is outside the repo, so it's where private
+capabilities belong — internal CLIs, user-scope skills, MCP servers. **Never name
+those in the repo-side prompt.** Absent or empty file is a no-op.
 
 The spawned run also gets `YUKI_CONDUCTOR_PROJECT` in its env so injected skills
 can locate and invoke the yuki-conductor CLI.

@@ -63,6 +63,7 @@ load_dotenv(DATA_DIR / ".env", override=True)
 WORKSPACE_DIR = DATA_DIR / "workspace"
 DB_FILE = WORKSPACE_DIR / "yuki-conductor.db"
 CRON_FILE = WORKSPACE_DIR / "cron.yaml"
+SYSTEM_PROMPT_FILE = WORKSPACE_DIR / "system-prompt.md"
 ATTACHMENTS_DIR = WORKSPACE_DIR / "attachments"
 UPLOADS_DIR = WORKSPACE_DIR / "uploads"
 WEB_UPLOADS_DIR = UPLOADS_DIR / "web"

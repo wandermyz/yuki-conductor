@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from yuki_conductor.config import CLAUDE_BIN, CLAUDE_TIMEOUT, CLAUDE_WORKING_DIR, project_dir
-from yuki_conductor.skills import SYSTEM_PROMPT, skill_plugin_dirs
+from yuki_conductor.skills import skill_plugin_dirs, system_prompt
 from yuki_conductor.stream_events import StreamEvent, parse_stream_line
 
 logger = logging.getLogger(__name__)
@@ -144,14 +144,18 @@ def run_claude(
             Exceptions raised by the callback are logged and swallowed so a
             broken UI subscriber can't kill the run.
     """
+    plugin_dirs = skill_plugin_dirs()
     args = [
         "-p",
         "--dangerously-skip-permissions",
         "--output-format", "stream-json",
         "--verbose",
-        "--append-system-prompt", SYSTEM_PROMPT,
+        # Without this, a headless run loads no settings at all, so user-scope
+        # skills in ~/.claude/skills are unreachable.
+        "--setting-sources", "user,project,local",
+        "--append-system-prompt", system_prompt(plugin_dirs),
     ]
-    for plugin_dir in skill_plugin_dirs():
+    for plugin_dir in plugin_dirs:
         args.extend(["--plugin-dir", plugin_dir])
     if model:
         args.extend(["--model", model])
