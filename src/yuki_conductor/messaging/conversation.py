@@ -95,6 +95,11 @@ def handle_incoming_message(
                 model=msg.model,
                 conversation_key=msg.conversation_key,
                 cwd=msg.cwd,
+                # Only the web platform's keys are addressable by
+                # `yuki-conductor send`, so only those are advertised.
+                web_conversation_id=(
+                    msg.conversation_key if msg.platform == "web" else None
+                ),
                 on_event=_event_sink(platform, msg.conversation_key),
             )
         except Exception:

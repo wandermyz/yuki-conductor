@@ -10,7 +10,7 @@ from croniter import croniter
 
 from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import CRON_FILE, WORKSPACE_DIR, chat_apps
-from yuki_conductor.messaging import MessagingPlatform
+from yuki_conductor.messaging import MessagingPlatform, OutgoingMessage
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +114,24 @@ def _run_cron_task(
     """Execute a single cron task: run Claude, post via the routed platform if <notify>."""
     logger.info(f"Cron task={task.name} starting, running Claude...")
 
+    title = task.description or task.name
+    platform = _pick_platform(task, platforms_by_name) if platforms_by_name else None
+
+    # Reserve the destination conversation up front where the platform supports
+    # it, so the run itself can push interim messages into the same thread via
+    # `yuki-conductor send` instead of only speaking through its final answer.
+    reserved: str | None = None
+    if platform is not None and hasattr(platform, "reserve_thread"):
+        try:
+            reserved = platform.reserve_thread(title=title)
+        except Exception:
+            logger.error(
+                f"Failed to reserve thread on platform={platform.name} for task={task.name}",
+                exc_info=True,
+            )
+
     prefixed_prompt = _CRON_PROMPT_PREFIX + task.prompt
-    result = run_claude(prefixed_prompt)
+    result = run_claude(prefixed_prompt, web_conversation_id=reserved)
 
     response_text = result.text or ""
     should_notify = "<notify>" in response_text
@@ -123,6 +139,9 @@ def _run_cron_task(
 
     if not should_notify:
         logger.info(f"Cron task={task.name} completed silently: {display_text[:200]}")
+        if reserved is not None and platform is not None:
+            # Keep the thread only if the run actually posted into it.
+            platform.discard_thread(reserved)
         return
 
     logger.info(f"Cron task={task.name} completed with notification")
@@ -131,13 +150,15 @@ def _run_cron_task(
         logger.info(f"Cron task={task.name} notification (no chat apps enabled): {display_text}")
         return
 
-    platform = _pick_platform(task, platforms_by_name)
     if platform is None:
         return
 
-    title = task.description or task.name
     try:
-        conversation_key = platform.start_thread(display_text, title=title)
+        if reserved is not None:
+            platform.send(reserved, OutgoingMessage(text=display_text))
+            conversation_key = reserved
+        else:
+            conversation_key = platform.start_thread(display_text, title=title)
     except Exception:
         logger.error(
             f"Failed to start cron thread on platform={platform.name} for task={task.name}",

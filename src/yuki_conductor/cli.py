@@ -40,6 +40,23 @@ def main(argv: list[str] | None = None) -> None:
         help="Rebuild the frontend (hot-reload without restarting the daemon)",
     )
 
+    # send
+    send_parser = sub.add_parser(
+        "send", help="Push a message into a web chat conversation"
+    )
+    send_parser.add_argument("text", help="Message text (use - to read stdin)")
+    send_parser.add_argument(
+        "--conversation",
+        "-c",
+        default=None,
+        help="Web conversation id to post into. Omit to open a new conversation.",
+    )
+    send_parser.add_argument(
+        "--title",
+        default=None,
+        help="Title for the new conversation (only used without --conversation)",
+    )
+
     import importlib.metadata
     for ep in importlib.metadata.entry_points(group="yuki_conductor.cli_plugins"):
         register_fn = ep.load()
@@ -85,6 +102,39 @@ def main(argv: list[str] | None = None) -> None:
                 store.set(args.thread_ts, result.session_id)
             print(f"session_id: {result.session_id}")
             print(f"response:\n{result.text}")
+    elif args.command == "send":
+        import json
+        import urllib.error
+        import urllib.request
+
+        from yuki_conductor.web_server import WEB_PORT
+
+        text = sys.stdin.read() if args.text == "-" else args.text
+        if not text.strip():
+            print("Refusing to send an empty message", file=sys.stderr)
+            sys.exit(1)
+
+        payload = {
+            "text": text,
+            "conversation_id": args.conversation,
+            "title": args.title,
+        }
+        req = urllib.request.Request(
+            f"http://localhost:{WEB_PORT}/api/push",
+            method="POST",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = json.load(resp)
+        except urllib.error.HTTPError as exc:
+            print(f"Send failed ({exc.code}): {exc.read().decode('utf-8', 'replace')}", file=sys.stderr)
+            sys.exit(1)
+        except urllib.error.URLError as exc:
+            print(f"Daemon not reachable on port {WEB_PORT}: {exc.reason}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Sent to conversation {body['conversation_id']}")
     elif args.command == "web":
         if args.web_command is None:
             web_parser.print_help()

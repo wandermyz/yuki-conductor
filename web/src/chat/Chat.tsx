@@ -22,6 +22,7 @@ import type {
   ChatMessage,
   Conversation,
   ConversationUsage,
+  ConvStatus,
   Project,
   StreamStep,
   WSEvent,
@@ -79,8 +80,6 @@ function isImage(mime: string | null, filename: string): boolean {
 }
 
 /* ---------- Conversation status helpers ---------- */
-
-type ConvStatus = "unread" | "read" | "done";
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + "B";
@@ -619,6 +618,19 @@ export default function Chat({
                 : msgs;
             return { ...prev, [cid]: [...pruned, e.message] };
           });
+          // An out-of-band push has no `processing` event to close the turn,
+          // so alert here instead — otherwise it arrives silently.
+          if (e.pushed) {
+            playNotificationSound();
+          }
+          // An out-of-band push can be the first we hear of a conversation
+          // (a cron run opening its own thread). Without this it stays absent
+          // from the sidebar until a reload.
+          setConversations((prev) => {
+            if (prev.some((c) => c.id === cid)) return prev;
+            listConversations().then(setConversations).catch(console.error);
+            return prev;
+          });
           // Mark as unread if this is an assistant message and the conversation is not currently selected
           if (e.message.role === "assistant" && selectedRef.current !== cid) {
             setStatuses((prev) => {
@@ -627,6 +639,13 @@ export default function Chat({
               setConvStatus(cid, "unread").catch(console.error);
               return next;
             });
+          }
+        } else if (e.type === "status") {
+          // Server-driven status change (e.g. an out-of-band push marking the
+          // conversation unread). Trust it only while the user isn't looking at
+          // the thread — otherwise it would un-read what they're reading.
+          if (selectedRef.current !== cid) {
+            setStatuses((prev) => ({ ...prev, [cid]: e.status }));
           }
         } else if (e.type === "step") {
           // Steps are ephemeral progress for the in-flight turn. Dedupe by seq

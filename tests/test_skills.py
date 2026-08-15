@@ -429,3 +429,14 @@ def test_run_claude_enables_all_setting_sources():
     cmd = mock_cls.call_args[0][0]
     assert "--setting-sources" in cmd
     assert cmd[cmd.index("--setting-sources") + 1] == "user,project,local"
+
+
+def test_system_prompt_names_the_web_conversation():
+    prompt = skills.system_prompt(plugin_dirs=[], cwd=None, conversation_key="abc123")
+    assert "## Your conversation" in prompt
+    assert "`abc123`" in prompt
+    assert "yuki-conductor-send" in prompt
+
+
+def test_system_prompt_omits_conversation_section_when_absent():
+    assert "## Your conversation" not in skills.system_prompt(plugin_dirs=[], cwd=None)

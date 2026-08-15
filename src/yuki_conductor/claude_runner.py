@@ -125,6 +125,7 @@ def run_claude(
     model: str | None = None,
     conversation_key: str | None = None,
     cwd: str | None = None,
+    web_conversation_id: str | None = None,
     on_event: Callable[[StreamEvent], None] | None = None,
 ) -> ClaudeResult:
     """Run claude CLI and return the result.
@@ -140,6 +141,9 @@ def run_claude(
         timeout: Timeout in seconds (defaults to CLAUDE_TIMEOUT).
         model: Optional model alias (e.g. "opus", "opus[1m]", "sonnet").
         cwd: Working directory for claude. Defaults to CLAUDE_WORKING_DIR.
+        web_conversation_id: Web conversation this run belongs to, if any. Named
+            in the system prompt so the run can push messages back into it via
+            `yuki-conductor send`.
         on_event: Called from the reader thread for every intermediate step.
             Exceptions raised by the callback are logged and swallowed so a
             broken UI subscriber can't kill the run.
@@ -155,7 +159,9 @@ def run_claude(
         # user-scope skills (~/.claude/skills) nor project-scope ones
         # (<cwd>/.claude/skills) are reachable.
         "--setting-sources", "user,project,local",
-        "--append-system-prompt", system_prompt(plugin_dirs, cwd=effective_cwd),
+        "--append-system-prompt", system_prompt(
+            plugin_dirs, cwd=effective_cwd, conversation_key=web_conversation_id
+        ),
     ]
     for plugin_dir in plugin_dirs:
         args.extend(["--plugin-dir", plugin_dir])

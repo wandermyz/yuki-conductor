@@ -125,6 +125,7 @@ Required env var (only when `slack_socket` is enabled): `SLACK_CRON_CHANNEL` —
 - `uv run ruff check --fix .` — run linter with auto-fix
 - `uv run yuki-conductor --help` — show CLI help
 - `uv run yuki-conductor simulate message "test"` — test without Slack
+- `uv run yuki-conductor send -c <conv-id> "text"` — push a message into a web chat conversation (see Outbound Messages)
 - `uv run yuki-conductor web rebuild` — rebuild frontend + auto-reload connected browsers
 - `cd web && pnpm dev` — start frontend dev server (proxies /api to port 2333)
 - `cd web && pnpm build` — build frontend for production (output: web/dist/)
@@ -162,6 +163,34 @@ ancestor of that session, so `_kill_daemon_processes()` refuses to kill it
 Use the bundled `yuki-conductor-restart` skill, which launches
 `.claude/skills/yuki-conductor-restart/restart-daemon.ps1` via WMI
 `Win32_Process.Create` so it runs outside the caller's process tree.
+
+## Outbound Messages
+
+A spawned Claude run normally speaks only through its final response. The
+`send` subcommand gives it a second channel: `yuki-conductor send [-c <conv-id>]
+"text"` POSTs to `/api/push` on the running daemon, which persists the text as
+an assistant message and broadcasts it over the chat WebSocket. Connected
+browsers see it immediately; a reconnecting one finds it in scrollback. Omitting
+`-c` opens a new conversation instead. This only reaches the **web** platform.
+
+Every pushed message gets `web_server.PUSH_MARKER` appended to its text, so a
+proactive note from a cron task reads differently from a reply to something the
+user actually said. The marker is baked into the stored text rather than carried
+as metadata, so it survives a reload; the `pushed` flag on the WebSocket payload
+is transport-only and drives the notification sound.
+
+For the run to address the right thread it must know its conversation id, so
+`skills.system_prompt(conversation_key=...)` renders a "Your conversation"
+section naming it, and `run_claude(web_conversation_id=...)` threads it through.
+Web-platform turns pass their own conversation key; other platforms pass None,
+since their keys aren't addressable by `send`.
+
+Cron tasks get the same treatment via `WebPlatform.reserve_thread()`, which
+allocates the conversation *before* the run so a long task can post progress
+into the same thread its final result lands in. `discard_thread()` cleans up the
+empty reservation when the run ends in `<silence>` and posted nothing.
+
+The `yuki-conductor-send` skill (bundled plugin) documents this for the model.
 
 ## Frontend Deployment Gotchas
 

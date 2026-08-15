@@ -316,8 +316,31 @@ def _workspace_prompt() -> str | None:
     return text
 
 
+def _conversation_section(conversation_key: str | None) -> list[str]:
+    """Tell the session which conversation it is speaking into.
+
+    Without this the `yuki-conductor-send` skill has no way to address the
+    thread it was spawned from — a cron run or background agent could only
+    open a brand-new conversation. Only web conversations are addressable by
+    the `send` CLI, so a non-web key is deliberately not advertised.
+    """
+    if not conversation_key:
+        return []
+    return [
+        "",
+        "## Your conversation",
+        "",
+        f"You are running inside web conversation `{conversation_key}`. To send "
+        "the user a message outside your normal reply (progress on a long task, "
+        "a follow-up after this turn ends), use the `yuki-conductor-send` skill "
+        "with this id.",
+    ]
+
+
 def system_prompt(
-    plugin_dirs: list[str] | None = None, cwd: Path | str | None = None
+    plugin_dirs: list[str] | None = None,
+    cwd: Path | str | None = None,
+    conversation_key: str | None = None,
 ) -> str:
     """Build the ``--append-system-prompt`` text for a spawned session.
 
@@ -327,7 +350,11 @@ def system_prompt(
     """
     resolved = resolve_skills(cwd=cwd, plugin_dirs=plugin_dirs)
 
-    lines = [_PROMPT_HEADER, *_render_skills(resolved, cwd)]
+    lines = [
+        _PROMPT_HEADER,
+        *_render_skills(resolved, cwd),
+        *_conversation_section(conversation_key),
+    ]
     prompt = "\n".join(lines)
 
     workspace = _workspace_prompt()

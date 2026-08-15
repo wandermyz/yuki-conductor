@@ -132,3 +132,60 @@ def test_run_cron_task_no_apps_logs_only(caplog):
             _run_cron_task(_task(), {})
 
     assert any("no chat apps enabled" in rec.message.lower() for rec in caplog.records)
+
+
+class ReservingPlatform(FakePlatform):
+    """A platform that can hand out a conversation id before the run starts."""
+
+    def __init__(self, name: str = "web") -> None:
+        super().__init__(name)
+        self.reserved: list[str] = []
+        self.discarded: list[str] = []
+
+    def reserve_thread(self, title=None):
+        key = f"{self.name}-reserved-{len(self.reserved)}"
+        self.reserved.append(key)
+        return key
+
+    def discard_thread(self, conversation_key):
+        self.discarded.append(conversation_key)
+        return True
+
+
+def test_reserved_conversation_is_passed_to_the_run_and_reused():
+    platform = ReservingPlatform()
+    result = ClaudeResult(text="all done <notify>", session_id="sess-1")
+    with patch(
+        "yuki_conductor.cron_scheduler.run_claude", return_value=result
+    ) as run:
+        _run_cron_task(_task(), {"web": platform})
+
+    assert run.call_args.kwargs["web_conversation_id"] == "web-reserved-0"
+    # Reused rather than opening a second thread the user has to find.
+    assert platform.threads == []
+    assert [key for key, _ in platform.sent] == ["web-reserved-0"]
+    assert platform.sent[0][1].text == "all done"
+    assert platform.discarded == []
+    assert platform.session_writes == [("web-reserved-0", "sess-1", "desc t1")]
+
+
+def test_silent_run_discards_the_reserved_conversation():
+    platform = ReservingPlatform()
+    result = ClaudeResult(text="nothing to report <silence>", session_id="sess-1")
+    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+        _run_cron_task(_task(), {"web": platform})
+
+    assert platform.discarded == ["web-reserved-0"]
+    assert platform.sent == []
+
+
+def test_platform_without_reserve_still_starts_a_thread():
+    platform = FakePlatform("slack")
+    result = ClaudeResult(text="ping <notify>", session_id="sess-1")
+    with patch(
+        "yuki_conductor.cron_scheduler.run_claude", return_value=result
+    ) as run:
+        _run_cron_task(_task(chat_app="slack"), {"slack": platform})
+
+    assert run.call_args.kwargs["web_conversation_id"] is None
+    assert platform.threads == [("ping", "desc t1")]

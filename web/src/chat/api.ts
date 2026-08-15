@@ -35,11 +35,20 @@ export interface StreamStep {
   seq: number;
 }
 
+export type ConvStatus = "unread" | "read" | "done";
+
 export type WSEvent =
-  | { type: "message"; conversation_id: string; message: ChatMessage }
+  | {
+      type: "message";
+      conversation_id: string;
+      message: ChatMessage;
+      /** Out-of-band push (`yuki-conductor send`) with no surrounding turn. */
+      pushed?: boolean;
+    }
   | { type: "processing"; conversation_id: string; on: boolean; message_id: string }
   | { type: "step"; conversation_id: string; step: StreamStep }
   | { type: "title"; conversation_id: string; title: string }
+  | { type: "status"; conversation_id: string; status: ConvStatus }
   | { type: "reload" };
 
 export async function listConversations(): Promise<Conversation[]> {

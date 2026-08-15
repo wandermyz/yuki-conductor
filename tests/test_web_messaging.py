@@ -5,6 +5,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from yuki_conductor import web_server
+
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
@@ -97,3 +99,81 @@ def test_delete_conversation(client):
     assert r.status_code == 200
     listing = client.get("/api/conversations").json()
     assert all(c["id"] != conv["id"] for c in listing)
+
+
+def test_push_into_existing_conversation(client):
+    conv = client.post("/api/conversations", json={"title": "watched"}).json()
+    r = client.post(
+        "/api/push", json={"conversation_id": conv["id"], "text": "progress update"}
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "conversation_id": conv["id"], "created": False}
+
+    msgs = client.get(f"/api/conversations/{conv['id']}/messages").json()
+    assert [m["role"] for m in msgs] == ["assistant"]
+    # The marker is persisted, so a reload still distinguishes a push from a reply.
+    assert msgs[0]["text"] == f"progress update\n\n{web_server.PUSH_MARKER}"
+    assert client.get("/api/chat/conversations/statuses").json()[conv["id"]] == "unread"
+
+
+def test_push_without_conversation_creates_one(client):
+    r = client.post("/api/push", json={"text": "cron fired", "title": "Nightly"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["created"] is True
+
+    conv = client.get(f"/api/conversations/{body['conversation_id']}").json()
+    assert conv["title"] == "Nightly"
+    msgs = client.get(f"/api/conversations/{body['conversation_id']}/messages").json()
+    assert msgs[0]["text"] == f"cron fired\n\n{web_server.PUSH_MARKER}"
+
+
+def test_push_rejects_unknown_conversation(client):
+    r = client.post("/api/push", json={"conversation_id": "nope", "text": "hi"})
+    assert r.status_code == 404
+
+
+def test_push_rejects_empty_text(client):
+    conv = client.post("/api/conversations", json={"title": None}).json()
+    r = client.post("/api/push", json={"conversation_id": conv["id"], "text": "  "})
+    assert r.status_code == 400
+
+
+def test_push_broadcasts_message_and_status(client, monkeypatch):
+    """Both the message and the unread flip must reach connected browsers.
+
+    Persisting alone is not enough: without the broadcast the user only sees the
+    push after reloading the page.
+    """
+    from yuki_conductor import web_server
+
+    sent: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        web_server.ws_manager,
+        "broadcast",
+        lambda cid, payload: sent.append((cid, payload)),
+    )
+
+    conv = client.post("/api/conversations", json={"title": "watched"}).json()
+    client.post("/api/push", json={"conversation_id": conv["id"], "text": "ping"})
+
+    types = [p["type"] for _, p in sent]
+    assert types == ["message", "status"]
+    assert all(cid == conv["id"] for cid, _ in sent)
+    assert sent[0][1]["message"]["text"] == f"ping\n\n{web_server.PUSH_MARKER}"
+    # No `processing` event bookends a push, so the client alerts off this flag.
+    assert sent[0][1]["pushed"] is True
+    assert sent[1][1]["status"] == "unread"
+
+
+def test_push_to_new_conversation_broadcasts_status(client, monkeypatch):
+    from yuki_conductor import web_server
+
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        web_server.ws_manager, "broadcast", lambda cid, payload: sent.append(payload)
+    )
+
+    client.post("/api/push", json={"text": "cron fired"})
+    assert [p["type"] for p in sent] == ["message", "status"]
+    assert sent[0]["pushed"] is True

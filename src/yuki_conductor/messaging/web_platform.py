@@ -231,6 +231,23 @@ class WebPlatform:
         )
         return conv.id
 
+    def reserve_thread(self, title: str | None = None) -> str:
+        """Create an empty conversation and return its id.
+
+        Lets a producer (the cron scheduler) know the conversation id *before*
+        running Claude, so the run can be told where to push interim messages
+        via `yuki-conductor send`. Pair with `discard_thread` to clean up if
+        the run turns out to have nothing to say.
+        """
+        conv = self._store.create_conversation(platform="web", title=title)
+        return conv.id
+
+    def discard_thread(self, conversation_key: str) -> bool:
+        """Delete a reserved conversation, unless something has posted to it."""
+        if self._store.list_messages(conversation_key, limit=1):
+            return False
+        return self._store.delete_conversation(conversation_key)
+
     def _import_outgoing_attachments(
         self, attachments: Iterable
     ) -> list[StoredAttachment]:

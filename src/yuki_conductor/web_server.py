@@ -47,6 +47,10 @@ def set_receivers(receivers: list) -> None:
 WEB_PORT = int(os.environ.get("WEB_PORT", "2333"))
 SLACK_WORKSPACE = os.environ.get("SLACK_WORKSPACE", "wandermyz")
 
+# Appended to every `/api/push` message so a proactive note from a cron task or
+# background run reads differently from a reply to something the user asked.
+PUSH_MARKER = "_📨 Pushed message_"
+
 # Resolve path to the built frontend assets
 _WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 
@@ -399,6 +403,61 @@ def create_api() -> FastAPI:
         ).start()
 
         return serialize_message(user_msg)
+
+    class PushMessage(BaseModel):
+        conversation_id: str | None = None
+        text: str
+        title: str | None = None
+
+    @api.post("/api/push")
+    def push_message(body: PushMessage):
+        """Deliver an out-of-band assistant message to a web conversation.
+
+        Backs the `yuki-conductor send` CLI, which is how a spawned Claude run
+        (a cron task, a long-running agent) talks back to the user without
+        being the reply to an in-flight turn. The message is persisted like any
+        assistant message and broadcast, so connected browsers see it live and
+        a reconnecting one still finds it in scrollback.
+        """
+        if not body.text.strip():
+            raise HTTPException(status_code=400, detail="Empty message")
+
+        if body.conversation_id is None:
+            conv = conv_store.create_conversation(
+                platform="web", title=body.title or body.text[:80]
+            )
+            conv_id = conv.id
+            created = True
+        else:
+            if not conv_store.get_conversation(body.conversation_id):
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            conv_id = body.conversation_id
+            created = False
+
+        # Mark the text itself, not just the WS payload: `pushed` is not
+        # persisted, so on reload a push would be indistinguishable from a
+        # reply Claude actually made to something the user said.
+        stored = conv_store.add_message(
+            conv_id,
+            role="assistant",
+            text=f"{body.text.rstrip()}\n\n{PUSH_MARKER}",
+            attachments=[],
+        )
+        ws_manager.broadcast(
+            conv_id,
+            {
+                "type": "message",
+                "message": serialize_message(stored),
+                # Out-of-band: no `processing` event bookends this message, so
+                # the client can't rely on the end-of-turn hook to alert on it.
+                "pushed": True,
+            },
+        )
+        conv_store.set_status(conv_id, "unread")
+        # The status change has to reach browsers too, or the conversation only
+        # looks unread after a reload.
+        ws_manager.broadcast(conv_id, {"type": "status", "status": "unread"})
+        return {"ok": True, "conversation_id": conv_id, "created": created}
 
     _upload_default = File(...)
 
