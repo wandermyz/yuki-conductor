@@ -1,0 +1,14 @@
+# Copy to ~/.yuki-conductor/workspace/skills.yaml
+#
+# Controls how yuki-conductor advertises your Claude Code *user-scope* skills
+# (those in ~/.claude/skills) to the headless sessions it spawns.
+#
+# Every user-scope skill is listed in the injected system prompt. Names under
+# `always:` are promoted to a more prominent "Always available" section, for
+# skills that should be considered in every session regardless of project.
+#
+# Names must match the `name:` frontmatter of a skill in ~/.claude/skills.
+# An unmatched name logs a warning and is otherwise ignored.
+
+always:
+  - some-user-scope-skill

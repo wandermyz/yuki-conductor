@@ -9,7 +9,7 @@ src/yuki_conductor/
   store.py          — SQLite-backed session & model stores
   claude_runner.py  — subprocess wrapper for claude CLI (stream-json reader)
   stream_events.py  — normalizes stream-json records into UI progress events
-  skills.py         — Claude Code skill-plugin injection for spawned sessions
+  skills.py         — skill discovery + system-prompt synthesis for spawned sessions
   runtime.py        — process orchestrator (starts receivers + web + cron)
   slack_app.py      — Slack Bolt handlers + SlackSocketReceiver
   messaging/        — platform-agnostic messaging core
@@ -22,7 +22,8 @@ src/yuki_conductor/
   web_server.py     — FastAPI HTTP server (agent conductor web UI)
 web/                — React + Vite frontend (pnpm, TypeScript)
 plugins/
-  yuki-conductor/   — Claude Code plugin bundled in this repo (cron skill)
+  yuki-conductor/   — bundled plugin, injected into every session (cron skill)
+.claude/skills/     — project-scoped skills, only advertised when cwd is this repo
 ```
 
 ## Workspace
@@ -35,7 +36,8 @@ Key files:
 - `~/.yuki-conductor/.secrets/` — one secret per file, mode 600 (referenced by the above; never in `workspace/`, which syncs to Obsidian)
 - `~/.yuki-conductor/workspace/yuki-conductor.db` — SQLite database for session and model tracking
 - `~/.yuki-conductor/workspace/cron.yaml` — Cron task definitions (see `cron.example.yaml` for format)
-- `~/.yuki-conductor/workspace/system-prompt.md` — optional personal system prompt appended to every spawned Claude run (see Skill Injection)
+- `~/.yuki-conductor/workspace/skills.yaml` — promotes user-scope skills to "always available" (see `skills.example.yaml` and Skill Discovery)
+- `~/.yuki-conductor/workspace/system-prompt.md` — optional personal system prompt appended to every spawned Claude run (see Skill Discovery)
 - `~/.yuki-conductor/workspace/attachments/`, `uploads/` — runtime file storage
 - `~/.yuki-conductor/daemon.log`, `daemon.err.log` — LaunchAgent logs
 
@@ -52,43 +54,58 @@ The daemon's chat surfaces are selected by `CHAT_APPS` (comma-separated):
 
 Multiple values may be combined: `CHAT_APPS=slack_socket,my_plugin`. Each session is platform-tagged so replies always route back to the originating chat app.
 
-## Skill Injection
+## Skill Discovery
 
 yuki-conductor spawns headless `claude -p` runs whose working directory often
-points at some other project. To teach those runs about yuki-conductor's own
-capabilities (cron scheduling, connected messaging surfaces),
-`claude_runner.py` injects Claude Code **plugins** per-session via `--plugin-dir`,
-plus an `--append-system-prompt`. Because these are session-scoped, they are
-invisible when the user runs Claude Code directly — nothing is written to
-`~/.claude/skills`.
+points at some other project. The goal is that such a run sees the same skills an
+interactive session in that directory would.
 
-**A headless `claude -p` run does not receive the available-skills listing that
-interactive sessions get.** Plugin skills resolve by name via the `Skill` tool,
-but the model never discovers them on its own — asked "what skills do you have",
-it will truthfully answer "none". So `skills.system_prompt()` builds the appended
-prompt dynamically: it reads the `name` and `description` frontmatter from every
-discovered `skills/*/SKILL.md` and lists them, with an explicit routing rule
-(`yuki-conductor-cron` for all scheduling). Entry-point plugins are picked up
-automatically — no hardcoded names.
+**A headless `claude -p` run receives no available-skills listing, in any scope.**
+Verified empirically: even with `--setting-sources user,project,local` *and*
+`--plugin-dir`, the model reports no skills — plugin, user-scope, and
+project-scope alike. But *resolution* works in all three: a skill invoked by name
+via the `Skill` tool runs fine. The gap is purely advertisement, so synthesizing
+the listing into `--append-system-prompt` is the only mechanism available.
 
-A headless run also loads no settings by default, so `run_claude` passes
-`--setting-sources user,project,local`. That makes user-scope skills in
-`~/.claude/skills` resolvable by name — though, like plugin skills, still not
-*discoverable*, so anything you want used must be named in the prompt.
+`skills.resolve_skills(cwd, plugin_dirs)` therefore builds that listing itself,
+reading `name`/`description` frontmatter from every `*/SKILL.md` it finds and
+tagging each with a **tier**. A skill declares its tier by where it lives:
 
-`skills.py` collects the plugin dirs:
+| Tier | Source | Scope |
+| --- | --- | --- |
+| `YUKI` | injected plugin dirs (`--plugin-dir`) | every session, every cwd |
+| `PROJECT` | `<cwd>/.claude/skills` | only when that project is the cwd |
+| `ALWAYS` | `~/.claude/skills`, named in `workspace/skills.yaml` | every session, emphasized |
+| `USER` | rest of `~/.claude/skills` | every session, plain listing |
 
-- the bundled `plugins/yuki-conductor` plugin (`yuki-conductor-cron` for the cron
-  scheduler);
+Names are deduplicated across tiers in that priority order, and each tier renders
+under its own heading in the prompt. **No skill name is hardcoded anywhere in
+`skills.py`** — routing emphasis belongs in each skill's own `description`.
+
+Plugin dirs (tier `YUKI`) come from:
+
+- the bundled `plugins/yuki-conductor` plugin — `yuki-conductor-cron` only, since
+  everything here is advertised globally;
 - any dirs contributed by installed packages through the
   `yuki_conductor.skill_plugins` entry-point group (each entry point is a
   zero-arg callable returning a plugin dir path). This lets an installed chat
   plugin ship its own skill without this public repo naming it.
 
+Because `--plugin-dir` is session-scoped, these are invisible when the user runs
+Claude Code directly — nothing is written to `~/.claude/skills`.
+
+The repo's own `.claude/skills/` holds `yuki-conductor-restart`, which only makes
+sense while working *in* this repo, so it is project-scoped rather than bundled.
+
+`run_claude` passes `--setting-sources user,project,local`; without it a headless
+run loads no settings at all and the last three tiers aren't even resolvable.
+
 Finally, if `~/.yuki-conductor/workspace/system-prompt.md` exists, its contents
 are appended verbatim. That file is outside the repo, so it's where private
-capabilities belong — internal CLIs, user-scope skills, MCP servers. **Never name
-those in the repo-side prompt.** Absent or empty file is a no-op.
+*usage guidance* belongs — internal CLI invocation details, gotchas, examples.
+Registration of private user-scope skills belongs in `workspace/skills.yaml`
+instead. **Never name private capabilities in the repo-side prompt.** Absent or
+empty file is a no-op.
 
 The spawned run also gets `YUKI_CONDUCTOR_PROJECT` in its env so injected skills
 can locate and invoke the yuki-conductor CLI.
@@ -137,6 +154,14 @@ taskkill /f /im yuki-conductor.exe 2>/dev/null; tasklist | grep yuki
 # Start in background
 uv run yuki-conductor run &
 ```
+
+**From a session the daemon spawned, neither of those works.** The daemon is an
+ancestor of that session, so `_kill_daemon_processes()` refuses to kill it
+(printing a refusal to stderr while still exiting 0) and `schtasks /Run` starts a
+*second* daemon that can't bind port 2333 — the old one keeps serving stale code.
+Use the bundled `yuki-conductor-restart` skill, which launches
+`.claude/skills/yuki-conductor-restart/restart-daemon.ps1` via WMI
+`Win32_Process.Create` so it runs outside the caller's process tree.
 
 ## Frontend Deployment Gotchas
 

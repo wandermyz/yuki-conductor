@@ -1,43 +1,86 @@
-"""Discovery of Claude Code skill plugins injected into spawned sessions.
+"""Skill discovery for spawned Claude Code sessions.
 
-yuki-conductor spawns headless ``claude -p`` runs to do work. Those runs need
-to know they are driven by yuki-conductor — e.g. that scheduling belongs in
-yuki-conductor's cron config, not the OS crontab. We teach them via Claude Code
-*plugins* loaded per-session with ``--plugin-dir``.
+yuki-conductor spawns headless ``claude -p`` runs to do work. A headless run
+gets **no available-skills listing** — not for plugin skills, not for user-scope
+skills, not even for project-scope skills in ``<cwd>/.claude/skills``. Skills
+still *resolve* by name via the ``Skill`` tool in every one of those scopes; they
+are simply never advertised. So the model can use any skill it is told about,
+and will never discover one on its own.
 
-Two sources are collected:
+This module closes that gap by rebuilding the listing an interactive session
+would have shown, and appending it to the system prompt. Skills are grouped into
+tiers, and a skill declares its tier by *where it lives*:
 
-- the plugin bundled in this repo (``plugins/yuki-conductor``), providing the
-  cron skill;
-- plugins contributed by installed chat-app packages through the
-  ``yuki_conductor.skill_plugins`` entry-point group. Each such entry point is a
-  zero-arg callable returning the path to a plugin directory (one containing a
-  ``.claude-plugin/plugin.json``). This lets an installed plugin ship its own
-  skill (e.g. a messaging skill) without this public repo naming it.
+``YUKI``
+    yuki-conductor's own capabilities — the bundled ``plugins/yuki-conductor``
+    plugin plus any dirs contributed through the
+    ``yuki_conductor.skill_plugins`` entry-point group. Injected with
+    ``--plugin-dir`` and advertised in **every** session, whatever the cwd.
 
-Loading via ``--plugin-dir`` is session-scoped, so these skills are never
-visible when the user runs Claude Code directly.
+``PROJECT``
+    ``<cwd>/.claude/skills``. Advertised only when the session runs in that
+    project. This is where a skill belongs when it only makes sense inside one
+    repo (e.g. restarting the daemon, which is meaningful only in the
+    yuki-conductor checkout).
 
-A headless ``claude -p`` run does *not* receive the available-skills listing
-that interactive sessions get, so a plugin skill is reachable by name but
-undiscoverable. ``system_prompt()`` closes that gap: it reads each discovered
-``SKILL.md``'s frontmatter and names the skills in the appended system prompt.
+``ALWAYS``
+    User-scope skills named in ``workspace/skills.yaml`` under ``always:``.
+    Promoted out of the ambient tier and advertised in every session. The list
+    lives in the workspace, outside the repo, so private capabilities can be
+    promoted without naming them in git.
+
+``USER``
+    Everything else in ``~/.claude/skills`` — listed so the session knows the
+    same skills an interactive one would, without special emphasis.
+
+The last three tiers are only reachable because ``run_claude`` passes
+``--setting-sources user,project,local``; a headless run loads no settings, and
+therefore no skills, by default.
 
 Finally, an optional personal prompt at ``workspace/system-prompt.md`` is
-appended verbatim. It lives outside the repo, so it can name private
-capabilities (internal CLIs, user-scope skills, MCP servers) that must not be
-committed here.
+appended verbatim. It lives outside the repo, so it can carry usage guidance for
+private capabilities (internal CLIs, MCP servers) that must not be committed
+here.
 """
 
 import importlib.metadata
 import logging
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
-from yuki_conductor.config import SYSTEM_PROMPT_FILE, project_dir
+from yuki_conductor.config import (
+    SKILLS_CONFIG_FILE,
+    SYSTEM_PROMPT_FILE,
+    USER_SKILLS_DIR,
+    project_dir,
+)
 
 logger = logging.getLogger(__name__)
 
 _ENTRY_POINT_GROUP = "yuki_conductor.skill_plugins"
+
+
+class Tier(Enum):
+    """Scope of a skill, which decides how prominently it is advertised."""
+
+    YUKI = "yuki"
+    PROJECT = "project"
+    ALWAYS = "always"
+    USER = "user"
+
+
+@dataclass(frozen=True)
+class Skill:
+    name: str
+    description: str
+    tier: Tier
+    source: Path
+
+
+# --------------------------------------------------------------------------
+# Plugin directories (the YUKI tier)
+# --------------------------------------------------------------------------
 
 
 def _bundled_plugin_dir() -> Path:
@@ -79,19 +122,9 @@ def skill_plugin_dirs() -> list[str]:
     return dirs
 
 
-_PROMPT_HEADER = (
-    "You are running as an agent spawned by yuki-conductor, a personal daemon "
-    "that bridges the user's chat apps to Claude Code and runs scheduled tasks. "
-    "You are not being run interactively by the user. When a request maps to a "
-    "yuki-conductor capability — scheduling recurring work, or sending messages "
-    "through a connected chat app — use the injected skills below rather than "
-    "OS-level schedulers or unrelated tools.\n\n"
-    "Use `yuki-conductor-cron` to schedule any recurring or timed job — never "
-    "crontab, schtasks, launchd, or a built-in scheduler.\n\n"
-    "These skills are loaded for this session but are NOT listed in your "
-    "available-skills context, so you must invoke them by name with the Skill "
-    "tool. Available skills:"
-)
+# --------------------------------------------------------------------------
+# Frontmatter parsing
+# --------------------------------------------------------------------------
 
 
 def _parse_frontmatter_field(text: str, field: str) -> str | None:
@@ -120,24 +153,159 @@ def _parse_frontmatter_field(text: str, field: str) -> str | None:
     return None
 
 
-def _discovered_skills(plugin_dirs: list[str]) -> list[tuple[str, str]]:
-    """Return (name, description) for every SKILL.md under the given plugin dirs."""
-    found: list[tuple[str, str]] = []
-    for plugin_dir in plugin_dirs:
-        for skill_md in sorted(Path(plugin_dir).glob("skills/*/SKILL.md")):
-            text = skill_md.read_text(encoding="utf-8")
-            name = _parse_frontmatter_field(text, "name") or skill_md.parent.name
-            description = _parse_frontmatter_field(text, "description") or ""
-            found.append((name, description))
+def _read_skill(skill_md: Path, tier: Tier) -> Skill | None:
+    """Build a Skill from a SKILL.md, or None if it can't be read."""
+    try:
+        text = skill_md.read_text(encoding="utf-8")
+    except OSError:
+        logger.warning("Could not read skill file %s", skill_md, exc_info=True)
+        return None
+    return Skill(
+        name=_parse_frontmatter_field(text, "name") or skill_md.parent.name,
+        description=_parse_frontmatter_field(text, "description") or "",
+        tier=tier,
+        source=skill_md.parent,
+    )
+
+
+def _scan_skill_dir(root: Path, tier: Tier) -> list[Skill]:
+    """Read every ``<root>/*/SKILL.md`` into a Skill of the given tier."""
+    if not root.is_dir():
+        return []
+    found = []
+    for skill_md in sorted(root.glob("*/SKILL.md")):
+        skill = _read_skill(skill_md, tier)
+        if skill is not None:
+            found.append(skill)
     return found
+
+
+# --------------------------------------------------------------------------
+# Workspace config (the ALWAYS tier)
+# --------------------------------------------------------------------------
+
+
+def _always_skill_names() -> list[str]:
+    """Names of user-scope skills to advertise in every session.
+
+    Read from ``workspace/skills.yaml``::
+
+        always:
+          - some-internal-cli
+
+    That file is outside the repo, so a private skill can be promoted without
+    being named in git.
+    """
+    if not SKILLS_CONFIG_FILE.is_file():
+        return []
+    try:
+        import yaml
+
+        data = yaml.safe_load(SKILLS_CONFIG_FILE.read_text(encoding="utf-8")) or {}
+    except Exception:
+        logger.warning("Could not parse %s", SKILLS_CONFIG_FILE, exc_info=True)
+        return []
+    names = data.get("always") or []
+    if not isinstance(names, list):
+        logger.warning("%s: 'always' must be a list, got %r", SKILLS_CONFIG_FILE, type(names))
+        return []
+    return [str(n).strip() for n in names if str(n).strip()]
+
+
+# --------------------------------------------------------------------------
+# Resolution
+# --------------------------------------------------------------------------
+
+
+def resolve_skills(cwd: Path | str | None = None, plugin_dirs: list[str] | None = None) -> list[Skill]:
+    """Return every skill reachable in a session, tagged with its tier.
+
+    ``cwd`` is the session's working directory; it decides which project-scope
+    skills apply. Names are deduplicated across tiers in priority order
+    (yuki > project > always > user), so a project skill shadowing a user skill
+    of the same name is listed once, under the more specific tier.
+    """
+    if plugin_dirs is None:
+        plugin_dirs = skill_plugin_dirs()
+
+    collected: list[Skill] = []
+    for plugin_dir in plugin_dirs:
+        collected.extend(_scan_skill_dir(Path(plugin_dir) / "skills", Tier.YUKI))
+
+    if cwd is not None:
+        collected.extend(_scan_skill_dir(Path(cwd) / ".claude" / "skills", Tier.PROJECT))
+
+    always = set(_always_skill_names())
+    user_skills = _scan_skill_dir(USER_SKILLS_DIR, Tier.USER)
+    for skill in user_skills:
+        tier = Tier.ALWAYS if skill.name in always else Tier.USER
+        collected.append(Skill(skill.name, skill.description, tier, skill.source))
+
+    missing = always - {s.name for s in user_skills}
+    for name in sorted(missing):
+        logger.warning(
+            "%s lists %r under 'always', but no such skill in %s",
+            SKILLS_CONFIG_FILE,
+            name,
+            USER_SKILLS_DIR,
+        )
+
+    seen: set[str] = set()
+    resolved: list[Skill] = []
+    for skill in collected:
+        if skill.name in seen:
+            continue
+        seen.add(skill.name)
+        resolved.append(skill)
+    return resolved
+
+
+# --------------------------------------------------------------------------
+# Prompt rendering
+# --------------------------------------------------------------------------
+
+
+_PROMPT_HEADER = (
+    "You are running as an agent spawned by yuki-conductor, a personal daemon "
+    "that bridges the user's chat apps to Claude Code and runs scheduled tasks. "
+    "You are not being run interactively by the user.\n\n"
+    "The skills below are available to you, but this session receives no "
+    "automatic skill listing, so they will not appear anywhere else in your "
+    "context. Invoke one by name with the `Skill` tool. When a request matches a "
+    "skill's description, prefer that skill over improvising with generic tools "
+    "— especially over OS-level schedulers or unrelated CLIs."
+)
+
+_TIER_HEADINGS = {
+    Tier.YUKI: "## yuki-conductor capabilities (always available)",
+    Tier.PROJECT: "## This project: {cwd}",
+    Tier.ALWAYS: "## Always available",
+    Tier.USER: "## Your other skills",
+}
+
+
+def _render_skills(resolved: list[Skill], cwd: Path | str | None) -> list[str]:
+    """Render resolved skills as grouped markdown sections."""
+    lines: list[str] = []
+    for tier in Tier:
+        group = [s for s in resolved if s.tier is tier]
+        if not group:
+            continue
+        lines.append("")
+        lines.append(_TIER_HEADINGS[tier].format(cwd=cwd))
+        for skill in group:
+            lines.append(
+                f"- `{skill.name}` — {skill.description}" if skill.description else f"- `{skill.name}`"
+            )
+    return lines
 
 
 def _workspace_prompt() -> str | None:
     """Read the optional personal prompt appended to every spawned session.
 
-    Lives in the workspace (outside the repo), so it can name private
-    capabilities — internal CLIs, user-scope skills, MCP servers — without any
-    of that landing in git.
+    Lives in the workspace (outside the repo), so it can carry guidance for
+    private capabilities — internal CLIs, MCP servers — without any of that
+    landing in git.
     """
     if not SYSTEM_PROMPT_FILE.is_file():
         return None
@@ -148,23 +316,19 @@ def _workspace_prompt() -> str | None:
     return text
 
 
-def system_prompt(plugin_dirs: list[str] | None = None) -> str:
+def system_prompt(
+    plugin_dirs: list[str] | None = None, cwd: Path | str | None = None
+) -> str:
     """Build the ``--append-system-prompt`` text for a spawned session.
 
-    Skills loaded via ``--plugin-dir`` resolve by name but are not advertised in
-    a headless (``claude -p``) session's available-skills listing, so the model
-    never discovers them on its own. Naming each one here — with its description
-    — is what makes them reachable. The same applies to user-scope skills in
-    ``~/.claude/skills``; those are enabled by ``--setting-sources`` and named by
-    the workspace prompt, which is appended last.
+    Rebuilds the available-skills listing a headless run never gets, grouped by
+    tier so the model can tell yuki-conductor's own capabilities from the ones
+    that merely happen to be installed. The workspace prompt is appended last.
     """
-    if plugin_dirs is None:
-        plugin_dirs = skill_plugin_dirs()
+    resolved = resolve_skills(cwd=cwd, plugin_dirs=plugin_dirs)
 
-    lines = [_PROMPT_HEADER]
-    for name, description in _discovered_skills(plugin_dirs):
-        lines.append(f"- `{name}` — {description}" if description else f"- `{name}`")
-
+    lines = [_PROMPT_HEADER, *_render_skills(resolved, cwd)]
     prompt = "\n".join(lines)
+
     workspace = _workspace_prompt()
     return f"{prompt}\n\n{workspace}" if workspace else prompt

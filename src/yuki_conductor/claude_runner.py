@@ -145,15 +145,17 @@ def run_claude(
             broken UI subscriber can't kill the run.
     """
     plugin_dirs = skill_plugin_dirs()
+    effective_cwd = cwd or CLAUDE_WORKING_DIR
     args = [
         "-p",
         "--dangerously-skip-permissions",
         "--output-format", "stream-json",
         "--verbose",
-        # Without this, a headless run loads no settings at all, so user-scope
-        # skills in ~/.claude/skills are unreachable.
+        # Without this, a headless run loads no settings at all, so neither
+        # user-scope skills (~/.claude/skills) nor project-scope ones
+        # (<cwd>/.claude/skills) are reachable.
         "--setting-sources", "user,project,local",
-        "--append-system-prompt", system_prompt(plugin_dirs),
+        "--append-system-prompt", system_prompt(plugin_dirs, cwd=effective_cwd),
     ]
     for plugin_dir in plugin_dirs:
         args.extend(["--plugin-dir", plugin_dir])
@@ -186,7 +188,7 @@ def run_claude(
             encoding="utf-8",
             errors="replace",
             env=env,
-            cwd=cwd or CLAUDE_WORKING_DIR,
+            cwd=effective_cwd,
         )
     except FileNotFoundError:
         return ClaudeResult(
