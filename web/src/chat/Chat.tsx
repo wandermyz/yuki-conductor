@@ -232,6 +232,99 @@ function ConvMenu({
   );
 }
 
+/* ---------- Message actions (copy / read aloud) ---------- */
+
+/**
+ * Flatten markdown into something a speech synthesizer reads sensibly:
+ * drop fenced code, list bullets, emphasis/heading markers, and link syntax.
+ */
+function markdownToSpeech(md: string): string {
+  return md
+    .replace(/```[\s\S]*?```/g, " code block. ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/(\*\*|__|\*|_|~~)/g, "")
+    .replace(/^\s*\|.*\|\s*$/gm, (row) =>
+      row.replace(/\|/g, " ").replace(/^[\s-:]+$/, ""),
+    )
+    .replace(/\n{2,}/g, ". ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function MessageActions({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined;
+
+  // A live utterance outlives this component's render; stop it on unmount.
+  useEffect(() => {
+    return () => {
+      if (speaking) synth?.cancel();
+    };
+  }, [speaking, synth]);
+
+  const onCopy = async () => {
+    try {
+      await copyText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable — leave the icon unchanged */
+    }
+  };
+
+  // Must run inside the click handler: iOS Safari only unlocks speech
+  // synthesis from a direct user gesture.
+  const onSpeak = () => {
+    if (!synth) return;
+    if (speaking) {
+      synth.cancel();
+      setSpeaking(false);
+      return;
+    }
+    const spoken = markdownToSpeech(text);
+    if (!spoken) return;
+    synth.cancel();
+    const utter = new SpeechSynthesisUtterance(spoken);
+    utter.lang = document.documentElement.lang || navigator.language || "en-US";
+    utter.onend = () => setSpeaking(false);
+    utter.onerror = () => setSpeaking(false);
+    setSpeaking(true);
+    synth.speak(utter);
+  };
+
+  return (
+    <div className="bubble-actions">
+      <button
+        type="button"
+        className="bubble-action"
+        onClick={onCopy}
+        title="Copy markdown"
+        aria-label="Copy message as markdown"
+      >
+        {copied ? "✓" : "⧉"}
+      </button>
+      {synth && (
+        <button
+          type="button"
+          className={`bubble-action ${speaking ? "is-active" : ""}`}
+          onClick={onSpeak}
+          title={speaking ? "Stop reading" : "Read aloud"}
+          aria-label={speaking ? "Stop reading message" : "Read message aloud"}
+        >
+          {speaking ? "■" : "🔊"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function MessageBubble({ msg, onRetry }: { msg: ChatMessage; onRetry: (msg: ChatMessage) => void }) {
   return (
     <div className={`bubble ${msg.role} ${msg.status ? `msg-${msg.status}` : ""}`}>
@@ -266,6 +359,7 @@ function MessageBubble({ msg, onRetry }: { msg: ChatMessage; onRetry: (msg: Chat
       )}
       <div className="bubble-time">
         {formatTime(msg.created_at)}
+        {msg.text && <MessageActions text={msg.text} />}
         {msg.status === "sending" && <span className="msg-status"> · Sending…</span>}
         {msg.status === "failed" && (
           <span className="msg-status msg-status-failed">
