@@ -336,6 +336,34 @@
   cursor: pointer;
 }
 
+.rename-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text-h);
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+
+.rename-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rename-actions .copy-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .chat-main {
   flex: 1;
   display: flex;

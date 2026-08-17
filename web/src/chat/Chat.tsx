@@ -15,6 +15,7 @@ import {
   subscribeChatSocket,
   sendMessage,
   setConvStatus,
+  updateConversation,
   uploadFile,
 } from "./api";
 import type {
@@ -164,17 +165,71 @@ function SessionIdModal({ sessionId, onClose }: { sessionId: string; onClose: ()
   );
 }
 
+/* ---------- Rename Modal ---------- */
+
+function RenameModal({
+  initialTitle,
+  onSubmit,
+  onClose,
+}: {
+  initialTitle: string;
+  onSubmit: (title: string) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(initialTitle);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  const submit = () => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    onSubmit(trimmed);
+    onClose();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <h3 className="modal-title">Rename Conversation</h3>
+        <input
+          ref={inputRef}
+          className="rename-input"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit();
+            if (e.key === "Escape") onClose();
+          }}
+          placeholder="Conversation title"
+        />
+        <div className="rename-actions">
+          <button className="modal-close-btn" onClick={onClose}>Cancel</button>
+          <button className="copy-btn" onClick={submit} disabled={!value.trim()}>
+            Rename
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Context Menu ---------- */
 
 function ConvMenu({
   status,
   onShowSessionId,
+  onRename,
   onSetStatus,
   onDelete,
   onClose,
 }: {
   status: ConvStatus;
   onShowSessionId: () => void;
+  onRename: () => void;
   onSetStatus: (s: ConvStatus) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -190,6 +245,12 @@ function ConvMenu({
 
   return (
     <div className="conv-menu" ref={ref}>
+      <button
+        className="conv-menu-item"
+        onClick={(e) => { e.stopPropagation(); onRename(); onClose(); }}
+      >
+        Rename
+      </button>
       <button
         className="conv-menu-item"
         onClick={(e) => { e.stopPropagation(); onShowSessionId(); onClose(); }}
@@ -318,7 +379,7 @@ function MessageActions({ text }: { text: string }) {
           title={speaking ? "Stop reading" : "Read aloud"}
           aria-label={speaking ? "Stop reading message" : "Read message aloud"}
         >
-          {speaking ? "■" : "🔊"}
+          {speaking ? "■" : "🕪"}
         </button>
       )}
     </div>
@@ -570,6 +631,7 @@ function ChatThread({
   onRetry,
   onStop,
   onShowSessionId,
+  onRename,
   onSetStatus,
   onDelete,
 }: {
@@ -583,6 +645,7 @@ function ChatThread({
   onRetry: (msg: ChatMessage) => void;
   onStop: () => void;
   onShowSessionId: () => void;
+  onRename: () => void;
   onSetStatus: (s: ConvStatus) => void;
   onDelete: () => void;
 }) {
@@ -634,6 +697,7 @@ function ChatThread({
             <ConvMenu
               status={status}
               onShowSessionId={onShowSessionId}
+              onRename={onRename}
               onSetStatus={onSetStatus}
               onDelete={onDelete}
               onClose={() => setHeaderMenuOpen(false)}
@@ -672,6 +736,7 @@ export default function Chat({
   const [statuses, setStatuses] = useState<Record<string, ConvStatus>>({});
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [sessionIdModal, setSessionIdModal] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [usage, setUsage] = useState<Record<string, ConversationUsage>>({});
@@ -857,6 +922,22 @@ export default function Chat({
     }
   };
 
+  const rename = async (id: string, title: string) => {
+    // Optimistic: the sidebar and header relabel immediately; revert on failure.
+    const prevTitle = conversations.find((c) => c.id === id)?.title ?? null;
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, title } : c)),
+    );
+    try {
+      await updateConversation(id, { title });
+    } catch (e) {
+      console.error(e);
+      setConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, title: prevTitle } : c)),
+      );
+    }
+  };
+
   const handleSend = async (convId: string, text: string, files: AttachmentRef[]) => {
     // Optimistically render the message immediately so nothing typed is lost,
     // even if the network request fails. A temp id lets us update/dedupe later.
@@ -930,6 +1011,13 @@ export default function Chat({
     <div className={`chat ${selected ? "chat-detail-open" : ""}`}>
       {sessionIdModal && (
         <SessionIdModal sessionId={sessionIdModal} onClose={() => setSessionIdModal(null)} />
+      )}
+      {renaming && (
+        <RenameModal
+          initialTitle={conversations.find((c) => c.id === renaming)?.title || ""}
+          onSubmit={(title) => rename(renaming, title)}
+          onClose={() => setRenaming(null)}
+        />
       )}
       {showProjectPicker && (
         <div className="modal-overlay" onClick={() => setShowProjectPicker(false)}>
@@ -1023,6 +1111,7 @@ export default function Chat({
                         <ConvMenu
                           status={st}
                           onShowSessionId={() => setSessionIdModal(c.claude_session_id || "(no session yet)")}
+                          onRename={() => setRenaming(c.id)}
                           onSetStatus={(s) => setStatus(c.id, s)}
                           onDelete={() => remove(c.id)}
                           onClose={() => setMenuOpen(null)}
@@ -1050,6 +1139,7 @@ export default function Chat({
             onRetry={(msg) => handleRetry(active.id, msg)}
             onStop={() => cancelProcessing(active.id).catch(console.error)}
             onShowSessionId={() => setSessionIdModal(active.claude_session_id || "(no session yet)")}
+            onRename={() => setRenaming(active.id)}
             onSetStatus={(s) => setStatus(active.id, s)}
             onDelete={() => remove(active.id)}
           />
