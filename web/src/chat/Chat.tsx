@@ -379,7 +379,7 @@ function MessageActions({ text }: { text: string }) {
           title={speaking ? "Stop reading" : "Read aloud"}
           aria-label={speaking ? "Stop reading message" : "Read message aloud"}
         >
-          {speaking ? "■" : "🕪"}
+          {speaking ? "■" : "▶"}
         </button>
       )}
     </div>

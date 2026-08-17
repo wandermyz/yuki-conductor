@@ -618,7 +618,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 14px;
+  gap: 8px;
 }
 
 /* Transparent to layout, so the date and both buttons share one flex gap. */
@@ -633,9 +633,13 @@
   font: inherit;
   font-size: 26px;
   line-height: 1;
-  /* No horizontal padding: it would double up between the two buttons and
-     make that gap wider than the one after the date. */
-  padding: 8px 0;
+  /* Square hit area so the hover highlight isn't a narrow sliver. */
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 8px;
   cursor: pointer;
   opacity: 0.75;
