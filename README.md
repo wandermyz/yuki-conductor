@@ -1,106 +1,207 @@
 # yuki-conductor
 
-Bridge Slack messages to Claude Code CLI. Messages sent to the bot start a new Claude session; replies in the thread resume the same session for continuous conversation.
+A personal agent conductor for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 
-## Quick Start
+yuki-conductor runs as a background daemon that spawns headless `claude -p` sessions,
+tracks them, and routes them to wherever you are — a web UI on your local network, a
+Slack thread, or a cron schedule. Sessions are persistent: every conversation maps to a
+Claude session id, so replying to a thread days later resumes exactly where it left off.
+
+It started as a Slack bridge. The Slack surface is still there, but it is now one of
+several front ends and is entirely optional.
+
+## What it does
+
+- **Web UI** — a React app served by the daemon on port 2333, built for phone and
+  desktop. Chat with Claude, watch its intermediate steps stream live, browse every
+  session the daemon knows about, and attach files.
+- **Chat apps** — Slack via Socket Mode out of the box, plus any chat platform
+  installed as a plugin. Each session is tagged with its originating platform, so
+  replies always route back to the right place.
+- **Scheduled tasks** — cron expressions that open a thread, run a prompt, and post
+  the result. Follow-up replies in that thread continue the conversation.
+- **Terminal sessions** — attach to a live [Zellij](https://zellij.dev) session from
+  the browser through xterm.js, for the times you want the interactive Claude Code
+  TUI rather than a headless run (macOS only).
+- **Skill injection** — headless runs get an advertised skill listing they would
+  otherwise be missing, so a spawned session sees the same skills an interactive one
+  would in that directory.
+- **Proactive messages** — a running session can push messages into its own web
+  conversation while it works, rather than staying silent until the final response.
+
+## Architecture
+
+```
+                  ┌──────────────────────────────┐
+   web browser ───┤                              │
+   Slack       ───┤   yuki-conductor daemon      ├─── claude -p (headless)
+   cron        ───┤   (FastAPI + receivers)      ├─── zellij (interactive TUI)
+                  └──────────────┬───────────────┘
+                                 │
+                    SQLite: sessions, models,
+                    conversations, statuses
+```
+
+Everything personal — the database, cron definitions, secrets, attachments — lives in
+`~/.yuki-conductor/`, outside the repo.
+
+## Quick start
 
 ### Prerequisites
 
-- macOS, or Windows 10/11 with PowerShell 7+ (both support `run` and `daemon install`)
-- [uv](https://docs.astral.sh/uv/) package manager
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
-- A Slack workspace with admin access
+- Python 3.11+ and [uv](https://docs.astral.sh/uv/)
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code), installed and authenticated
+- Node.js and pnpm, to build the web frontend
+- macOS, or Windows 10/11 with PowerShell 7+
+- A Slack workspace *only* if you want the Slack surface
 
 ### Setup
 
-1. **Create a Slack app** — Follow [docs/slack-app-setup.md](docs/slack-app-setup.md)
-
-2. **Configure environment**
-   ```bash
-   mkdir -p ~/.yuki-conductor
-   cp .env.template ~/.yuki-conductor/.env
-   # Edit ~/.yuki-conductor/.env with your Slack tokens
-   ```
-
-3. **Test locally**
-   ```bash
-   # Test without Slack (calls real Claude CLI)
-   uv run yuki-conductor simulate message "What is 2+2?"
-
-   # Resume the session
-   uv run yuki-conductor simulate reply <thread_ts> "And 3+3?"
-   ```
-
-4. **Run in foreground**
-   ```bash
-   uv run yuki-conductor run
-   ```
-
-5. **Install as daemon** (auto-starts on login)
-   ```bash
-   uv run yuki-conductor daemon install
-   uv run yuki-conductor daemon status
-   ```
-
-## CLI Reference
-
-```
-yuki-conductor run                              # Start listener (foreground)
-yuki-conductor daemon install                   # Install auto-start daemon (LaunchAgent on macOS, Task Scheduler on Windows)
-yuki-conductor daemon uninstall                 # Remove the daemon
-yuki-conductor daemon restart                   # Restart daemon
-yuki-conductor daemon status                    # Check if running
-yuki-conductor daemon log                       # Show log file paths + recent output
-yuki-conductor simulate message "hello"         # Test without Slack
-yuki-conductor simulate reply <ts> "follow up"  # Resume session
+```bash
+mkdir -p ~/.yuki-conductor
+cp .env.template ~/.yuki-conductor/.env
+# Edit ~/.yuki-conductor/.env — see Configuration below
 ```
 
-## Windows
+To run web-only, with no chat integration at all, set `CHAT_APPS=none` and skip the
+Slack tokens entirely.
 
-`yuki-conductor run` works on Windows. Use PowerShell:
+Build the frontend and start in the foreground:
 
-```powershell
-mkdir $env:USERPROFILE\.yuki-conductor
-copy .env.template $env:USERPROFILE\.yuki-conductor\.env
-# Edit the .env in your editor of choice
+```bash
+cd web && pnpm install && pnpm build && cd ..
 uv run yuki-conductor run
 ```
 
-To run it as a background daemon that auto-starts at login, install it as a
-per-user Scheduled Task (the Windows equivalent of the macOS LaunchAgent):
+Open <http://localhost:2333>.
 
-```powershell
-uv run yuki-conductor daemon install     # Register + start the "YukiConductor" task
-uv run yuki-conductor daemon status      # Check whether it's running
-uv run yuki-conductor daemon restart     # Rebuild the frontend + restart
-uv run yuki-conductor daemon uninstall   # Remove the task
+Install it as a daemon that starts at login — a LaunchAgent on macOS, a per-user
+Scheduled Task on Windows, neither needing admin rights:
+
+```bash
+uv run yuki-conductor daemon install
+uv run yuki-conductor daemon status
 ```
 
-The task uses a Logon trigger with `RestartOnFailure`, runs in your user
-session (so uv, claude, and your `.env` are all available), and needs no admin
-elevation. It launches `bin/yuki-conductor-daemon.ps1`, which redirects
-stdout/stderr to `daemon.log` / `daemon.err.log` in your data dir. Because the
-trigger is at logon, the daemon only runs while you are logged in.
+### Configuration
 
-Caveats:
+`~/.yuki-conductor/.env`:
 
-- Zellij terminal sessions are disabled on Windows (the
-  `/ws/terminal/...` WebSocket returns "not supported"). The rest of the
-  web UI (chat, sessions list, cron) works the same as on macOS.
-- If your `%USERPROFILE%` is redirected into OneDrive, set
-  `YUKI_CONDUCTOR_DATA_DIR` to a non-synced path to avoid SQLite
-  corruption.
+| Variable | Purpose |
+| --- | --- |
+| `CHAT_APPS` | Comma-separated chat surfaces: `slack_socket`, plugin names, or `none` |
+| `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN` | Slack credentials (only with `slack_socket`) |
+| `SLACK_CRON_CHANNEL` | Channel that scheduled tasks post to |
+| `CLAUDE_WORKING_DIR` | Default directory that spawned sessions run in |
+| `CLAUDE_BIN` | Claude CLI path or name (default `claude`) |
+| `CLAUDE_TIMEOUT` | Per-run timeout in seconds |
+| `WEB_PORT` | Web UI port (default `2333`) |
+| `YUKI_CONDUCTOR_DATA_DIR` | Override the `~/.yuki-conductor` location |
+
+For Slack setup, see [docs/slack-app-setup.md](docs/slack-app-setup.md).
+
+## Web UI
+
+Four tabs, with state kept in the URL hash so a reload or a shared link lands in the
+same place.
+
+**Chat** — the main surface. Messages stream Claude's intermediate steps (tool calls,
+thinking, results) as they happen, and a browser that reconnects mid-run replays the
+buffer and resumes watching. Conversations can be renamed, marked read/unread/done,
+cancelled mid-run, and given file attachments. Drafts persist per conversation.
+
+**Sessions** — every session the daemon has tracked, across Slack, chat plugins, and
+Zellij, with deep links back into the originating Slack thread.
+
+**Projects** — registered project directories with a file browser, used when creating
+new terminal sessions.
+
+**Status** — health of each chat receiver.
+
+## Scheduled tasks
+
+Define tasks in `~/.yuki-conductor/workspace/cron.yaml` (see
+[cron.example.yaml](cron.example.yaml)):
+
+```yaml
+tasks:
+  - name: morning-briefing
+    schedule: "0 9 * * 1-5"
+    description: "Morning briefing (weekdays at 9am)"
+    prompt: >
+      Summarize the git log from the past 24 hours and suggest
+      the top 1-2 things to focus on today.
+```
+
+When a task fires it opens a new thread, runs the prompt, and posts the result. Add
+`chat_app:` to pin a task to a particular surface; omit it and the first enabled
+platform is used, preferring Slack. A task naming a platform that isn't enabled is
+skipped with a warning rather than misrouted.
+
+## Skills
+
+A headless `claude -p` run receives no available-skills listing, in any scope — even
+though skills *resolve* correctly when invoked by name. yuki-conductor closes that gap
+by building the listing itself and injecting it via `--append-system-prompt`.
+
+Skills are discovered in four tiers, each declared by where the skill lives:
+
+| Tier | Source | Scope |
+| --- | --- | --- |
+| `YUKI` | bundled and plugin-contributed dirs | every session |
+| `PROJECT` | `<cwd>/.claude/skills` | only when that project is the cwd |
+| `ALWAYS` | `~/.claude/skills`, listed in `workspace/skills.yaml` | every session, emphasized |
+| `USER` | the rest of `~/.claude/skills` | every session |
+
+See [skills.example.yaml](skills.example.yaml). A personal system prompt at
+`~/.yuki-conductor/workspace/system-prompt.md` is appended verbatim to every run.
+
+## Outbound messages
+
+A spawned run normally speaks only through its final response. `send` gives it a
+second channel:
+
+```bash
+uv run yuki-conductor send -c <conversation-id> "halfway done, tests are green"
+```
+
+The text is persisted as an assistant message and broadcast over the chat WebSocket,
+so connected browsers see it immediately and reconnecting ones find it in scrollback.
+This reaches the web platform only.
+
+## CLI reference
+
+```
+yuki-conductor run                              # Start the daemon in the foreground
+yuki-conductor daemon install|uninstall         # Manage the auto-start daemon
+yuki-conductor daemon restart|status|log        # Control and inspect it
+yuki-conductor web rebuild                      # Rebuild frontend + hot-reload browsers
+yuki-conductor send [-c <id>] "text"            # Push a message into a web conversation
+yuki-conductor simulate message "hello"         # Run a prompt with no chat app attached
+yuki-conductor simulate reply <ts> "follow up"  # Resume a session by thread id
+```
+
+## Windows notes
+
+Everything works except Zellij terminal sessions, which are disabled — the
+`/ws/terminal/...` WebSocket reports "not supported". The rest of the web UI behaves
+identically.
+
+If `%USERPROFILE%` is redirected into OneDrive, point `YUKI_CONDUCTOR_DATA_DIR` at a
+non-synced path; SQLite and file sync do not mix.
 
 ## Development
 
 ```bash
-uv run pytest
+uv run pytest              # Tests
+uv run ruff check .        # Lint
+cd web && pnpm dev         # Frontend dev server, proxies /api to port 2333
 ```
 
-## How It Works
+After frontend changes, `uv run yuki-conductor web rebuild` rebuilds and pushes a
+reload to connected browsers. After backend changes, restart the daemon — the running
+process holds the old code in memory.
 
-1. The bot listens for Slack messages via [Socket Mode](https://api.slack.com/apis/socket-mode)
-2. Each new message spawns `claude -p --dangerously-skip-permissions --output-format json`
-3. The response is posted as a thread reply
-4. Thread replies look up the stored `session_id` and resume with `claude -r <session_id>`
-5. Session mappings (`thread_ts -> session_id`) and per-channel model settings are persisted in the SQLite DB at `~/.yuki-conductor/workspace/yuki-conductor.db`
+## License
+
+MIT — see [LICENSE](LICENSE).
