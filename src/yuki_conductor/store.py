@@ -2,6 +2,7 @@
 
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 from yuki_conductor.config import DB_FILE
@@ -250,8 +251,6 @@ class SessionStore:
 
     def stats(self) -> dict:
         """Return usage statistics from the sessions table."""
-        import time
-
         now = time.time()
         day7 = now - 7 * 86400
         day30 = now - 30 * 86400
@@ -286,6 +285,146 @@ class SessionStore:
                 }
             finally:
                 con.close()
+
+
+class CronRunStore:
+    """Run history for cron tasks: one row per firing, keyed by task name.
+
+    Rows are inserted when a run starts (so an in-flight run is visible in the
+    UI) and updated when it finishes. History is capped per task by
+    ``MAX_RUNS_PER_TASK``; older rows are pruned on every insert.
+    """
+
+    MAX_RUNS_PER_TASK = 30
+
+    def __init__(self, db_path: Path | None = None):
+        self._db_path = db_path or DB_FILE
+        self._lock = threading.Lock()
+        self._init_table()
+
+    def _connect(self) -> sqlite3.Connection:
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        return sqlite3.connect(str(self._db_path))
+
+    def _init_table(self) -> None:
+        with self._lock:
+            con = self._connect()
+            try:
+                con.execute(
+                    "CREATE TABLE IF NOT EXISTS cron_runs ("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    "task_name TEXT NOT NULL, "
+                    "trigger TEXT NOT NULL DEFAULT 'schedule', "
+                    "status TEXT NOT NULL, "
+                    "started_at REAL NOT NULL, "
+                    "finished_at REAL, "
+                    "response TEXT, "
+                    "error TEXT, "
+                    "notified INTEGER NOT NULL DEFAULT 0, "
+                    "session_id TEXT, "
+                    "conversation_id TEXT)"
+                )
+                con.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_cron_runs_task "
+                    "ON cron_runs (task_name, started_at DESC)"
+                )
+                con.commit()
+            finally:
+                con.close()
+
+    def start_run(self, task_name: str, trigger: str = "schedule") -> int:
+        """Record a run that has just begun. Returns its row id."""
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    "INSERT INTO cron_runs (task_name, trigger, status, started_at) "
+                    "VALUES (?, ?, 'running', ?)",
+                    (task_name, trigger, time.time()),
+                )
+                run_id = cur.lastrowid
+                # Prune anything past the retention window for this task.
+                con.execute(
+                    "DELETE FROM cron_runs WHERE task_name = ? AND id NOT IN "
+                    "(SELECT id FROM cron_runs WHERE task_name = ? "
+                    " ORDER BY started_at DESC, id DESC LIMIT ?)",
+                    (task_name, task_name, self.MAX_RUNS_PER_TASK),
+                )
+                con.commit()
+                return run_id
+            finally:
+                con.close()
+
+    def finish_run(
+        self,
+        run_id: int,
+        status: str,
+        response: str | None = None,
+        error: str | None = None,
+        notified: bool = False,
+        session_id: str | None = None,
+        conversation_id: str | None = None,
+    ) -> None:
+        """Mark a run finished. ``status`` is 'success' or 'error'."""
+        with self._lock:
+            con = self._connect()
+            try:
+                con.execute(
+                    "UPDATE cron_runs SET status = ?, finished_at = ?, response = ?, "
+                    "error = ?, notified = ?, session_id = ?, conversation_id = ? "
+                    "WHERE id = ?",
+                    (
+                        status,
+                        time.time(),
+                        response,
+                        error,
+                        1 if notified else 0,
+                        session_id,
+                        conversation_id,
+                        run_id,
+                    ),
+                )
+                con.commit()
+            finally:
+                con.close()
+
+    def list_runs(self, task_name: str, limit: int = MAX_RUNS_PER_TASK) -> list[dict]:
+        """Most recent runs for a task, newest first."""
+        with self._lock:
+            con = self._connect()
+            try:
+                rows = con.execute(
+                    "SELECT id, task_name, trigger, status, started_at, finished_at, "
+                    "response, error, notified, session_id, conversation_id "
+                    "FROM cron_runs WHERE task_name = ? "
+                    "ORDER BY started_at DESC, id DESC LIMIT ?",
+                    (task_name, limit),
+                ).fetchall()
+                return [
+                    {
+                        "id": r[0],
+                        "task_name": r[1],
+                        "trigger": r[2],
+                        "status": r[3],
+                        "started_at": r[4],
+                        "finished_at": r[5],
+                        "response": r[6],
+                        "error": r[7],
+                        "notified": bool(r[8]),
+                        "session_id": r[9],
+                        "conversation_id": r[10],
+                    }
+                    for r in rows
+                ]
+            finally:
+                con.close()
+
+    def last_run(self, task_name: str) -> dict | None:
+        runs = self.list_runs(task_name, limit=1)
+        return runs[0] if runs else None
+
+    def is_running(self, task_name: str) -> bool:
+        return any(r["status"] == "running" for r in self.list_runs(task_name, limit=5))
 
 
 class ModelStore(_SqliteKVStore):

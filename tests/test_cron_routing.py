@@ -1,9 +1,11 @@
 """Tests for cron task → MessagingPlatform routing."""
 
+import threading
 from unittest.mock import patch
 
 from yuki_conductor.claude_runner import ClaudeResult
-from yuki_conductor.cron_scheduler import CronTask, _pick_platform, _run_cron_task
+from yuki_conductor.cron_config import CronTask
+from yuki_conductor.cron_scheduler import _pick_platform, _run_cron_task
 from yuki_conductor.messaging.platform import OutgoingMessage
 
 
@@ -189,3 +191,91 @@ def test_platform_without_reserve_still_starts_a_thread():
 
     assert run.call_args.kwargs["web_conversation_id"] is None
     assert platform.threads == [("ping", "desc t1")]
+
+
+# ---- Run history recording ----
+
+
+def test_successful_run_is_recorded(isolated_cron_run_store):
+    platform = FakePlatform("slack")
+    result = ClaudeResult(text="ping <notify>", session_id="sess-1")
+    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+        _run_cron_task(_task(chat_app="slack"), {"slack": platform})
+
+    run = isolated_cron_run_store.last_run("t1")
+    assert run["status"] == "success"
+    assert run["response"] == "ping"
+    assert run["notified"] is True
+    assert run["trigger"] == "schedule"
+    assert run["session_id"] == "sess-1"
+
+
+def test_silent_run_is_recorded_as_not_notified(isolated_cron_run_store):
+    result = ClaudeResult(text="nothing <silence>", session_id="sess-1")
+    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+        _run_cron_task(_task(), {})
+
+    run = isolated_cron_run_store.last_run("t1")
+    assert run["status"] == "success"
+    assert run["notified"] is False
+    assert run["response"] == "nothing"
+
+
+def test_claude_error_result_is_recorded_as_error(isolated_cron_run_store):
+    result = ClaudeResult(text="it broke", session_id=None, is_error=True)
+    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+        _run_cron_task(_task(), {})
+
+    run = isolated_cron_run_store.last_run("t1")
+    assert run["status"] == "error"
+    assert run["error"] == "it broke"
+
+
+def test_raised_exception_is_recorded_as_error(isolated_cron_run_store):
+    with patch(
+        "yuki_conductor.cron_scheduler.run_claude",
+        side_effect=RuntimeError("subprocess died"),
+    ):
+        _run_cron_task(_task(), {})
+
+    run = isolated_cron_run_store.last_run("t1")
+    assert run["status"] == "error"
+    assert "subprocess died" in run["error"]
+    assert run["finished_at"] is not None
+
+
+def test_reserved_conversation_is_recorded_on_the_run(isolated_cron_run_store):
+    platform = ReservingPlatform()
+    result = ClaudeResult(text="done <notify>", session_id="sess-1")
+    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+        _run_cron_task(_task(), {"web": platform})
+
+    assert isolated_cron_run_store.last_run("t1")["conversation_id"] == "web-reserved-0"
+
+
+# ---- Manual triggering ----
+
+
+def test_trigger_task_runs_a_defined_task(isolated_cron_run_store):
+    from yuki_conductor import cron_scheduler
+
+    result = ClaudeResult(text="manual go <notify>", session_id="sess-1")
+    with (
+        patch.object(cron_scheduler, "_load_cron_tasks", return_value=[_task()]),
+        patch.object(cron_scheduler, "run_claude", return_value=result),
+    ):
+        assert cron_scheduler.trigger_task("t1") is True
+        for thread in threading.enumerate():
+            if thread.name == "cron-manual-t1":
+                thread.join(timeout=5)
+
+    run = isolated_cron_run_store.last_run("t1")
+    assert run["trigger"] == "manual"
+    assert run["status"] == "success"
+
+
+def test_trigger_task_unknown_name_returns_false():
+    from yuki_conductor import cron_scheduler
+
+    with patch.object(cron_scheduler, "_load_cron_tasks", return_value=[_task()]):
+        assert cron_scheduler.trigger_task("does-not-exist") is False

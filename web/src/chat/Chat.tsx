@@ -118,7 +118,7 @@ function newTempId(): string {
 }
 
 /** Copy to clipboard, falling back to a hidden textarea off secure contexts. */
-async function copyText(text: string): Promise<void> {
+export async function copyText(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     return navigator.clipboard.writeText(text);
   }

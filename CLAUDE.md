@@ -18,6 +18,7 @@ src/yuki_conductor/
     slack_platform.py  — Slack adapter
     web_platform.py    — Web chat adapter
   cron_scheduler.py — cron task scheduler (reads ~/.yuki-conductor/workspace/cron.yaml)
+  cron_config.py    — cron.yaml parsing, cadence prose, surgical field edits
   daemon.py         — macOS LaunchAgent management
   web_server.py     — FastAPI HTTP server (agent conductor web UI)
 web/                — React + Vite frontend (pnpm, TypeScript)
@@ -117,6 +118,39 @@ The daemon supports scheduled tasks via `~/.yuki-conductor/workspace/cron.yaml`.
 Routing rule when `chat_app:` is omitted: pick the first enabled platform, with `slack` preferred. If `chat_app:` names a platform that isn't in `CHAT_APPS`, the task is skipped with a warning rather than misrouted.
 
 Required env var (only when `slack_socket` is enabled): `SLACK_CRON_CHANNEL` — the Slack channel ID to post cron results to.
+
+### Automations tab
+
+The web UI surfaces cron tasks as **Automations** (`web/src/AutomationsView.tsx`,
+`/api/automations`). The sidebar lists tasks by `display_name` → `description` →
+truncated prompt; the detail pane shows a link back to `origin_conversation`, a
+foldable prompt with the cron string plus a plain-English cadence, and the run
+history with a "Run now" button.
+
+`cron_config.py` owns everything about the file that isn't scheduling:
+
+- `load_tasks()` — the single parser. `cron_scheduler` uses it too; there is no
+  second copy of the YAML schema.
+- `describe_schedule()` — cron expression → prose. Pure string work, no deps.
+- `set_task_field()` — **line-based**, not a PyYAML round trip. Rewriting the
+  document would reflow every `prompt: >` block and drop comments, so renames
+  find the task's `name:` line and patch one key inside its block. Only fields
+  in `EDITABLE_FIELDS` may be written; everything else is read-only from the UI.
+
+Run history lives in the `cron_runs` table of the same workspace DB, via
+`CronRunStore`. A row is inserted as `running` when a task fires and updated on
+completion, so an in-flight run is visible; the last 30 runs per task are kept
+and older rows are pruned on insert. History is keyed by `name`, so renaming a
+task's `name` (as opposed to its `display_name`) orphans its history.
+
+Manual runs go through `cron_scheduler.trigger_task()`, which reuses the exact
+scheduled path — same prompt prefix, same notification routing — and tags the
+row `trigger='manual'`. It notifies via the platforms `start_cron_scheduler()`
+registered, so it only works in the daemon process.
+
+Tests that exercise a cron run must not touch the real workspace DB; the autouse
+`isolated_cron_run_store` fixture in `tests/conftest.py` rebinds the store.
+
 
 ## Key Commands
 
