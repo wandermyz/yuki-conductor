@@ -8,6 +8,7 @@ import {
   runAutomation,
 } from "./chat/api";
 import type { Automation, CronRun } from "./chat/api";
+import { copyText } from "./chat/Chat";
 
 /** While a run is in flight, poll so the history fills in without a reload. */
 const RUNNING_POLL_MS = 5000;
@@ -27,6 +28,38 @@ function formatDuration(run: CronRun): string {
   if (secs < 60) return `${secs}s`;
   const mins = Math.floor(secs / 60);
   return `${mins}m ${secs % 60}s`;
+}
+
+/** The session id plus the exact command to reopen that run in Claude Code. */
+function RunSession({ sessionId }: { sessionId: string }) {
+  const [copied, setCopied] = useState<"id" | "cmd" | null>(null);
+
+  const copy = async (what: "id" | "cmd", text: string) => {
+    await copyText(text);
+    setCopied(what);
+    setTimeout(() => setCopied(null), 1500);
+  };
+
+  return (
+    <div className="run-session">
+      <span className="run-session-label">Session</span>
+      <code className="run-session-id">{sessionId}</code>
+      <button
+        className="run-session-copy"
+        title="Copy session id"
+        onClick={() => copy("id", sessionId)}
+      >
+        {copied === "id" ? "copied" : "copy id"}
+      </button>
+      <button
+        className="run-session-copy"
+        title={`claude --resume ${sessionId}`}
+        onClick={() => copy("cmd", `claude --resume ${sessionId}`)}
+      >
+        {copied === "cmd" ? "copied" : "copy --resume"}
+      </button>
+    </div>
+  );
 }
 
 function RunRow({ run }: { run: CronRun }) {
@@ -58,6 +91,7 @@ function RunRow({ run }: { run: CronRun }) {
           ) : (
             <p className="run-empty">No output recorded.</p>
           )}
+          {run.session_id && <RunSession sessionId={run.session_id} />}
           {run.conversation_id && (
             <a className="run-conv-link" href={`#chat/${run.conversation_id}`}>
               Open this run's conversation &rarr;

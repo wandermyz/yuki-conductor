@@ -1107,3 +1107,41 @@
 .run-conv-link:hover {
   text-decoration: underline;
 }
+
+.run-session {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.run-session-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+}
+
+.run-session-id {
+  font-family: var(--mono);
+  font-size: 12px;
+  user-select: all;
+  word-break: break-all;
+}
+
+.run-session-copy {
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.run-session-copy:hover {
+  border-color: var(--accent);
+}
