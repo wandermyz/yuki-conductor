@@ -2,26 +2,27 @@
 
 import logging
 import threading
-from dataclasses import dataclass
 from datetime import datetime
 
-import yaml
 from croniter import croniter
 
 from yuki_conductor.claude_runner import run_claude
-from yuki_conductor.config import CRON_FILE, WORKSPACE_DIR, chat_apps
+from yuki_conductor.config import WORKSPACE_DIR, chat_apps
+from yuki_conductor.cron_config import CronTask, load_tasks
 from yuki_conductor.messaging import MessagingPlatform, OutgoingMessage
+from yuki_conductor.store import CronRunStore
 
 logger = logging.getLogger(__name__)
 
+run_store = CronRunStore()
 
-@dataclass
-class CronTask:
-    name: str
-    schedule: str
-    description: str
-    prompt: str
-    chat_app: str | None = None  # "slack" | plugin name | None (default routing)
+# Platforms registered by runtime.start(), so a manually triggered run from the
+# web UI notifies the same place a scheduled firing would.
+_platforms: dict[str, MessagingPlatform] = {}
+
+
+def registered_platforms() -> dict[str, MessagingPlatform]:
+    return _platforms
 
 
 def _ensure_workspace() -> None:
@@ -32,35 +33,10 @@ def _ensure_workspace() -> None:
 
 def _load_cron_tasks() -> list[CronTask]:
     """Load cron tasks from the workspace YAML file."""
-    if not CRON_FILE.exists():
-        logger.info(f"No cron file found at {CRON_FILE}, skipping cron scheduling")
-        return []
-
-    with open(CRON_FILE) as f:
-        data = yaml.safe_load(f)
-
-    if not data or "tasks" not in data:
-        logger.warning(f"Cron file {CRON_FILE} has no 'tasks' key")
-        return []
-
-    tasks = []
-    for entry in data["tasks"]:
-        try:
-            task = CronTask(
-                name=entry["name"],
-                schedule=entry["schedule"],
-                description=entry.get("description", ""),
-                prompt=entry["prompt"],
-                chat_app=entry.get("chat_app"),
-            )
-            # Validate cron expression
-            croniter(task.schedule)
-            tasks.append(task)
-        except (KeyError, ValueError) as e:
-            logger.error(f"Invalid cron task entry: {entry} — {e}")
-
-    logger.info(f"Loaded {len(tasks)} cron task(s) from {CRON_FILE}")
+    tasks = load_tasks()
+    logger.info(f"Loaded {len(tasks)} cron task(s)")
     return tasks
+
 
 
 _CRON_PROMPT_PREFIX = (
@@ -109,12 +85,34 @@ def _pick_platform(
 
 
 def _run_cron_task(
-    task: CronTask, platforms_by_name: dict[str, MessagingPlatform]
+    task: CronTask,
+    platforms_by_name: dict[str, MessagingPlatform],
+    trigger: str = "schedule",
 ) -> None:
-    """Execute a single cron task: run Claude, post via the routed platform if <notify>."""
-    logger.info(f"Cron task={task.name} starting, running Claude...")
+    """Execute a single cron task: run Claude, post via the routed platform if <notify>.
 
-    title = task.description or task.name
+    Every firing is recorded in ``cron_runs`` — a 'running' row up front so the
+    Automations tab can show a run in flight, updated with the response (or the
+    traceback, if the run blew up) when it settles.
+    """
+    logger.info(f"Cron task={task.name} starting ({trigger}), running Claude...")
+    run_id = run_store.start_run(task.name, trigger=trigger)
+
+    try:
+        _execute(task, platforms_by_name, run_id)
+    except Exception as exc:
+        logger.error(f"Cron task={task.name} failed", exc_info=True)
+        run_store.finish_run(
+            run_id, status="error", error=f"{type(exc).__name__}: {exc}"
+        )
+
+
+def _execute(
+    task: CronTask,
+    platforms_by_name: dict[str, MessagingPlatform],
+    run_id: int,
+) -> None:
+    title = task.label
     platform = _pick_platform(task, platforms_by_name) if platforms_by_name else None
 
     # Reserve the destination conversation up front where the platform supports
@@ -136,6 +134,24 @@ def _run_cron_task(
     response_text = result.text or ""
     should_notify = "<notify>" in response_text
     display_text = response_text.replace("<notify>", "").replace("<silence>", "").strip()
+
+    if result.is_error:
+        run_store.finish_run(
+            run_id,
+            status="error",
+            error=display_text or "Claude run failed with no output",
+            session_id=result.session_id,
+            conversation_id=reserved,
+        )
+    else:
+        run_store.finish_run(
+            run_id,
+            status="success",
+            response=display_text,
+            notified=should_notify,
+            session_id=result.session_id,
+            conversation_id=reserved,
+        )
 
     if not should_notify:
         logger.info(f"Cron task={task.name} completed silently: {display_text[:200]}")
@@ -182,6 +198,25 @@ def _tasks_changed(old: list[CronTask], new: list[CronTask]) -> bool:
     def to_tuple(t: CronTask) -> tuple:
         return (t.name, t.schedule, t.description, t.prompt, t.chat_app)
     return [to_tuple(t) for t in old] != [to_tuple(t) for t in new]
+
+
+def trigger_task(task_name: str) -> bool:
+    """Fire a task right now, off-schedule. Returns False if it isn't defined.
+
+    Backs the "Run now" button in the Automations tab. The run goes through the
+    same path as a scheduled firing — same prompt prefix, same notification
+    routing — and is tagged ``trigger='manual'`` in the history.
+    """
+    task = next((t for t in _load_cron_tasks() if t.name == task_name), None)
+    if task is None:
+        return False
+    threading.Thread(
+        target=_run_cron_task,
+        args=(task, _platforms, "manual"),
+        name=f"cron-manual-{task.name}",
+        daemon=True,
+    ).start()
+    return True
 
 
 def _scheduler_loop(
@@ -236,6 +271,8 @@ def start_cron_scheduler(
     """
     _ensure_workspace()
     platforms_by_name = platforms_by_name or {}
+    _platforms.clear()
+    _platforms.update(platforms_by_name)
 
     stop_event = threading.Event()
     thread = threading.Thread(

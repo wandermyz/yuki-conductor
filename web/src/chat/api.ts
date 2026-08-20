@@ -220,6 +220,72 @@ export async function browseDirectory(path: string = ""): Promise<BrowseResult> 
   return r.json();
 }
 
+export interface CronRun {
+  id: number;
+  task_name: string;
+  trigger: "schedule" | "manual";
+  status: "running" | "success" | "error";
+  started_at: number;
+  finished_at: number | null;
+  response: string | null;
+  error: string | null;
+  notified: boolean;
+  session_id: string | null;
+  conversation_id: string | null;
+}
+
+export interface Automation {
+  name: string;
+  label: string;
+  display_name: string | null;
+  description: string;
+  schedule: string;
+  schedule_text: string;
+  next_runs: number[];
+  prompt: string;
+  chat_app: string | null;
+  origin_conversation: string | null;
+  last_run: CronRun | null;
+  running: boolean;
+  /** Only present on the single-automation endpoint. */
+  runs?: CronRun[];
+}
+
+export async function listAutomations(): Promise<Automation[]> {
+  const r = await fetch("/api/automations");
+  if (!r.ok) throw new Error("Failed to list automations");
+  return r.json();
+}
+
+export async function getAutomation(name: string): Promise<Automation> {
+  const r = await fetch(`/api/automations/${encodeURIComponent(name)}`);
+  if (!r.ok) throw new Error("Failed to load automation");
+  return r.json();
+}
+
+export async function renameAutomation(
+  name: string,
+  displayName: string,
+): Promise<Automation> {
+  const r = await fetch(`/api/automations/${encodeURIComponent(name)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ display_name: displayName }),
+  });
+  if (!r.ok) throw new Error("Failed to rename automation");
+  return r.json();
+}
+
+export async function runAutomation(name: string): Promise<void> {
+  const r = await fetch(`/api/automations/${encodeURIComponent(name)}/run`, {
+    method: "POST",
+  });
+  if (!r.ok) {
+    const detail = await r.json().catch(() => null);
+    throw new Error(detail?.detail || "Failed to run automation");
+  }
+}
+
 /**
  * Module-level singleton WebSocket that stays alive across component
  * mount/unmount cycles (e.g. tab switches). Subscribers are notified of

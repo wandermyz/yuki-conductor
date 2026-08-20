@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import AutomationsView from "./AutomationsView";
 import Chat from "./chat/Chat";
 import ProjectsView from "./ProjectsView";
 import StatusView from "./StatusView";
 import Terminal from "./Terminal";
 import "./App.css";
 
-type Tab = "sessions" | "chat" | "projects" | "status";
+type Tab = "sessions" | "chat" | "projects" | "automations" | "status";
 
 interface Session {
   thread_ts: string;
@@ -462,10 +463,18 @@ function parseHash(): { tab: Tab; chatId: string | null } {
   if (hash === "chat") return { tab: "chat", chatId: null };
   if (hash === "sessions") return { tab: "sessions", chatId: null };
   if (hash === "projects") return { tab: "projects", chatId: null };
+  if (hash === "automations") return { tab: "automations", chatId: null };
   if (hash === "status") return { tab: "status", chatId: null };
   // Fall back to localStorage for users without a hash yet
   const saved = window.localStorage.getItem("yuki-tab");
-  if (saved === "chat" || saved === "sessions" || saved === "projects" || saved === "status") return { tab: saved, chatId: null };
+  if (
+    saved === "chat" ||
+    saved === "sessions" ||
+    saved === "projects" ||
+    saved === "automations" ||
+    saved === "status"
+  )
+    return { tab: saved, chatId: null };
   return { tab: "chat", chatId: null };
 }
 
@@ -500,7 +509,17 @@ function App() {
   return (
     <div className="root">
       <div className="tab-content">
-        {tab === "chat" ? <Chat selectedId={chatId} onSelectId={setChatId} /> : tab === "projects" ? <ProjectsView /> : tab === "status" ? <StatusView /> : <SessionsView />}
+        {tab === "chat" ? (
+          <Chat selectedId={chatId} onSelectId={setChatId} />
+        ) : tab === "projects" ? (
+          <ProjectsView />
+        ) : tab === "automations" ? (
+          <AutomationsView />
+        ) : tab === "status" ? (
+          <StatusView />
+        ) : (
+          <SessionsView />
+        )}
       </div>
       <nav className="tabbar" role="tablist">
         <button
@@ -542,6 +561,28 @@ function App() {
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           </svg>
           <span className="tab-label">Projects</span>
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "automations"}
+          className={`tab ${tab === "automations" ? "active" : ""}`}
+          onClick={() => setTab("automations")}
+        >
+          <svg
+            className="tab-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+            <path d="M12 3v2M21 12h-2M12 21v-2M3 12h2" />
+          </svg>
+          <span className="tab-label">Automations</span>
         </button>
         <button
           role="tab"

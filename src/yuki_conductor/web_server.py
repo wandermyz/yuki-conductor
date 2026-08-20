@@ -33,7 +33,7 @@ from yuki_conductor.messaging.web_platform import (
     resolve_file,
     serialize_message,
 )
-from yuki_conductor.store import ProjectStore, SessionStore
+from yuki_conductor.store import CronRunStore, ProjectStore, SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,7 @@ _WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 store = SessionStore()
 conv_store = ConversationStore()
 project_store = ProjectStore()
+cron_run_store = CronRunStore()
 ws_manager = ConnectionManager()
 
 
@@ -458,6 +459,83 @@ def create_api() -> FastAPI:
         # looks unread after a reload.
         ws_manager.broadcast(conv_id, {"type": "status", "status": "unread"})
         return {"ok": True, "conversation_id": conv_id, "created": created}
+
+    # ── Automations (cron) endpoints ──────────────────────────────────────
+
+    def _task_to_dict(task, *, include_runs: bool = False) -> dict:
+        from yuki_conductor.cron_config import describe_schedule, next_fire_times
+
+        data = {
+            "name": task.name,
+            "label": task.label,
+            "display_name": task.display_name,
+            "description": task.description,
+            "schedule": task.schedule,
+            "schedule_text": describe_schedule(task.schedule),
+            "next_runs": next_fire_times(task.schedule, 3),
+            "prompt": task.prompt,
+            "chat_app": task.chat_app,
+            "origin_conversation": task.origin_conversation,
+        }
+        last = cron_run_store.last_run(task.name)
+        data["last_run"] = last
+        data["running"] = bool(last and last["status"] == "running")
+        if include_runs:
+            data["runs"] = cron_run_store.list_runs(task.name)
+        return data
+
+    @api.get("/api/automations")
+    def list_automations():
+        from yuki_conductor.cron_config import load_tasks
+
+        tasks = [_task_to_dict(t) for t in load_tasks()]
+        # Most recently run first; never-run tasks sink to the bottom.
+        tasks.sort(
+            key=lambda t: t["last_run"]["started_at"] if t["last_run"] else 0.0,
+            reverse=True,
+        )
+        return tasks
+
+    @api.get("/api/automations/{name}")
+    def get_automation(name: str):
+        from yuki_conductor.cron_config import load_tasks
+
+        task = next((t for t in load_tasks() if t.name == name), None)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Automation not found")
+        return _task_to_dict(task, include_runs=True)
+
+    class AutomationUpdate(BaseModel):
+        display_name: str | None = None
+
+    @api.patch("/api/automations/{name}")
+    def update_automation(name: str, body: AutomationUpdate):
+        """Rename an automation by writing `display_name` back into cron.yaml."""
+        from yuki_conductor.cron_config import load_tasks, set_task_field
+
+        # An empty rename clears the override and falls back to the derived label.
+        value = (body.display_name or "").strip() or None
+        if not set_task_field(name, "display_name", value):
+            raise HTTPException(status_code=404, detail="Automation not found")
+        task = next((t for t in load_tasks() if t.name == name), None)
+        if task is None:
+            raise HTTPException(status_code=500, detail="Automation became unreadable after edit")
+        return _task_to_dict(task)
+
+    @api.post("/api/automations/{name}/run")
+    def run_automation(name: str):
+        """Fire an automation immediately, off-schedule."""
+        from yuki_conductor.cron_scheduler import trigger_task
+
+        if cron_run_store.is_running(name):
+            raise HTTPException(status_code=409, detail="Automation is already running")
+        if not trigger_task(name):
+            raise HTTPException(status_code=404, detail="Automation not found")
+        return {"ok": True}
+
+    @api.get("/api/automations/{name}/runs")
+    def list_automation_runs(name: str, limit: int = Query(default=30, ge=1, le=30)):
+        return cron_run_store.list_runs(name, limit=limit)
 
     _upload_default = File(...)
 

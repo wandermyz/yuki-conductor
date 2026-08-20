@@ -2,7 +2,9 @@
 # Copy this file to ~/.yuki-conductor/workspace/cron.yaml and edit as needed.
 #
 # Each task has:
-#   name:        Unique identifier for the task
+#   name:        Unique identifier for the task (also keys its run history)
+#   display_name: (optional) Label shown in the Automations tab; renameable
+#                there. Falls back to description, then a truncated prompt.
 #   schedule:    Cron expression (minute hour day month weekday)
 #   description: Human-readable description shown in the chat app
 #   prompt:      The prompt to send to Claude Code
@@ -10,9 +12,12 @@
 #                If omitted, the first enabled platform is used (slack
 #                preferred). If named but not enabled, the task is skipped
 #                with a warning.
+#   origin_conversation: (optional) Web conversation id this task was set up in,
+#                so the Automations tab can link back to it.
 
 tasks:
   - name: morning-briefing
+    display_name: "Morning briefing"
     schedule: "0 9 * * 1-5"
     description: "Morning briefing (weekdays at 9am)"
     prompt: >
