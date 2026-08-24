@@ -189,14 +189,14 @@ def test_nonzero_exit():
     assert "Some error" in result.text
 
 
-def test_truncation():
+def test_no_truncation():
+    """The runner returns the full text; length limits belong to each platform."""
     long_text = "x" * 5000
     mock_proc = _mock_popen(stdout=_stream(_result_record(long_text, "s1")))
     with patch("subprocess.Popen", return_value=mock_proc):
         result = run_claude("big")
 
-    assert len(result.text) <= 4000
-    assert "truncated" in result.text
+    assert result.text == long_text
 
 
 def test_unset_claudecode_env():

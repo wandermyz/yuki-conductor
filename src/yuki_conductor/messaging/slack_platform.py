@@ -26,6 +26,51 @@ STATUS_POLL_SECONDS = 2
 # Slack renders the status inline, so keep step labels short.
 STATUS_LABEL_LIMIT = 80
 
+# Slack visibly truncates messages past ~4000 characters, so long replies are
+# split across several messages in the same thread rather than cut off. Only
+# Slack has this limit — web chat posts the full text in one piece.
+MESSAGE_LIMIT = 4000
+# Room for the ``` fences _balance_fences may add to either end of a chunk.
+_FENCE_RESERVE = 8
+
+
+def _split_text(text: str, limit: int) -> list[str]:
+    """Break text into <=limit chunks, preferring paragraph/line/word boundaries."""
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > limit:
+        window = remaining[:limit]
+        # Prefer the latest natural boundary in the window; fall back to a hard
+        # cut only when a single run of text is longer than the whole limit.
+        cut = max(window.rfind("\n\n"), window.rfind("\n"), window.rfind(" "))
+        if cut <= 0:
+            cut = limit
+        chunks.append(remaining[:cut].rstrip())
+        remaining = remaining[cut:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks or [""]
+
+
+def _balance_fences(chunks: list[str]) -> list[str]:
+    """Close an open code fence at a chunk's end and reopen it in the next one.
+
+    Splitting mid-fence would otherwise leave one message with an unterminated
+    ``` and render the next as plain text.
+    """
+    out: list[str] = []
+    carry = False
+    for chunk in chunks:
+        body = f"```\n{chunk}" if carry else chunk
+        carry = body.count("```") % 2 == 1
+        out.append(f"{body}\n```" if carry else body)
+    return out
+
+
+def _for_slack(text: str) -> list[str]:
+    """Convert markdown to mrkdwn and split it into Slack-sized messages."""
+    return _balance_fences(_split_text(markdown_to_mrkdwn(text), MESSAGE_LIMIT - _FENCE_RESERVE))
+
 
 def _status_for(event) -> str | None:
     """Render a stream event as a Slack status line, or None to keep the last one.
@@ -79,11 +124,12 @@ class SlackPlatform:
                 logger.error(f"Failed to upload attachment {att.local_path}", exc_info=True)
 
         if msg.text:
-            self._client.chat_postMessage(
-                channel=channel,
-                thread_ts=conversation_key,
-                text=markdown_to_mrkdwn(msg.text),
-            )
+            for chunk in _for_slack(msg.text):
+                self._client.chat_postMessage(
+                    channel=channel,
+                    thread_ts=conversation_key,
+                    text=chunk,
+                )
 
     def set_processing(self, conversation_key: str, message_id: str, on: bool) -> None:
         """Show the shimmering assistant status while Claude runs.
@@ -209,20 +255,26 @@ class SlackPlatform:
 
     def send_notification(self, text: str) -> None:
         try:
-            self._client.chat_postMessage(
-                channel=slack_app_dm_channel(),
-                text=markdown_to_mrkdwn(text),
-            )
+            for chunk in _for_slack(text):
+                self._client.chat_postMessage(
+                    channel=slack_app_dm_channel(),
+                    text=chunk,
+                )
         except Exception:
             logger.warning("Failed to send Slack notification", exc_info=True)
 
     def start_thread(self, text: str, title: str | None = None) -> str:
-        """Post a top-level message to the cron channel and return its `ts`."""
+        """Post a top-level message to the cron channel and return its `ts`.
+
+        A long body opens the thread with its first chunk and hangs the rest
+        underneath, so the channel shows one entry rather than several.
+        """
         channel = slack_cron_channel()
-        response = self._client.chat_postMessage(
-            channel=channel, text=markdown_to_mrkdwn(text)
-        )
+        chunks = _for_slack(text)
+        response = self._client.chat_postMessage(channel=channel, text=chunks[0])
         thread_ts = response["ts"]
+        for chunk in chunks[1:]:
+            self._client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=chunk)
         from yuki_conductor.store import SessionStore
 
         SessionStore().set(

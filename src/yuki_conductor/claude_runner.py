@@ -14,8 +14,6 @@ from yuki_conductor.stream_events import StreamEvent, parse_stream_line
 
 logger = logging.getLogger(__name__)
 
-SLACK_MESSAGE_LIMIT = 4000
-
 # Registry of running Claude subprocesses, keyed by conversation_key.
 _active_processes: dict[str, subprocess.Popen] = {}
 _cancelled: set[str] = set()
@@ -300,15 +298,10 @@ def _build_result(
     if final is None:
         # No result record — the CLI printed something we don't understand.
         text = raw_stdout.strip()
-        if len(text) > SLACK_MESSAGE_LIMIT:
-            text = text[: SLACK_MESSAGE_LIMIT - 50] + "\n\n... (truncated, response too long)"
         return ClaudeResult(text=text or "(empty response)", session_id=fallback_session_id)
 
     result_text = final.get("result") or ""
     new_session_id = final.get("session_id") or fallback_session_id
-
-    if len(result_text) > SLACK_MESSAGE_LIMIT:
-        result_text = result_text[: SLACK_MESSAGE_LIMIT - 50] + "\n\n... (truncated, response too long)"
 
     usage = final.get("usage")
     usage = usage if isinstance(usage, dict) else {}
