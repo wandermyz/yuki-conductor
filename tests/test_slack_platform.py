@@ -3,6 +3,7 @@
 import time
 
 from yuki_conductor.messaging import slack_platform
+from yuki_conductor.messaging.platform import OutgoingMessage
 from yuki_conductor.messaging.slack_platform import SlackPlatform
 
 
@@ -82,3 +83,66 @@ def test_refresh_thread_keeps_status_alive_and_stops(monkeypatch):
     assert not thread.is_alive()
     assert client.status_calls[-1]["status"] == ""
     assert not platform._refreshers
+
+
+def _recording_platform():
+    client = FakeClient()
+    client.posted = []
+    client.chat_postMessage = lambda **kw: (client.posted.append(kw), {"ts": "999.000"})[1]
+    return client, _platform(client)
+
+
+def test_long_message_is_split_across_messages():
+    """Slack caps message length; long replies continue in the same thread."""
+    client, platform = _recording_platform()
+    body = "\n\n".join(f"paragraph {i} " + "word " * 100 for i in range(30))
+
+    platform.send("111.222", OutgoingMessage(text=body))
+
+    assert len(client.posted) > 1
+    for kw in client.posted:
+        assert len(kw["text"]) <= slack_platform.MESSAGE_LIMIT
+        assert kw["thread_ts"] == "111.222"
+    # Nothing dropped: every word survives somewhere, in order.
+    joined = " ".join(kw["text"] for kw in client.posted)
+    assert joined.split() == body.split()
+
+
+def test_short_message_posts_once_unmodified():
+    client, platform = _recording_platform()
+
+    platform.send("111.222", OutgoingMessage(text="hello"))
+
+    assert [kw["text"] for kw in client.posted] == ["hello"]
+
+
+def test_split_reopens_code_fence():
+    chunks = slack_platform._for_slack("```\n" + "line of code\n" * 500 + "```")
+
+    assert len(chunks) > 1
+    for chunk in chunks:
+        assert chunk.count("```") % 2 == 0
+    assert chunks[1].startswith("```")
+
+
+def test_start_thread_hangs_overflow_under_the_root_message(monkeypatch):
+    monkeypatch.setenv("SLACK_CRON_CHANNEL", "C999")
+    client, platform = _recording_platform()
+    platform_store_calls = []
+    import yuki_conductor.store as store_mod
+
+    class FakeStore:
+        def set(self, *a, **kw):
+            platform_store_calls.append((a, kw))
+
+    original = store_mod.SessionStore
+    store_mod.SessionStore = FakeStore
+    try:
+        ts = platform.start_thread("word " * 2000)
+    finally:
+        store_mod.SessionStore = original
+
+    assert ts == "999.000"
+    assert len(client.posted) > 1
+    assert "thread_ts" not in client.posted[0]
+    assert all(kw["thread_ts"] == ts for kw in client.posted[1:])
