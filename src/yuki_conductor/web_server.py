@@ -472,54 +472,103 @@ def create_api() -> FastAPI:
             "description": task.description,
             "schedule": task.schedule,
             "schedule_text": describe_schedule(task.schedule),
-            "next_runs": next_fire_times(task.schedule, 3),
+            # A paused task has no upcoming firings — showing them would lie.
+            "next_runs": [] if task.paused else next_fire_times(task.schedule, 3),
             "prompt": task.prompt,
             "chat_app": task.chat_app,
             "origin_conversation": task.origin_conversation,
+            "paused": task.paused,
+            "active": True,
         }
-        last = cron_run_store.last_run(task.name)
+        _attach_runs(data, task.name, include_runs=include_runs)
+        return data
+
+    def _removed_to_dict(name: str, *, include_runs: bool = False) -> dict:
+        """A task that only exists as run history — deleted from cron.yaml."""
+        data = {
+            "name": name,
+            "label": name,
+            "display_name": None,
+            "description": "",
+            "schedule": "",
+            "schedule_text": "Removed from cron.yaml",
+            "next_runs": [],
+            "prompt": "",
+            "chat_app": None,
+            "origin_conversation": None,
+            "paused": False,
+            "active": False,
+        }
+        _attach_runs(data, name, include_runs=include_runs)
+        return data
+
+    def _attach_runs(data: dict, name: str, *, include_runs: bool) -> None:
+        last = cron_run_store.last_run(name)
         data["last_run"] = last
         data["running"] = bool(last and last["status"] == "running")
         if include_runs:
-            data["runs"] = cron_run_store.list_runs(task.name)
-        return data
+            data["runs"] = cron_run_store.list_runs(name)
 
     @api.get("/api/automations")
     def list_automations():
         from yuki_conductor.cron_config import load_tasks
 
-        tasks = [_task_to_dict(t) for t in load_tasks()]
+        defined = load_tasks()
+        tasks = [_task_to_dict(t) for t in defined]
+        # A task deleted from the YAML keeps its history, so it stays visible —
+        # marked inactive and parked below every live task.
+        known = {t.name for t in defined}
+        removed = [
+            _removed_to_dict(n) for n in cron_run_store.task_names() if n not in known
+        ]
+
+        def recency(t: dict) -> float:
+            return t["last_run"]["started_at"] if t["last_run"] else 0.0
+
         # Most recently run first; never-run tasks sink to the bottom.
-        tasks.sort(
-            key=lambda t: t["last_run"]["started_at"] if t["last_run"] else 0.0,
-            reverse=True,
-        )
-        return tasks
+        tasks.sort(key=recency, reverse=True)
+        removed.sort(key=recency, reverse=True)
+        return tasks + removed
 
     @api.get("/api/automations/{name}")
     def get_automation(name: str):
         from yuki_conductor.cron_config import load_tasks
 
         task = next((t for t in load_tasks() if t.name == name), None)
-        if task is None:
-            raise HTTPException(status_code=404, detail="Automation not found")
-        return _task_to_dict(task, include_runs=True)
+        if task is not None:
+            return _task_to_dict(task, include_runs=True)
+        # Still openable while it has history to show; 404 once that's gone too.
+        if cron_run_store.last_run(name):
+            return _removed_to_dict(name, include_runs=True)
+        raise HTTPException(status_code=404, detail="Automation not found")
 
     class AutomationUpdate(BaseModel):
         display_name: str | None = None
+        paused: bool | None = None
 
     @api.patch("/api/automations/{name}")
     def update_automation(name: str, body: AutomationUpdate):
-        """Rename an automation by writing `display_name` back into cron.yaml."""
+        """Write editable fields (`display_name`, `paused`) back into cron.yaml."""
         from yuki_conductor.cron_config import load_tasks, set_task_field
 
-        # An empty rename clears the override and falls back to the derived label.
-        value = (body.display_name or "").strip() or None
-        if not set_task_field(name, "display_name", value):
-            raise HTTPException(status_code=404, detail="Automation not found")
+        # Only fields actually present in the request body are touched, so a
+        # pause toggle doesn't clobber the label and vice versa.
+        sent = body.model_fields_set
+        edits: list[tuple[str, str | bool | None]] = []
+        if "display_name" in sent:
+            # An empty rename clears the override, falling back to the derived label.
+            edits.append(("display_name", (body.display_name or "").strip() or None))
+        if "paused" in sent:
+            # Resuming drops the key entirely rather than writing `paused: false`.
+            edits.append(("paused", True if body.paused else None))
+
+        for field, value in edits:
+            if not set_task_field(name, field, value):
+                raise HTTPException(status_code=404, detail="Automation not found")
+
         task = next((t for t in load_tasks() if t.name == name), None)
         if task is None:
-            raise HTTPException(status_code=500, detail="Automation became unreadable after edit")
+            raise HTTPException(status_code=404, detail="Automation not found")
         return _task_to_dict(task)
 
     @api.post("/api/automations/{name}/run")

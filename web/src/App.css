@@ -1063,6 +1063,19 @@
   color: var(--accent);
 }
 
+/* A paused automation stays legible but visibly inert. */
+.run-badge.paused,
+.run-badge.removed {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+.automations-view .sidebar li.paused .session-title,
+.automations-view .sidebar li.paused .session-date {
+  opacity: 0.55;
+}
+
 .run-body {
   padding: 4px 4px 14px 24px;
   font-size: 13px;

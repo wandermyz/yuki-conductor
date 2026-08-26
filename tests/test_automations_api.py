@@ -107,6 +107,40 @@ def test_rename_unknown_automation_404(client):
     assert r.status_code == 404
 
 
+def test_pause_and_resume_persist_to_yaml(client, cron_file):
+    r = client.patch("/api/automations/briefing", json={"paused": True})
+    assert r.status_code == 200
+    assert r.json()["paused"] is True
+    # A paused task advertises no upcoming firings.
+    assert r.json()["next_runs"] == []
+    assert "paused: true" in cron_file.read_text(encoding="utf-8")
+    assert client.get("/api/automations/briefing").json()["paused"] is True
+
+    r = client.patch("/api/automations/briefing", json={"paused": False})
+    assert r.json()["paused"] is False
+    assert len(r.json()["next_runs"]) == 3
+    assert "paused:" not in cron_file.read_text(encoding="utf-8")
+
+
+def test_pause_leaves_the_label_alone(client, cron_file):
+    client.patch("/api/automations/weekly", json={"paused": True})
+    # display_name wasn't in the body, so it must not be cleared.
+    assert client.get("/api/automations").json()[1]["label"] == "Weekly check"
+    assert 'display_name: "Weekly check"' in cron_file.read_text(encoding="utf-8")
+
+
+def test_rename_leaves_paused_alone(client, cron_file):
+    client.patch("/api/automations/weekly", json={"paused": True})
+    client.patch("/api/automations/weekly", json={"display_name": "Renamed"})
+    data = client.get("/api/automations/weekly").json()
+    assert data["label"] == "Renamed"
+    assert data["paused"] is True
+
+
+def test_pause_unknown_automation_404(client):
+    assert client.patch("/api/automations/nope", json={"paused": True}).status_code == 404
+
+
 def test_run_now_triggers_the_task(client, monkeypatch):
     called = []
     monkeypatch.setattr(
@@ -136,3 +170,29 @@ def test_runs_endpoint_caps_at_thirty(client, runs):
         runs.finish_run(runs.start_run("briefing"), status="success", response="x")
     assert len(client.get("/api/automations/briefing/runs").json()) == 30
     assert client.get("/api/automations/briefing/runs?limit=99").status_code == 422
+
+
+def test_removed_tasks_are_listed_last_and_marked_inactive(client, runs):
+    # A task with history but no YAML entry stays visible, parked at the end
+    # even though it ran most recently of all.
+    runs.finish_run(runs.start_run("briefing"), status="success")
+    runs.finish_run(runs.start_run("gone"), status="success")
+
+    items = client.get("/api/automations").json()
+    assert [a["name"] for a in items] == ["briefing", "weekly", "gone"]
+    assert [a["active"] for a in items] == [True, True, False]
+    assert items[-1]["schedule_text"] == "Removed from cron.yaml"
+    assert items[-1]["next_runs"] == []
+
+
+def test_get_removed_automation_returns_history(client, runs):
+    runs.finish_run(runs.start_run("gone"), status="success", response="bye")
+
+    data = client.get("/api/automations/gone").json()
+    assert data["active"] is False
+    assert data["label"] == "gone"
+    assert [r["response"] for r in data["runs"]] == ["bye"]
+
+
+def test_unknown_automation_without_history_still_404s(client):
+    assert client.get("/api/automations/never-existed").status_code == 404

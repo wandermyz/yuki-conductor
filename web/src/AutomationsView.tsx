@@ -6,6 +6,7 @@ import {
   listAutomations,
   renameAutomation,
   runAutomation,
+  setAutomationPaused,
 } from "./chat/api";
 import type { Automation, CronRun } from "./chat/api";
 import { copyText } from "./chat/Chat";
@@ -107,15 +108,18 @@ function AutomationDetail({
   automation,
   onRefresh,
   onRename,
+  onTogglePaused,
   onBack,
 }: {
   automation: Automation;
   onRefresh: () => void;
   onRename: (displayName: string) => void;
+  onTogglePaused: (paused: boolean) => Promise<void>;
   onBack: () => void;
 }) {
   const [promptOpen, setPromptOpen] = useState(false);
   const [running, setRunning] = useState(false);
+  const [pausing, setPausing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const triggerRun = async () => {
@@ -131,6 +135,18 @@ function AutomationDetail({
     }
   };
 
+  const togglePaused = async () => {
+    setError(null);
+    setPausing(true);
+    try {
+      await onTogglePaused(!automation.paused);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPausing(false);
+    }
+  };
+
   const inFlight = automation.running || running;
   const runs = automation.runs ?? [];
 
@@ -140,9 +156,24 @@ function AutomationDetail({
         &larr; Back
       </button>
       <header className="automation-detail-header">
-        <EditableLabel value={automation.label} onSave={onRename} />
+        <EditableLabel
+          value={automation.label}
+          onSave={onRename}
+          readOnly={!automation.active}
+        />
         <code className="automation-id">{automation.name}</code>
+        {!automation.active && <span className="run-badge removed">removed</span>}
+        {automation.active && automation.paused && (
+          <span className="run-badge paused">paused</span>
+        )}
       </header>
+
+      {!automation.active && (
+        <p className="automation-origin muted">
+          This automation is no longer defined in cron.yaml. Its history is kept
+          here, but it can't run or be edited.
+        </p>
+      )}
 
       {automation.origin_conversation ? (
         <a
@@ -152,12 +183,15 @@ function AutomationDetail({
           &#8617; Back to the conversation that set this up
         </a>
       ) : (
-        <p className="automation-origin muted">
-          No originating conversation recorded for this automation.
-        </p>
+        automation.active && (
+          <p className="automation-origin muted">
+            No originating conversation recorded for this automation.
+          </p>
+        )
       )}
 
-      <section className="automation-section">
+      {automation.active && (
+        <section className="automation-section">
         <button
           className="automation-fold"
           onClick={() => setPromptOpen((v) => !v)}
@@ -176,23 +210,42 @@ function AutomationDetail({
           <dd>{automation.schedule_text}</dd>
           <dt>Next</dt>
           <dd>
-            {automation.next_runs.length
-              ? automation.next_runs.map(formatTime).join(" · ")
-              : "—"}
+            {automation.paused
+              ? "Paused — will not run on schedule"
+              : automation.next_runs.length
+                ? automation.next_runs.map(formatTime).join(" · ")
+                : "—"}
           </dd>
         </dl>
       </section>
+      )}
 
       <section className="automation-section">
         <div className="automation-runs-header">
           <h3>Recent runs</h3>
-          <button
-            className="new-chat-btn"
-            onClick={triggerRun}
-            disabled={inFlight}
-          >
-            {inFlight ? "Running…" : "Run now"}
-          </button>
+          {automation.active && (
+            <>
+              <button
+                className="new-chat-btn"
+                onClick={togglePaused}
+                disabled={pausing}
+                title={
+                  automation.paused
+                    ? "Resume the schedule"
+                    : "Stop firing on schedule (Run now still works)"
+                }
+              >
+                {pausing ? "…" : automation.paused ? "Resume" : "Pause"}
+              </button>
+              <button
+                className="new-chat-btn"
+                onClick={triggerRun}
+                disabled={inFlight}
+              >
+                {inFlight ? "Running…" : "Run now"}
+              </button>
+            </>
+          )}
         </div>
         {error && <p className="automation-error">{error}</p>}
         {runs.length === 0 ? (
@@ -212,9 +265,11 @@ function AutomationDetail({
 function EditableLabel({
   value,
   onSave,
+  readOnly = false,
 }: {
   value: string;
   onSave: (next: string) => void;
+  readOnly?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -257,14 +312,16 @@ function EditableLabel({
   return (
     <div className="title-row">
       <h2>{value}</h2>
-      <button
-        className="edit-btn"
-        onClick={() => setEditing(true)}
-        title="Rename automation"
-        aria-label="Rename automation"
-      >
-        &#9998;
-      </button>
+      {!readOnly && (
+        <button
+          className="edit-btn"
+          onClick={() => setEditing(true)}
+          title="Rename automation"
+          aria-label="Rename automation"
+        >
+          &#9998;
+        </button>
+      )}
     </div>
   );
 }
@@ -308,16 +365,21 @@ export default function AutomationsView() {
     return () => clearInterval(id);
   }, [anyRunning, refreshDetail, refreshList]);
 
+  const applyUpdate = useCallback((updated: Automation) => {
+    setDetail((d) => (d ? { ...d, ...updated, runs: d.runs } : d));
+    setAutomations((prev) =>
+      prev.map((a) => (a.name === updated.name ? { ...a, ...updated } : a)),
+    );
+  }, []);
+
   const handleRename = (displayName: string) => {
     if (!selected) return;
-    renameAutomation(selected, displayName)
-      .then((updated) => {
-        setDetail((d) => (d ? { ...d, ...updated, runs: d.runs } : d));
-        setAutomations((prev) =>
-          prev.map((a) => (a.name === updated.name ? { ...a, ...updated } : a)),
-        );
-      })
-      .catch(console.error);
+    renameAutomation(selected, displayName).then(applyUpdate).catch(console.error);
+  };
+
+  const handleTogglePaused = async (paused: boolean) => {
+    if (!selected) return;
+    applyUpdate(await setAutomationPaused(selected, paused));
   };
 
   return (
@@ -336,14 +398,20 @@ export default function AutomationsView() {
           {automations.map((a) => (
             <li
               key={a.name}
-              className={a.name === selected ? "active" : ""}
+              className={`${a.name === selected ? "active" : ""} ${a.paused || !a.active ? "paused" : ""}`}
               onClick={() => setSelected(a.name)}
             >
               <span className="session-title">
                 {a.running && <span className="alive-dot alive" title="Running" />}
                 {a.label}
               </span>
-              <span className="session-date">{a.schedule_text}</span>
+              <span className="session-date">
+                {!a.active
+                  ? "Removed from cron.yaml"
+                  : a.paused
+                    ? `Paused · ${a.schedule_text}`
+                    : a.schedule_text}
+              </span>
             </li>
           ))}
         </ul>
@@ -354,6 +422,7 @@ export default function AutomationsView() {
             automation={detail}
             onRefresh={refreshDetail}
             onRename={handleRename}
+            onTogglePaused={handleTogglePaused}
             onBack={() => setSelected(null)}
           />
         ) : (

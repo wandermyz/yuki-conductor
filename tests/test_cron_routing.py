@@ -5,7 +5,12 @@ from unittest.mock import patch
 
 from yuki_conductor.claude_runner import ClaudeResult
 from yuki_conductor.cron_config import CronTask
-from yuki_conductor.cron_scheduler import _pick_platform, _run_cron_task
+from yuki_conductor.cron_scheduler import (
+    _build_task_state,
+    _pick_platform,
+    _run_cron_task,
+    _tasks_changed,
+)
 from yuki_conductor.messaging.platform import OutgoingMessage
 
 
@@ -279,3 +284,44 @@ def test_trigger_task_unknown_name_returns_false():
 
     with patch.object(cron_scheduler, "_load_cron_tasks", return_value=[_task()]):
         assert cron_scheduler.trigger_task("does-not-exist") is False
+
+
+# ---- Pausing ----
+
+
+def test_paused_tasks_are_excluded_from_scheduler_state():
+    active = _task("active")
+    paused = _task("paused")
+    paused.paused = True
+
+    iters, next_times = _build_task_state([active, paused])
+    assert [t.name for t, _ in iters] == ["active"]
+    # No fire time at all, so the loop can never pick it up.
+    assert "paused" not in next_times
+
+
+def test_toggling_paused_counts_as_a_task_change():
+    """Otherwise the reload wouldn't rebuild state and a pause wouldn't take."""
+    before = _task()
+    after = _task()
+    after.paused = True
+    assert _tasks_changed([before], [after])
+
+
+def test_trigger_task_still_runs_a_paused_task(isolated_cron_run_store):
+    """Pausing suspends the schedule; "Run now" is an explicit override."""
+    from yuki_conductor import cron_scheduler
+
+    paused = _task()
+    paused.paused = True
+    result = ClaudeResult(text="manual go <notify>", session_id="sess-1")
+    with (
+        patch.object(cron_scheduler, "_load_cron_tasks", return_value=[paused]),
+        patch.object(cron_scheduler, "run_claude", return_value=result),
+    ):
+        assert cron_scheduler.trigger_task("t1") is True
+        for thread in threading.enumerate():
+            if thread.name == "cron-manual-t1":
+                thread.join(timeout=5)
+
+    assert isolated_cron_run_store.last_run("t1")["status"] == "success"

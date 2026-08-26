@@ -14,6 +14,8 @@
 #                with a warning.
 #   origin_conversation: (optional) Web conversation id this task was set up in,
 #                so the Automations tab can link back to it.
+#   paused:      (optional) true to suspend the schedule without deleting the
+#                task. Toggleable from the Automations tab; "Run now" still works.
 
 tasks:
   - name: morning-briefing
@@ -29,6 +31,7 @@ tasks:
     schedule: "0 10 * * 1"
     description: "Weekly dependency check (Mondays at 10am)"
     chat_app: slack_socket
+    # paused: true                 # uncomment to suspend without deleting
     prompt: >
       Check for outdated dependencies across all projects in this monorepo.
       List any packages with newer versions available and flag any known

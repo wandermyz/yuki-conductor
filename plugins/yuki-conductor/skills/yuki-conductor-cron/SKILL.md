@@ -43,6 +43,7 @@ tasks:
       task fires. Write it as an instruction to Claude.
     chat_app: slack_socket           # optional; where to post the result
     origin_conversation: <conv-id>   # optional; conversation that set this up
+    paused: true                     # optional; suspend the schedule without deleting
 ```
 
 Field notes:
@@ -63,6 +64,11 @@ Field notes:
   in, so the Automations tab can link back to it. If your system prompt has a
   "Your conversation" section naming an id, put that id here when creating a
   task; otherwise omit the field.
+- `paused` — optional boolean, default false. When true the scheduler never fires
+  the task, but the definition and its history stay put and "Run now" in the
+  Automations tab still works. This is what to set when the user asks to pause,
+  suspend, or temporarily stop a task — don't delete the entry. The user can also
+  toggle it from the Automations tab, so omit it at creation.
 
 ## How to add or change a task
 
