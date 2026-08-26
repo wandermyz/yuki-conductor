@@ -136,3 +136,27 @@ def test_set_task_field_rejects_non_editable_field(tmp_path):
 
     with pytest.raises(ValueError):
         set_task_field("weekly-check", "prompt", "evil", _write(tmp_path))
+
+
+def test_paused_defaults_false_and_parses(tmp_path):
+    path = _write(tmp_path, SAMPLE.replace(
+        '    prompt: "Check deps."\n', '    prompt: "Check deps."\n    paused: true\n'
+    ))
+    tasks = load_tasks(path)
+    assert tasks[0].paused is False
+    assert tasks[1].paused is True
+
+
+def test_set_task_field_toggles_paused_as_a_bare_boolean(tmp_path):
+    path = _write(tmp_path)
+
+    assert set_task_field("morning-briefing", "paused", True, path)
+    # Written unquoted so YAML reads it back as a bool, not the string "true".
+    assert "    paused: true\n" in path.read_text(encoding="utf-8")
+    assert load_tasks(path)[0].paused is True
+    assert load_tasks(path)[1].paused is False
+
+    # Resuming drops the key entirely rather than writing `paused: false`.
+    assert set_task_field("morning-briefing", "paused", None, path)
+    assert "paused:" not in path.read_text(encoding="utf-8")
+    assert load_tasks(path)[0].paused is False

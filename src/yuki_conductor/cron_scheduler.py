@@ -38,7 +38,6 @@ def _load_cron_tasks() -> list[CronTask]:
     return tasks
 
 
-
 _CRON_PROMPT_PREFIX = (
     "You are running as a scheduled cron task. After completing your work, "
     "decide whether the user needs to be notified.\n"
@@ -187,8 +186,15 @@ def _execute(
 
 
 def _build_task_state(tasks: list[CronTask]) -> tuple[list[tuple[CronTask, croniter]], dict[str, datetime]]:
-    """Build croniter instances and next-fire-time map from a task list."""
-    iters = [(task, croniter(task.schedule, datetime.now())) for task in tasks]
+    """Build croniter instances and next-fire-time map from a task list.
+
+    Paused tasks are left out entirely, so they hold no schedule state at all.
+    """
+    iters = [
+        (task, croniter(task.schedule, datetime.now()))
+        for task in tasks
+        if not task.paused
+    ]
     next_times = {task.name: it.get_next(datetime) for task, it in iters}
     return iters, next_times
 
@@ -196,7 +202,7 @@ def _build_task_state(tasks: list[CronTask]) -> tuple[list[tuple[CronTask, croni
 def _tasks_changed(old: list[CronTask], new: list[CronTask]) -> bool:
     """Check if the task list has changed (by comparing as tuples)."""
     def to_tuple(t: CronTask) -> tuple:
-        return (t.name, t.schedule, t.description, t.prompt, t.chat_app)
+        return (t.name, t.schedule, t.description, t.prompt, t.chat_app, t.paused)
     return [to_tuple(t) for t in old] != [to_tuple(t) for t in new]
 
 
@@ -234,7 +240,11 @@ def _scheduler_loop(
             current_tasks = new_tasks
             if current_tasks:
                 iters, next_times = _build_task_state(current_tasks)
-                logger.info(f"Cron tasks reloaded: {[t.name for t in current_tasks]}")
+                paused = [t.name for t in current_tasks if t.paused]
+                logger.info(
+                    f"Cron tasks reloaded: {[t.name for t, _ in iters]}"
+                    + (f" (paused: {paused})" if paused else "")
+                )
             else:
                 iters, next_times = [], {}
                 logger.info("Cron tasks cleared")

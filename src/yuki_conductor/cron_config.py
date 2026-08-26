@@ -16,7 +16,7 @@ from croniter import croniter
 from yuki_conductor.config import CRON_FILE
 
 # Fields the UI is allowed to write back into cron.yaml.
-EDITABLE_FIELDS = frozenset({"display_name"})
+EDITABLE_FIELDS = frozenset({"display_name", "paused"})
 
 _MONTHS = [
     "January", "February", "March", "April", "May", "June",
@@ -34,6 +34,7 @@ class CronTask:
     chat_app: str | None = None  # "slack" | plugin name | None (default routing)
     display_name: str | None = None  # user-facing label, renameable from the UI
     origin_conversation: str | None = None  # web conversation that created the task
+    paused: bool = False  # when true the scheduler never fires it (manual runs still work)
 
     @property
     def label(self) -> str:
@@ -184,6 +185,7 @@ def load_tasks(path=None) -> list[CronTask]:
                 chat_app=entry.get("chat_app"),
                 display_name=entry.get("display_name"),
                 origin_conversation=entry.get("origin_conversation"),
+                paused=bool(entry.get("paused", False)),
             )
             croniter(task.schedule)
         except (KeyError, ValueError, TypeError):
@@ -192,16 +194,21 @@ def load_tasks(path=None) -> list[CronTask]:
     return tasks
 
 
-def _yaml_scalar(value: str) -> str:
-    """Quote a value so it survives a round trip as a YAML scalar."""
+def _yaml_scalar(value: str | bool) -> str:
+    """Render a value so it survives a round trip as a YAML scalar."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def set_task_field(task_name: str, field: str, value: str | None, path=None) -> bool:
+def set_task_field(
+    task_name: str, field: str, value: str | bool | None, path=None
+) -> bool:
     """Set one scalar ``field`` on the task named ``task_name``.
 
     Rewrites only the affected lines, so folded prompts and comments elsewhere
-    in the file survive verbatim. Returns False if the task isn't found.
+    in the file survive verbatim. ``None`` deletes the key. Returns False if the
+    task isn't found.
     """
     if field not in EDITABLE_FIELDS:
         raise ValueError(f"Field {field!r} is not editable")

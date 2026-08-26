@@ -115,6 +115,13 @@ can locate and invoke the yuki-conductor CLI.
 
 The daemon supports scheduled tasks via `~/.yuki-conductor/workspace/cron.yaml`. Each task specifies a cron expression, a description, a Claude prompt, and optionally `chat_app` (`slack_socket` or an installed chat plugin's name) to control where the notification goes. When the cron fires, the routed platform opens a new thread and runs Claude Code with the prompt, posting the result. The thread is session-tracked, so follow-up replies in that thread continue the conversation.
 
+A task may also set `paused: true`, which keeps the definition and its run history
+but excludes it from the scheduler entirely (`_build_task_state` filters it out, so
+it holds no croniter state at all). Manual "Run now" still fires a paused task —
+pausing suspends the *schedule*, not the task. The Automations tab toggles it via
+`PATCH /api/automations/{name}`; resuming deletes the key rather than writing
+`paused: false`.
+
 Routing rule when `chat_app:` is omitted: pick the first enabled platform, with `slack` preferred. If `chat_app:` names a platform that isn't in `CHAT_APPS`, the task is skipped with a warning rather than misrouted.
 
 Required env var (only when `slack_socket` is enabled): `SLACK_CRON_CHANNEL` — the Slack channel ID to post cron results to.
@@ -142,6 +149,14 @@ Run history lives in the `cron_runs` table of the same workspace DB, via
 completion, so an in-flight run is visible; the last 30 runs per task are kept
 and older rows are pruned on insert. History is keyed by `name`, so renaming a
 task's `name` (as opposed to its `display_name`) orphans its history.
+
+Deleting a task from `cron.yaml` leaves that history behind, so
+`/api/automations` unions the YAML tasks with `CronRunStore.task_names()` and
+emits a synthetic `active: false` entry for every name that only has history.
+Those sort after every live task regardless of recency, render dimmed and
+labelled "Removed from cron.yaml", and their detail pane drops Rename / Pause /
+Run now. `GET /api/automations/{name}` serves them too, and only 404s once a
+name has neither a definition nor a run.
 
 Manual runs go through `cron_scheduler.trigger_task()`, which reuses the exact
 scheduled path — same prompt prefix, same notification routing — and tags the

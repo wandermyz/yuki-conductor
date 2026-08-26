@@ -426,6 +426,19 @@ class CronRunStore:
     def is_running(self, task_name: str) -> bool:
         return any(r["status"] == "running" for r in self.list_runs(task_name, limit=5))
 
+    def task_names(self) -> list[str]:
+        """Every task name that has run history, most recently run first."""
+        with self._lock:
+            con = self._connect()
+            try:
+                rows = con.execute(
+                    "SELECT task_name FROM cron_runs "
+                    "GROUP BY task_name ORDER BY MAX(started_at) DESC"
+                ).fetchall()
+                return [r[0] for r in rows]
+            finally:
+                con.close()
+
 
 class ModelStore(_SqliteKVStore):
     """Maps Slack channel_id -> model alias."""

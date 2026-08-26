@@ -245,6 +245,9 @@ export interface Automation {
   prompt: string;
   chat_app: string | null;
   origin_conversation: string | null;
+  paused: boolean;
+  /** False once the task is gone from cron.yaml and only history remains. */
+  active: boolean;
   last_run: CronRun | null;
   running: boolean;
   /** Only present on the single-automation endpoint. */
@@ -267,12 +270,27 @@ export async function renameAutomation(
   name: string,
   displayName: string,
 ): Promise<Automation> {
+  return patchAutomation(name, { display_name: displayName });
+}
+
+/** Pause or resume an automation's schedule. Manual runs work either way. */
+export async function setAutomationPaused(
+  name: string,
+  paused: boolean,
+): Promise<Automation> {
+  return patchAutomation(name, { paused });
+}
+
+async function patchAutomation(
+  name: string,
+  body: { display_name?: string; paused?: boolean },
+): Promise<Automation> {
   const r = await fetch(`/api/automations/${encodeURIComponent(name)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ display_name: displayName }),
+    body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error("Failed to rename automation");
+  if (!r.ok) throw new Error("Failed to update automation");
   return r.json();
 }
 
