@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -106,6 +107,22 @@ def _git_bash() -> str:
     return "bash"
 
 
+def _write_temp_prompt(text: str) -> str:
+    """Write `text` to a temp file for `--append-system-prompt-file`."""
+    fd, path = tempfile.mkstemp(prefix="yuki-sysprompt-", suffix=".md", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return path
+
+
+def _cleanup_temp_prompt(path: str) -> None:
+    """Remove a temp system-prompt file, ignoring an already-deleted one."""
+    try:
+        os.unlink(path)
+    except OSError:
+        logger.debug("Could not remove temp system prompt %s", path, exc_info=True)
+
+
 @dataclass
 class ClaudeResult:
     text: str
@@ -148,6 +165,12 @@ def run_claude(
     """
     plugin_dirs = skill_plugin_dirs()
     effective_cwd = cwd or CLAUDE_WORKING_DIR
+    # The synthesized skills listing runs to tens of KB in skill-heavy projects.
+    # Passing it inline blows Windows' 32767-char command-line limit, so it goes
+    # through a temp file instead; `prompt_file` is removed once the run ends.
+    prompt_file = _write_temp_prompt(
+        system_prompt(plugin_dirs, cwd=effective_cwd, conversation_key=web_conversation_id)
+    )
     args = [
         "-p",
         "--dangerously-skip-permissions",
@@ -157,9 +180,7 @@ def run_claude(
         # user-scope skills (~/.claude/skills) nor project-scope ones
         # (<cwd>/.claude/skills) are reachable.
         "--setting-sources", "user,project,local",
-        "--append-system-prompt", system_prompt(
-            plugin_dirs, cwd=effective_cwd, conversation_key=web_conversation_id
-        ),
+        "--append-system-prompt-file", prompt_file,
     ]
     for plugin_dir in plugin_dirs:
         args.extend(["--plugin-dir", plugin_dir])
@@ -194,12 +215,21 @@ def run_claude(
             env=env,
             cwd=effective_cwd,
         )
-    except FileNotFoundError:
-        return ClaudeResult(
-            text=f"{CLAUDE_BIN} CLI not found. Ensure it is installed and on PATH (or set CLAUDE_BIN).",
-            session_id=None,
-            is_error=True,
-        )
+    except OSError as exc:
+        _cleanup_temp_prompt(prompt_file)
+        # Windows reports an over-long command line as WinError 206, which arrives
+        # as FileNotFoundError and would otherwise read as a missing CLI.
+        if getattr(exc, "winerror", None) == 206:
+            text = (
+                "Claude could not be started: the command line exceeded the Windows "
+                "32767-character limit. The synthesized skills listing for this "
+                "project is likely very large."
+            )
+        elif isinstance(exc, FileNotFoundError):
+            text = f"{CLAUDE_BIN} CLI not found. Ensure it is installed and on PATH (or set CLAUDE_BIN)."
+        else:
+            text = f"Failed to start {CLAUDE_BIN}: {exc}"
+        return ClaudeResult(text=text, session_id=None, is_error=True)
 
     if conversation_key:
         register_process(conversation_key, proc)
@@ -209,6 +239,7 @@ def run_claude(
             proc, effective_timeout, on_event
         )
     finally:
+        _cleanup_temp_prompt(prompt_file)
         if conversation_key:
             unregister_process(conversation_key)
 

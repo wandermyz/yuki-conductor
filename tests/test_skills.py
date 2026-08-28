@@ -386,19 +386,72 @@ def test_run_claude_injects_plugin_dirs_and_system_prompt():
     output = json.dumps({"type": "result", "result": "ok", "session_id": "s1"}) + "\n"
     mock_proc = _mock_popen(stdout=output)
     fake_dirs = ["C:/plug/a", "C:/plug/b"]
+    written: list[str] = []
+
+    def capture_popen(*args, **kwargs):
+        # The temp file is deleted once run_claude returns, so read it here.
+        cmd = args[0]
+        path = cmd[cmd.index("--append-system-prompt-file") + 1]
+        written.append(Path(path).read_text(encoding="utf-8"))
+        return mock_proc
 
     with (
-        patch("subprocess.Popen", return_value=mock_proc) as mock_cls,
+        patch("subprocess.Popen", side_effect=capture_popen) as mock_cls,
         patch("yuki_conductor.claude_runner.skill_plugin_dirs", return_value=fake_dirs),
     ):
         run_claude("hi", cwd="C:/work")
 
     cmd = mock_cls.call_args[0][0]
-    assert "--append-system-prompt" in cmd
-    assert skills.system_prompt(fake_dirs, cwd="C:/work") in cmd
+    # The prompt goes through a file, not inline: inline blows the Windows
+    # 32767-char command-line limit for skill-heavy projects.
+    assert "--append-system-prompt" not in cmd
+    assert "--append-system-prompt-file" in cmd
+    assert written == [skills.system_prompt(fake_dirs, cwd="C:/work")]
     for d in fake_dirs:
         assert d in cmd
     assert cmd.count("--plugin-dir") == len(fake_dirs)
+
+
+def test_run_claude_removes_temp_system_prompt_file():
+    output = json.dumps({"type": "result", "result": "ok", "session_id": "s1"}) + "\n"
+    mock_proc = _mock_popen(stdout=output)
+
+    with (
+        patch("subprocess.Popen", return_value=mock_proc) as mock_cls,
+        patch("yuki_conductor.claude_runner.skill_plugin_dirs", return_value=[]),
+    ):
+        run_claude("hi")
+
+    cmd = mock_cls.call_args[0][0]
+    path = cmd[cmd.index("--append-system-prompt-file") + 1]
+    assert not Path(path).exists()
+
+
+def test_run_claude_reports_command_line_too_long_distinctly():
+    """WinError 206 arrives as FileNotFoundError but isn't a missing CLI."""
+    err = FileNotFoundError("The filename or extension is too long")
+    err.winerror = 206
+
+    with (
+        patch("subprocess.Popen", side_effect=err),
+        patch("yuki_conductor.claude_runner.skill_plugin_dirs", return_value=[]),
+    ):
+        result = run_claude("hi")
+
+    assert result.is_error
+    assert "32767" in result.text
+    assert "not found" not in result.text
+
+
+def test_run_claude_still_reports_missing_cli():
+    with (
+        patch("subprocess.Popen", side_effect=FileNotFoundError("nope")),
+        patch("yuki_conductor.claude_runner.skill_plugin_dirs", return_value=[]),
+    ):
+        result = run_claude("hi")
+
+    assert result.is_error
+    assert "CLI not found" in result.text
 
 
 def test_run_claude_passes_session_cwd_to_system_prompt():
