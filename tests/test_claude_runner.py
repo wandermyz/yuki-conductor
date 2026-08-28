@@ -3,6 +3,7 @@
 import json
 import subprocess
 import threading
+import time
 from unittest.mock import MagicMock, patch
 
 from yuki_conductor.claude_runner import run_claude
@@ -151,7 +152,7 @@ def test_resume_session():
 
 
 def test_timeout():
-    """A hung CLI is killed by the watchdog and reported as a timeout."""
+    """A silent CLI is killed by the idle watchdog and reported as a timeout."""
     killed = threading.Event()
 
     def hanging_stdout():
@@ -168,8 +169,34 @@ def test_timeout():
         result = run_claude("slow prompt", timeout=0.05)
 
     assert result.is_error
-    assert "timed out" in result.text
+    assert "no output" in result.text
     kill.assert_called_once()
+
+
+def test_slow_but_chatty_run_is_not_killed():
+    """The deadline is idle-based: steady output past the timeout must survive."""
+    records = [
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": f"step {i}"}]}}
+        for i in range(6)
+    ]
+    lines = _stream(*records, _result_record("Done!", "sess_slow")).splitlines(keepends=True)
+
+    def trickling_stdout():
+        for line in lines:
+            time.sleep(0.05)
+            yield line
+
+    mock_proc = _mock_popen()
+    mock_proc.stdout = trickling_stdout()
+
+    with patch("subprocess.Popen", return_value=mock_proc), \
+         patch("yuki_conductor.claude_runner._kill_tree") as kill:
+        # Total runtime (~0.35s) far exceeds the timeout; no single gap does.
+        result = run_claude("slow prompt", timeout=0.2)
+
+    assert not result.is_error
+    assert result.text == "Done!"
+    kill.assert_not_called()
 
 
 def test_cli_not_found():

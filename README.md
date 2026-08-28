@@ -94,7 +94,7 @@ uv run yuki-conductor daemon status
 | `SLACK_CRON_CHANNEL` | Channel that scheduled tasks post to |
 | `CLAUDE_WORKING_DIR` | Default directory that spawned sessions run in |
 | `CLAUDE_BIN` | Claude CLI path or name (default `claude`) |
-| `CLAUDE_TIMEOUT` | Per-run timeout in seconds |
+| `CLAUDE_TIMEOUT` | Idle timeout in seconds — a run is stopped only after this long with no output |
 | `WEB_PORT` | Web UI port (default `2333`) |
 | `YUKI_CONDUCTOR_DATA_DIR` | Override the `~/.yuki-conductor` location |
 

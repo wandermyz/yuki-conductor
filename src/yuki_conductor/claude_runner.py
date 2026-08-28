@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -14,6 +15,9 @@ from yuki_conductor.skills import skill_plugin_dirs, system_prompt
 from yuki_conductor.stream_events import StreamEvent, parse_stream_line
 
 logger = logging.getLogger(__name__)
+
+# How often the idle watchdog checks the last-output timestamp.
+_WATCHDOG_POLL_SECONDS = 5.0
 
 # Registry of running Claude subprocesses, keyed by conversation_key.
 _active_processes: dict[str, subprocess.Popen] = {}
@@ -153,7 +157,9 @@ def run_claude(
     Args:
         prompt: The prompt text to send.
         session_id: Optional session ID to resume.
-        timeout: Timeout in seconds (defaults to CLAUDE_TIMEOUT).
+        timeout: Idle timeout in seconds — the run is killed only after this
+            long with no output on stdout or stderr, so a long but active run
+            is never cut off. Defaults to CLAUDE_TIMEOUT.
         model: Optional model alias (e.g. "opus", "opus[1m]", "sonnet").
         cwd: Working directory for claude. Defaults to CLAUDE_WORKING_DIR.
         web_conversation_id: Web conversation this run belongs to, if any. Named
@@ -245,7 +251,10 @@ def run_claude(
 
     if timed_out:
         return ClaudeResult(
-            text="Claude timed out and was stopped. Increase CLAUDE_TIMEOUT to wait longer.",
+            text=(
+                f"Claude produced no output for {effective_timeout}s and was stopped. "
+                "Increase CLAUDE_TIMEOUT to wait longer."
+            ),
             session_id=session_id,
             is_error=True,
         )
@@ -273,30 +282,49 @@ def _consume_stream(
 
     stderr is drained on a helper thread so a chatty CLI can't deadlock on a
     full pipe while we're blocked reading stdout. Because that read blocks
-    indefinitely on a hung CLI, a watchdog timer kills the process tree at
-    `timeout`, which closes the pipe and unblocks us.
+    indefinitely on a hung CLI, a watchdog thread kills the process tree once
+    `timeout` seconds pass *with no output at all*, which closes the pipe and
+    unblocks us. The deadline is idle-based rather than wall-clock: a long run
+    that keeps streaming steps is never cut off, so the timeout only fires on a
+    genuinely silent process.
 
     Returns `(final_result_record, raw_stdout, stderr, timed_out)`.
     """
     stderr_chunks: list[str] = []
+    last_activity = time.monotonic()
+    activity_lock = threading.Lock()
+
+    def touch() -> None:
+        nonlocal last_activity
+        with activity_lock:
+            last_activity = time.monotonic()
 
     def drain_stderr() -> None:
         if proc.stderr is None:
             return
         for line in proc.stderr:
             stderr_chunks.append(line)
+            touch()
 
     stderr_thread = threading.Thread(target=drain_stderr, name="claude-stderr", daemon=True)
     stderr_thread.start()
 
     timed_out = threading.Event()
+    finished = threading.Event()
 
-    def on_timeout() -> None:
-        timed_out.set()
-        _kill_tree(proc)
+    def watch() -> None:
+        # Poll rather than arm a one-shot timer: every line of output pushes the
+        # deadline out, so the fire time isn't known in advance.
+        poll = min(timeout, _WATCHDOG_POLL_SECONDS)
+        while not finished.wait(poll):
+            with activity_lock:
+                idle = time.monotonic() - last_activity
+            if idle >= timeout:
+                timed_out.set()
+                _kill_tree(proc)
+                return
 
-    watchdog = threading.Timer(timeout, on_timeout)
-    watchdog.daemon = True
+    watchdog = threading.Thread(target=watch, name="claude-watchdog", daemon=True)
     watchdog.start()
 
     final: dict | None = None
@@ -305,6 +333,7 @@ def _consume_stream(
         if proc.stdout is not None:
             for line in proc.stdout:
                 raw_lines.append(line)
+                touch()
                 events, result = parse_stream_line(line)
                 if on_event is not None:
                     for event in events:
@@ -316,7 +345,8 @@ def _consume_stream(
                     final = result
         proc.wait()
     finally:
-        watchdog.cancel()
+        finished.set()
+        watchdog.join(timeout=5)
 
     stderr_thread.join(timeout=5)
     return final, "".join(raw_lines), "".join(stderr_chunks), timed_out.is_set()
