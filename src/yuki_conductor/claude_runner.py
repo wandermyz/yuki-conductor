@@ -10,7 +10,13 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from yuki_conductor.config import CLAUDE_BIN, CLAUDE_TIMEOUT, CLAUDE_WORKING_DIR, project_dir
+from yuki_conductor.config import (
+    CLAUDE_BIN,
+    CLAUDE_DEFAULT_MODEL,
+    CLAUDE_TIMEOUT,
+    CLAUDE_WORKING_DIR,
+    project_dir,
+)
 from yuki_conductor.skills import skill_plugin_dirs, system_prompt
 from yuki_conductor.stream_events import StreamEvent, parse_stream_line
 
@@ -160,7 +166,9 @@ def run_claude(
         timeout: Idle timeout in seconds — the run is killed only after this
             long with no output on stdout or stderr, so a long but active run
             is never cut off. Defaults to CLAUDE_TIMEOUT.
-        model: Optional model alias (e.g. "opus", "opus[1m]", "sonnet").
+        model: Optional model alias (e.g. "opus", "opus[1m]", "sonnet"). When
+            None, `CLAUDE_DEFAULT_MODEL` is passed explicitly — see the note on
+            that constant for why the flag is never omitted.
         cwd: Working directory for claude. Defaults to CLAUDE_WORKING_DIR.
         web_conversation_id: Web conversation this run belongs to, if any. Named
             in the system prompt so the run can push messages back into it via
@@ -190,8 +198,7 @@ def run_claude(
     ]
     for plugin_dir in plugin_dirs:
         args.extend(["--plugin-dir", plugin_dir])
-    if model:
-        args.extend(["--model", model])
+    args.extend(["--model", model or CLAUDE_DEFAULT_MODEL])
     if session_id:
         args.extend(["-r", session_id])
     args.append(prompt)

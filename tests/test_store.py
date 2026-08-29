@@ -109,8 +109,8 @@ def test_default_is_not_a_pinnable_model():
     assert DEFAULT_MODEL_ARG not in MODEL_ALIASES
 
 
-def test_model_clear_restores_cli_default(tmp_path: Path):
-    """An unset channel returns None, which run_claude turns into no --model flag."""
+def test_model_clear_restores_default(tmp_path: Path):
+    """An unset channel returns None, which run_claude turns into CLAUDE_DEFAULT_MODEL."""
     models = ModelStore(db_path=tmp_path / "test.db")
     assert models.get("C123") is None
 
