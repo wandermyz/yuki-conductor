@@ -75,6 +75,17 @@ CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "1800"))
 CLAUDE_WORKING_DIR = os.path.expanduser(os.environ.get("CLAUDE_WORKING_DIR", "~/Projects/wandering-vibe"))
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 
+# Model passed to `claude --model` when a conversation pins nothing.
+#
+# This must be passed explicitly rather than omitted. Omitting the flag lets the
+# CLI resolve its own default, which is `opus[1m]` on a fresh run — but on a
+# `-r` resume it rehydrates the model from the session record instead, and that
+# record stores the *canonical* id (`claude-opus-5`), which has no `[1m]`
+# context-window suffix. Since almost every turn after the first is a resume,
+# omitting the flag means only the first message of a conversation ever gets the
+# 1M window.
+CLAUDE_DEFAULT_MODEL = os.environ.get("CLAUDE_DEFAULT_MODEL", "opus[1m]")
+
 def chat_apps() -> list[str]:
     """Return ordered list of enabled chat-app plugin names.
 

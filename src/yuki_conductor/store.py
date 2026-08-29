@@ -579,9 +579,10 @@ MODEL_ALIASES = {
     "opus1m": "opus[1m]",
 }
 
-# Passing no --model flag lets the claude CLI pick its own default, which is
-# whatever `model` is set to in ~/.claude/settings.json (currently opus[1m]).
-# The bare aliases resolve to the plain 200k variants, so pinning one silently
-# gives up the 1M context window — this is how a channel returns to the
-# CLI default.
+# Clearing a channel's pin doesn't mean "no --model flag" — run_claude always
+# passes one, falling back to CLAUDE_DEFAULT_MODEL (opus[1m]). The flag can't be
+# omitted, because a `-r` resume would then rehydrate the canonical model id and
+# silently drop the 1M context window. The bare aliases above resolve to the
+# plain 200k variants, so pinning one is a deliberate downgrade; `default` is
+# how a channel returns to the 1M default.
 DEFAULT_MODEL_ARG = "default"

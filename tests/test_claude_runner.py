@@ -7,6 +7,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 from yuki_conductor.claude_runner import run_claude
+from yuki_conductor.config import CLAUDE_DEFAULT_MODEL
 
 
 def _stream(*records: dict) -> str:
@@ -113,19 +114,24 @@ def test_usage_and_cost_from_result_record():
     assert result.cost_usd == 0.42
 
 
-def test_no_model_flag_when_unset():
-    """A channel with no pinned model must not get --model.
+def test_default_model_flag_when_unset():
+    """A channel with no pinned model must still get an explicit --model.
 
-    Omitting the flag is what lets the claude CLI apply its own default
-    (opus[1m]); passing an alias like "opus" resolves to the plain 200k
-    variant instead, silently giving up the 1M context window.
+    Omitting the flag lets the CLI resolve its own default, which is only
+    opus[1m] on a *fresh* run — a `-r` resume rehydrates the canonical id
+    instead and silently drops the 1M context window.
     """
     mock_proc = _mock_popen(stdout=_stream(_result_record()))
     with patch("subprocess.Popen", return_value=mock_proc) as mock_cls:
         run_claude("hi", model=None)
 
     cmd = mock_cls.call_args[0][0]
-    assert "--model" not in cmd
+    assert cmd[cmd.index("--model") + 1] == CLAUDE_DEFAULT_MODEL
+
+
+def test_default_model_keeps_the_1m_window():
+    """The whole point of pinning a default: it must carry the [1m] suffix."""
+    assert CLAUDE_DEFAULT_MODEL.endswith("[1m]")
 
 
 def test_model_flag_when_pinned():

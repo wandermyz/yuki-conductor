@@ -17,6 +17,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import (
     CLAUDE_BIN,
+    CLAUDE_DEFAULT_MODEL,
     CLAUDE_WORKING_DIR,
     slack_app_token,
     slack_bot_token,
@@ -47,13 +48,13 @@ def create_app() -> App:
         options = ", ".join([DEFAULT_MODEL_ARG, *MODEL_ALIASES])
 
         if not arg:
-            current = model_store.get(channel) or f"{DEFAULT_MODEL_ARG} (whatever the claude CLI is configured to use)"
+            current = model_store.get(channel) or f"{DEFAULT_MODEL_ARG} ({CLAUDE_DEFAULT_MODEL})"
             respond(f"Current model: *{current}*\nUsage: `/yuki-model [{options}]`")
             return
 
         if arg == DEFAULT_MODEL_ARG:
             model_store.clear(channel)
-            respond("Model reset to the claude CLI default for this channel.")
+            respond(f"Model reset to the default ({CLAUDE_DEFAULT_MODEL}) for this channel.")
             return
 
         if arg not in MODEL_ALIASES:
