@@ -66,6 +66,20 @@ def _slack_thread_url(channel_id: str, thread_ts: str) -> str:
     return f"https://{SLACK_WORKSPACE}.slack.com/archives/{channel_id}/p{ts_no_dot}"
 
 
+# Plugin toggles only take effect when receivers are rebuilt, which happens at
+# startup. Rather than pretend otherwise with a half-working hot reload, every
+# mutation sets this flag and the UI shows a banner until a restart clears it.
+_restart_required = {"value": False}
+
+
+def _mark_restart_required() -> None:
+    _restart_required["value"] = True
+
+
+def _clear_restart_required() -> None:
+    _restart_required["value"] = False
+
+
 def create_api() -> FastAPI:
     api = FastAPI(title="Agent Conductor")
 
@@ -642,6 +656,115 @@ def create_api() -> FastAPI:
     def get_all_usage():
         """Return aggregated token usage and cost per conversation."""
         return conv_store.get_all_conversation_usage()
+
+    # ---------------------------------------------------------------- plugins
+
+    def _plugin_to_dict(desc) -> dict:
+        return {
+            "name": desc.name,
+            "description": desc.description,
+            "version": desc.version,
+            "source": desc.source,
+            "path": str(desc.path) if desc.path else None,
+            "enabled": desc.enabled,
+            "builtin": desc.builtin,
+            "channels": desc.channel_names,
+            "skill_dirs": [str(p) for p in desc.skill_dirs],
+            "cli_entry": desc.cli_entry,
+            "status": desc.status,
+            "error": desc.error,
+        }
+
+    @api.get("/api/plugins")
+    def list_plugins():
+        """Every known plugin, plus how channel enablement is currently resolved."""
+        from yuki_conductor.config import channels, channels_override
+        from yuki_conductor.plugins import discover_plugins
+
+        override = channels_override()
+        return {
+            "plugins": [_plugin_to_dict(d) for d in discover_plugins()],
+            "active_channels": channels(),
+            "channels_override": override,
+            "restart_required": _restart_required["value"],
+        }
+
+    class PluginAdd(BaseModel):
+        path: str
+
+    @api.post("/api/plugins", status_code=201)
+    def add_plugin(body: PluginAdd):
+        """Register a local plugin directory, disabled by default."""
+        from yuki_conductor.plugin_config import add_plugin as write_plugin
+        from yuki_conductor.plugin_config import load_records
+        from yuki_conductor.plugins import MANIFEST_NAME, read_manifest
+
+        path = Path(body.path.strip()).expanduser()
+        if not path.is_dir():
+            raise HTTPException(status_code=400, detail=f"Not a directory: {path}")
+        try:
+            manifest = read_manifest(path)
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=400, detail=f"No {MANIFEST_NAME} in {path}"
+            ) from None
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Bad manifest: {exc}") from None
+
+        name = manifest["name"]
+        if any(r.name == name for r in load_records()):
+            raise HTTPException(
+                status_code=409, detail=f"Plugin {name!r} is already registered"
+            )
+
+        write_plugin(name, path)
+        _mark_restart_required()
+        return {"name": name, "restart_required": True}
+
+    class PluginUpdate(BaseModel):
+        enabled: bool
+
+    @api.patch("/api/plugins/{name}")
+    def update_plugin(name: str, body: PluginUpdate):
+        from yuki_conductor.plugin_config import ensure_file, set_plugin_field
+
+        ensure_file()
+        if not set_plugin_field(name, "enabled", body.enabled):
+            raise HTTPException(status_code=404, detail="Plugin not found in registry")
+        _mark_restart_required()
+        return {"name": name, "enabled": body.enabled, "restart_required": True}
+
+    @api.delete("/api/plugins/{name}")
+    def delete_plugin(name: str):
+        from yuki_conductor.plugin_config import load_records, remove_plugin
+
+        record = next((r for r in load_records() if r.name == name), None)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Plugin not found in registry")
+        if record.builtin:
+            raise HTTPException(
+                status_code=400, detail="Built-in plugins can only be disabled"
+            )
+        remove_plugin(name)
+        _mark_restart_required()
+        return {"ok": True, "restart_required": True}
+
+    @api.post("/api/daemon/restart", status_code=202)
+    def restart_daemon():
+        """Restart the daemon out-of-process.
+
+        The web server runs *inside* the daemon, so the restart must be
+        detached before it kills anything — otherwise it kills its own caller
+        mid-response. Returns immediately; the frontend polls /api/status.
+        """
+        from yuki_conductor.daemon import spawn_detached_restart
+
+        try:
+            spawn_detached_restart()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from None
+        _clear_restart_required()
+        return {"ok": True, "restarting": True}
 
     @api.post("/api/admin/rebuild")
     def admin_rebuild():

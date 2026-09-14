@@ -316,6 +316,46 @@ def _restart():
     print(f"Restarted scheduled task {TASK_NAME}")
 
 
+def _restart_script() -> Path:
+    return project_dir() / "bin" / "restart-daemon.ps1"
+
+
+def spawn_detached_restart(delay_seconds: int = 5) -> None:
+    """Launch bin/restart-daemon.ps1 outside the caller's process tree.
+
+    `Start-Process`, `&`, and background jobs all stay in the caller's tree and
+    get killed halfway through when the script kills the daemon. WMI's
+    `Win32_Process.Create` parents the new process to the WMI provider host
+    instead, so it survives the caller's death.
+    """
+    script = _restart_script()
+    if not script.is_file():
+        raise RuntimeError(f"Restart script not found: {script}")
+
+    from yuki_conductor.web_server import WEB_PORT
+
+    command = (
+        f'{_pwsh()} -NoProfile -ExecutionPolicy Bypass -File "{script}" '
+        f"-Port {WEB_PORT} -DelaySeconds {delay_seconds}"
+    )
+    ps = (
+        "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
+        f"-Arguments @{{ CommandLine = '{command}' }}; exit $r.ReturnValue"
+    )
+    result = subprocess.run(
+        [_pwsh(), "-NoProfile", "-Command", ps],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Win32_Process.Create failed (code {result.returncode}): "
+            f"{result.stderr.strip() or result.stdout.strip()}"
+        )
+
+
 def _status():
     """Report whether the daemon is actually alive, not merely installed.
 

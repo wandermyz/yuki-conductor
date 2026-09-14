@@ -1,19 +1,19 @@
 """Process-level orchestrator for yuki-conductor.
 
-Reads the enabled chat apps from `CHAT_APPS`, starts each receiver
-non-blocking, then starts the web server and cron scheduler. Blocks
-forever.
+Resolves enabled channels from the plugin registry (or the `CHANNELS`
+override), starts each receiver non-blocking, then starts the web server and
+cron scheduler. Blocks forever.
 """
 
-import importlib.metadata
 import logging
 import subprocess
 import sys
 import threading
 import time
 
-from yuki_conductor.config import CLAUDE_WORKING_DIR, chat_apps
+from yuki_conductor.config import CLAUDE_WORKING_DIR, channels, channels_override
 from yuki_conductor.messaging import ChatAppReceiver, MessagingPlatform
+from yuki_conductor.plugins import discover_plugins, find_channel, load_factory
 from yuki_conductor.store import ModelStore, SessionStore
 
 logger = logging.getLogger(__name__)
@@ -51,24 +51,34 @@ def _broadcast_restart_notification(
 
 
 def _build_receiver(
-    name: str, session_store: SessionStore, model_store: ModelStore
+    name: str,
+    session_store: SessionStore,
+    model_store: ModelStore,
+    descriptors=None,
 ) -> ChatAppReceiver:
-    if name == "slack_socket":
-        from yuki_conductor.slack_app import SlackSocketReceiver
+    """Construct the receiver for a channel name.
 
-        return SlackSocketReceiver()
+    Slack is described in the registry like any other plugin, so there is one
+    construction path: resolve the channel's ``module:attr`` factory and call
+    it. The builtin factory is a receiver class taking no stores.
+    """
+    if descriptors is None:
+        descriptors = discover_plugins()
 
-    # Discover from installed entry-point plugins
-    eps = importlib.metadata.entry_points(group="yuki_conductor.chat_plugins")
-    for ep in eps:
-        if ep.name == name:
-            factory = ep.load()
-            return factory(session_store=session_store, model_store=model_store)
+    found = find_channel(name, descriptors)
+    if found is None:
+        available = sorted(
+            c.name for d in descriptors for c in d.channels
+        )
+        raise RuntimeError(
+            f"Unknown channel {name!r}; available: {', '.join(available) or '(none)'}"
+        )
 
-    available = ["slack_socket"] + [ep.name for ep in eps]
-    raise RuntimeError(
-        f"Unknown chat app {name!r}; available: {', '.join(available)}"
-    )
+    desc, channel = found
+    factory = load_factory(channel.factory)
+    if desc.builtin:
+        return factory()
+    return factory(session_store=session_store, model_store=model_store)
 
 
 def _open_log_handler(log_file, attempts: int = 20, delay: float = 0.5):
@@ -110,11 +120,23 @@ def start() -> None:
         fh.setFormatter(logging.Formatter(fmt))
         root.addHandler(fh)
 
-    apps = chat_apps()
+    from yuki_conductor.plugin_config import ensure_file
+
+    ensure_file()
+
+    descriptors = discover_plugins()
+    apps = channels()
+    source = "CHANNELS override" if channels_override() is not None else "plugin registry"
     logger.info(
-        "Starting yuki-conductor with CHAT_APPS="
-        + ",".join(apps or ["(none)"])
+        "Channels enabled (%s): %s", source, ", ".join(apps) or "(none)"
     )
+    for desc in descriptors:
+        if desc.status != "ok":
+            logger.warning(
+                "Plugin %r unavailable (%s): %s", desc.name, desc.status, desc.error
+            )
+        elif not desc.enabled:
+            logger.info("Plugin %r installed but disabled", desc.name)
 
     session_store = SessionStore()
     model_store = ModelStore()
@@ -122,7 +144,13 @@ def start() -> None:
     receivers: list[ChatAppReceiver] = []
     platforms_by_name: dict[str, MessagingPlatform] = {}
     for app in apps:
-        rec = _build_receiver(app, session_store, model_store)
+        try:
+            rec = _build_receiver(app, session_store, model_store, descriptors)
+        except Exception:
+            # A broken plugin must not take the daemon down with it; the web UI
+            # surfaces the failure via /api/plugins.
+            logger.error("Channel %r failed to start", app, exc_info=True)
+            continue
         receivers.append(rec)
         platforms_by_name[rec.platform.name] = rec.platform
 
@@ -153,6 +181,6 @@ def start() -> None:
     _broadcast_restart_notification(platforms_by_name)
 
     if not receivers:
-        logger.info("No chat apps enabled (CHAT_APPS empty); web + cron only")
+        logger.info("No channels enabled; web + cron only")
 
     threading.Event().wait()

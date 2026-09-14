@@ -57,10 +57,21 @@ def main(argv: list[str] | None = None) -> None:
         help="Title for the new conversation (only used without --conversation)",
     )
 
-    import importlib.metadata
-    for ep in importlib.metadata.entry_points(group="yuki_conductor.cli_plugins"):
-        register_fn = ep.load()
-        register_fn(sub)
+    # CLI subcommands contributed by enabled plugins. A broken plugin must not
+    # make the whole CLI unusable, so failures are reported and skipped.
+    from yuki_conductor.plugins import discover_plugins, inject_python_path, load_factory
+
+    for desc in discover_plugins():
+        if not desc.usable or not desc.cli_entry:
+            continue
+        try:
+            inject_python_path(desc)
+            load_factory(desc.cli_entry)(sub)
+        except Exception as exc:
+            print(
+                f"warning: plugin {desc.name!r} failed to register CLI commands: {exc}",
+                file=sys.stderr,
+            )
 
     args = parser.parse_args(argv)
 

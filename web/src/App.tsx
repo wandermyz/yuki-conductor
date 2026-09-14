@@ -1,12 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import AutomationsView from "./AutomationsView";
 import Chat from "./chat/Chat";
+import PluginsView from "./PluginsView";
 import ProjectsView from "./ProjectsView";
 import StatusView from "./StatusView";
 import Terminal from "./Terminal";
 import "./App.css";
 
-type Tab = "sessions" | "chat" | "projects" | "automations" | "status";
+type Tab =
+  | "sessions"
+  | "chat"
+  | "projects"
+  | "automations"
+  | "status"
+  | "plugins"
+  | "more";
 
 interface Session {
   thread_ts: string;
@@ -457,24 +465,134 @@ function SessionsView() {
   );
 }
 
+const ALL_TABS: Tab[] = [
+  "chat",
+  "projects",
+  "automations",
+  "sessions",
+  "status",
+  "plugins",
+  "more",
+];
+
+/** Tabs behind the "More" overflow. The bar holds four; these are the rest. */
+const OVERFLOW_TABS: Tab[] = ["sessions", "status", "plugins"];
+
+const TAB_LABELS: Record<Tab, string> = {
+  chat: "Chat",
+  projects: "Projects",
+  automations: "Automations",
+  sessions: "Sessions",
+  status: "Status",
+  plugins: "Plugins",
+  more: "More",
+};
+
+const TAB_BLURBS: Partial<Record<Tab, string>> = {
+  sessions: "Slack threads and Zellij terminals",
+  status: "Health of each running channel",
+  plugins: "Install, enable, and restart",
+};
+
+function TabIcon({ tab }: { tab: Tab }) {
+  const common = {
+    className: "tab-icon",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  switch (tab) {
+    case "chat":
+      return (
+        <svg {...common}>
+          <path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z" />
+        </svg>
+      );
+    case "projects":
+      return (
+        <svg {...common}>
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        </svg>
+      );
+    case "automations":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+          <path d="M12 3v2M21 12h-2M12 21v-2M3 12h2" />
+        </svg>
+      );
+    case "sessions":
+      return (
+        <svg {...common}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M3 9h18" />
+          <path d="M8 4v5" />
+        </svg>
+      );
+    case "status":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 6v6l4 2" />
+        </svg>
+      );
+    case "plugins":
+      return (
+        <svg {...common}>
+          <path d="M9 3v4M15 3v4" />
+          <rect x="6" y="7" width="12" height="7" rx="2" />
+          <path d="M12 14v3a4 4 0 0 0 4 4h2" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <circle cx="5" cy="12" r="1.6" />
+          <circle cx="12" cy="12" r="1.6" />
+          <circle cx="19" cy="12" r="1.6" />
+        </svg>
+      );
+  }
+}
+
+/** The "More" landing page: a plain list into each overflowed tab. */
+function MoreView({ onSelect }: { onSelect: (tab: Tab) => void }) {
+  return (
+    <div className="more-view">
+      <ul className="more-list">
+        {OVERFLOW_TABS.map((t) => (
+          <li key={t}>
+            <button onClick={() => onSelect(t)}>
+              <TabIcon tab={t} />
+              <span className="more-text">
+                <span className="more-label">{TAB_LABELS[t]}</span>
+                <span className="more-blurb">{TAB_BLURBS[t]}</span>
+              </span>
+              <span className="more-chevron">&rsaquo;</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function parseHash(): { tab: Tab; chatId: string | null } {
   const hash = window.location.hash.replace(/^#/, "");
   if (hash.startsWith("chat/")) return { tab: "chat", chatId: hash.slice(5) || null };
-  if (hash === "chat") return { tab: "chat", chatId: null };
-  if (hash === "sessions") return { tab: "sessions", chatId: null };
-  if (hash === "projects") return { tab: "projects", chatId: null };
-  if (hash === "automations") return { tab: "automations", chatId: null };
-  if (hash === "status") return { tab: "status", chatId: null };
+  // Deep links to the overflowed tabs stay valid — they just render with the
+  // "More" tab highlighted rather than a tab of their own.
+  if ((ALL_TABS as string[]).includes(hash))
+    return { tab: hash as Tab, chatId: null };
   // Fall back to localStorage for users without a hash yet
   const saved = window.localStorage.getItem("yuki-tab");
-  if (
-    saved === "chat" ||
-    saved === "sessions" ||
-    saved === "projects" ||
-    saved === "automations" ||
-    saved === "status"
-  )
-    return { tab: saved, chatId: null };
+  if (saved && (ALL_TABS as string[]).includes(saved))
+    return { tab: saved as Tab, chatId: null };
   return { tab: "chat", chatId: null };
 }
 
@@ -506,130 +624,55 @@ function App() {
     window.localStorage.setItem("yuki-tab", tab);
   }, [tab, chatId]);
 
+  const renderTab = () => {
+    switch (tab) {
+      case "chat":
+        return <Chat selectedId={chatId} onSelectId={setChatId} />;
+      case "projects":
+        return <ProjectsView />;
+      case "automations":
+        return <AutomationsView />;
+      case "status":
+        return <StatusView />;
+      case "plugins":
+        return <PluginsView />;
+      case "sessions":
+        return <SessionsView />;
+      default:
+        return <MoreView onSelect={setTab} />;
+    }
+  };
+
+  // The overflow tab reads as active whenever one of its children is showing.
+  const barTabs: Tab[] = ["chat", "projects", "automations", "more"];
+  const isActive = (t: Tab) =>
+    t === "more" ? tab === "more" || OVERFLOW_TABS.includes(tab) : tab === t;
+
   return (
     <div className="root">
-      <div className="tab-content">
-        {tab === "chat" ? (
-          <Chat selectedId={chatId} onSelectId={setChatId} />
-        ) : tab === "projects" ? (
-          <ProjectsView />
-        ) : tab === "automations" ? (
-          <AutomationsView />
-        ) : tab === "status" ? (
-          <StatusView />
-        ) : (
-          <SessionsView />
-        )}
-      </div>
+      <div className="tab-content">{renderTab()}</div>
       <nav className="tabbar" role="tablist">
-        <button
-          role="tab"
-          aria-selected={tab === "chat"}
-          className={`tab ${tab === "chat" ? "active" : ""}`}
-          onClick={() => setTab("chat")}
-        >
-          <svg
-            className="tab-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
+        {barTabs.map((t) => (
+          <button
+            key={t}
+            role="tab"
+            aria-selected={isActive(t)}
+            className={`tab ${isActive(t) ? "active" : ""}`}
+            onClick={() => setTab(t)}
           >
-            <path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z" />
-          </svg>
-          <span className="tab-label">Chat</span>
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "projects"}
-          className={`tab ${tab === "projects" ? "active" : ""}`}
-          onClick={() => setTab("projects")}
-        >
-          <svg
-            className="tab-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-          </svg>
-          <span className="tab-label">Projects</span>
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "automations"}
-          className={`tab ${tab === "automations" ? "active" : ""}`}
-          onClick={() => setTab("automations")}
-        >
-          <svg
-            className="tab-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 7v5l3 2" />
-            <path d="M12 3v2M21 12h-2M12 21v-2M3 12h2" />
-          </svg>
-          <span className="tab-label">Automations</span>
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "sessions"}
-          className={`tab ${tab === "sessions" ? "active" : ""}`}
-          onClick={() => setTab("sessions")}
-        >
-          <svg
-            className="tab-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <rect x="3" y="4" width="18" height="16" rx="2" />
-            <path d="M3 9h18" />
-            <path d="M8 4v5" />
-          </svg>
-          <span className="tab-label">Sessions</span>
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "status"}
-          className={`tab ${tab === "status" ? "active" : ""}`}
-          onClick={() => setTab("status")}
-        >
-          <svg
-            className="tab-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 6v6l4 2" />
-          </svg>
-          <span className="tab-label">Status</span>
-        </button>
+            <TabIcon tab={t} />
+            <span className="tab-label">
+              {t === "more" && OVERFLOW_TABS.includes(tab)
+                ? TAB_LABELS[tab]
+                : TAB_LABELS[t]}
+            </span>
+          </button>
+        ))}
       </nav>
     </div>
   );
 }
 
 export default App;
+
+

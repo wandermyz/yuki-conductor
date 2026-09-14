@@ -31,11 +31,12 @@ So: run the restart **detached from your own process tree**.
 
 ## Procedure
 
-1. Locate the bundled script. This skill is project-scoped, so it lives in the
-   yuki-conductor checkout alongside this file:
+1. Locate the bundled script. It lives in the yuki-conductor checkout, shared
+   with the web UI's **Restart daemon** button (`POST /api/daemon/restart`) so
+   there is one script and no drifting copy:
 
    ```
-   $YUKI_CONDUCTOR_PROJECT\.claude\skills\yuki-conductor-restart\restart-daemon.ps1
+   $YUKI_CONDUCTOR_PROJECT\bin\restart-daemon.ps1
    ```
 
 2. Launch it via WMI so it runs under the WMI provider host — **outside** your
@@ -43,7 +44,7 @@ So: run the restart **detached from your own process tree**.
    abort it:
 
    ```powershell
-   $script = "$env:YUKI_CONDUCTOR_PROJECT\.claude\skills\yuki-conductor-restart\restart-daemon.ps1"
+   $script = "$env:YUKI_CONDUCTOR_PROJECT\bin\restart-daemon.ps1"
    Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
        CommandLine = "pwsh -NoProfile -ExecutionPolicy Bypass -File `"$script`""
    }

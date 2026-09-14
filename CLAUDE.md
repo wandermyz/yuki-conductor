@@ -5,7 +5,9 @@
 ```
 src/yuki_conductor/
   cli.py            — argparse entry point (run, daemon, simulate)
-  config.py         — env loading, path constants, CHAT_APPS parsing
+  config.py         — env loading, path constants, CHANNELS override parsing
+  plugins.py        — plugin identity, injection points, discovery + status
+  plugin_config.py  — plugins.yaml parsing and surgical field edits
   store.py          — SQLite-backed session & model stores
   claude_runner.py  — subprocess wrapper for claude CLI (stream-json reader)
   stream_events.py  — normalizes stream-json records into UI progress events
@@ -24,6 +26,8 @@ src/yuki_conductor/
 web/                — React + Vite frontend (pnpm, TypeScript)
 plugins/
   yuki-conductor/   — bundled plugin, injected into every session (cron skill)
+examples/
+  echo-plugin/      — reference plugin: manifest, channel, skill dir
 .claude/skills/     — project-scoped skills, only advertised when cwd is this repo
 ```
 
@@ -37,23 +41,80 @@ Key files:
 - `~/.yuki-conductor/.secrets/` — one secret per file, mode 600 (referenced by the above; never in `workspace/`, which syncs to Obsidian)
 - `~/.yuki-conductor/workspace/yuki-conductor.db` — SQLite database for session and model tracking
 - `~/.yuki-conductor/workspace/cron.yaml` — Cron task definitions (see `cron.example.yaml` for format)
+- `~/.yuki-conductor/workspace/plugins.yaml` — plugin registry: installed and enabled (see `plugins.example.yaml`)
 - `~/.yuki-conductor/workspace/skills.yaml` — promotes user-scope skills to "always available" (see `skills.example.yaml` and Skill Discovery)
 - `~/.yuki-conductor/workspace/system-prompt.md` — optional personal system prompt appended to every spawned Claude run (see Skill Discovery)
 - `~/.yuki-conductor/workspace/attachments/`, `uploads/` — runtime file storage
 - `~/.yuki-conductor/daemon.log`, `daemon.err.log` — LaunchAgent logs
 
-## Chat Apps
+## Plugins and Channels
 
-The daemon's chat surfaces are selected by `CHAT_APPS` (comma-separated):
+A **plugin** is a named unit that contributes capability at one or more
+**injection points**. `plugins.py` owns the concept; `plugin_config.py` owns the
+registry file.
 
-- `slack_socket` (default) — slack-bolt Socket Mode using `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN`.
-- any other name — resolved as an installed chat-app plugin via the
-  `yuki_conductor.chat_plugins` entry-point group (see
-  `docs/plans/chat-plugin-architecture.md`). Plugins live in separate packages;
-  install one into the same environment and enable it by its entry-point name.
-- empty / `none` — no chat receivers. Web server and cron scheduler still run; cron notifications are logged instead of posted.
+| Injection point | Status | Contribution |
+| --- | --- | --- |
+| `channels` | implemented | a `ChatAppReceiver` factory — a chat surface the daemon listens on |
+| `skills` | implemented | a Claude Code plugin dir injected via `--plugin-dir` |
+| `cli` | implemented | subcommands grafted onto `yuki-conductor` |
+| `triggers` | planned | a source of automation events |
 
-Multiple values may be combined: `CHAT_APPS=slack_socket,my_plugin`. Each session is platform-tagged so replies always route back to the originating chat app.
+Plugins reach the registry three ways, merged in that precedence order:
+
+1. **builtin** — Slack, shipped in-tree. Described in `plugins._BUILTIN_CHANNELS`
+   exactly like an external plugin, so `runtime._build_receiver` has one code
+   path: resolve the channel's `module:attr` factory and call it. A builtin can
+   be disabled but not removed.
+2. **path** — a directory registered in `~/.yuki-conductor/workspace/plugins.yaml`,
+   declaring itself in a `yuki-plugin.yaml` manifest at its root. See
+   `examples/echo-plugin` for a complete one. If the manifest sets
+   `python_path:`, those dirs are **appended** to `sys.path` (appended, not
+   prepended, so a plugin can't shadow a stdlib module) when the plugin is
+   enabled — that's what makes "just point at a folder" work without an
+   editable install.
+3. **entry_point** — an installed package declaring `yuki_conductor.chat_plugins`
+   / `.skill_plugins` / `.cli_plugins`. Still supported with no manifest; the
+   three groups are merged by entry-point name into one plugin.
+
+`discover_plugins()` **never raises.** A missing path yields `status="missing"`,
+a failed import `status="error"` with the message; both still render in the UI
+and neither is fatal at startup. A *disabled* plugin is never imported at all —
+discovery reads manifests without executing plugin code.
+
+Enablement lives in `plugins.yaml`, not the environment. `CHANNELS` is only an
+override/ordering escape hatch: when set it wins outright (`none`/empty = no
+channels), and `runtime.start()` logs which source resolved the channel list.
+Order matters — the cron scheduler uses the first enabled platform as its
+default notification target.
+
+Toggling a plugin off also stops advertising its **skills** to spawned sessions
+(`skills.skill_plugin_dirs` → `plugins.enabled_skill_dirs`), which is what a
+user toggling it off expects.
+
+### Plugins tab
+
+`/api/plugins` (GET/POST/PATCH/DELETE) plus `POST /api/daemon/restart`, surfaced
+by `web/src/PluginsView.tsx`. Every mutation is a `plugins.yaml` edit that only
+takes effect when receivers are rebuilt, i.e. at startup — so each response
+carries `restart_required: true` and the UI shows a banner until a restart. This
+is deliberate: hot-swapping live receivers is a much bigger change than
+pretending to.
+
+`POST /api/daemon/restart` must not kill its own caller, since the web server
+runs *inside* the daemon. `daemon.spawn_detached_restart()` dispatches to
+`daemon_windows` (WMI `Win32_Process.Create` running `bin/restart-daemon.ps1`)
+or `daemon_macos` (`setsid` + `launchctl kickstart -k`), returns 202 at once,
+and the frontend polls `/api/status` until the socket comes back. That script is
+shared with the `yuki-conductor-restart` skill — one copy, two callers.
+
+### Web tabs
+
+The tab bar holds four: Chat, Projects, Automations, and a `⋯` overflow.
+Sessions, Status, and Plugins live behind the overflow (`OVERFLOW_TABS` in
+`App.tsx`), which renders a list view and shows as active whenever one of its
+children is current. Deep links (`#sessions`, `#plugins`, …) remain valid.
+
 
 ## Skill Discovery
 
@@ -122,9 +183,9 @@ pausing suspends the *schedule*, not the task. The Automations tab toggles it vi
 `PATCH /api/automations/{name}`; resuming deletes the key rather than writing
 `paused: false`.
 
-Routing rule when `chat_app:` is omitted: pick the first enabled platform, with `slack` preferred. If `chat_app:` names a platform that isn't in `CHAT_APPS`, the task is skipped with a warning rather than misrouted.
+Routing rule when `chat_app:` is omitted: pick the first enabled platform, with `slack` preferred. If `chat_app:` names a platform that isn't enabled, the task is skipped with a warning rather than misrouted.
 
-Required env var (only when `slack_socket` is enabled): `SLACK_CRON_CHANNEL` — the Slack channel ID to post cron results to.
+Required env var (only when the Slack channel is enabled): `SLACK_CRON_CHANNEL` — the Slack channel ID to post cron results to.
 
 ### Automations tab
 

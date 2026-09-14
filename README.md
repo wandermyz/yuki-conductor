@@ -63,8 +63,11 @@ cp .env.template ~/.yuki-conductor/.env
 # Edit ~/.yuki-conductor/.env — see Configuration below
 ```
 
-To run web-only, with no chat integration at all, set `CHAT_APPS=none` and skip the
-Slack tokens entirely.
+Chat surfaces ("channels") are enabled in the **Plugins** tab, which writes
+`~/.yuki-conductor/workspace/plugins.yaml`. A fresh install starts with the
+built-in Slack channel present but disabled, so web-only needs no configuration
+at all — just skip the Slack tokens. Setting `CHANNELS` in `.env` overrides the
+registry if you need an escape hatch.
 
 Build the frontend and start in the foreground:
 
@@ -89,8 +92,8 @@ uv run yuki-conductor daemon status
 
 | Variable | Purpose |
 | --- | --- |
-| `CHAT_APPS` | Comma-separated chat surfaces: `slack_socket`, plugin names, or `none` |
-| `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN` | Slack credentials (only with `slack_socket`) |
+| `CHANNELS` | Optional override of the plugin registry: comma-separated channel names, or `none` |
+| `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN` | Slack credentials (only with the Slack channel enabled) |
 | `SLACK_CRON_CHANNEL` | Channel that scheduled tasks post to |
 | `CLAUDE_WORKING_DIR` | Default directory that spawned sessions run in |
 | `CLAUDE_BIN` | Claude CLI path or name (default `claude`) |

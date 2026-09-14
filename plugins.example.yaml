@@ -1,0 +1,23 @@
+# yuki-conductor plugin registry.
+#
+# Copy to ~/.yuki-conductor/workspace/plugins.yaml.
+#
+# This file records only *identity and enablement*. What a plugin contributes —
+# channels, skills, CLI commands — is read from its own yuki-plugin.yaml at load
+# time and never cached here.
+#
+# Changes take effect on the next daemon start. The Plugins tab in the web UI
+# edits this file and offers a "Restart daemon" button.
+
+plugins:
+  # Built-in Slack Socket Mode channel. Can be disabled but not removed.
+  # Needs SLACK_BOT_TOKEN + SLACK_APP_TOKEN in ~/.yuki-conductor/.env.
+  - name: slack
+    builtin: true
+    enabled: true
+
+  # A plugin registered by local path. The directory must contain a
+  # yuki-plugin.yaml manifest; see docs/plans/2026-09-14-plugin-system.md.
+  # - name: example-channel
+  #   path: ~/Projects/yuki-conductor-example
+  #   enabled: false

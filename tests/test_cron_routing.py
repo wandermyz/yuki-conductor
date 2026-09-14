@@ -60,32 +60,32 @@ def test_pick_platform_explicit_missing_skips():
 
 
 def test_pick_platform_slack_socket_alias():
-    """`chat_app: slack_socket` (the CHAT_APPS spelling) maps to platform `slack`."""
+    """`chat_app: slack_socket` (the channel-name spelling) maps to platform `slack`."""
     slack = FakePlatform("slack")
     assert _pick_platform(_task(chat_app="slack_socket"), {"slack": slack}) is slack
 
 
-def test_pick_platform_default_uses_chat_apps_order():
+def test_pick_platform_default_uses_channel_order():
     slack = FakePlatform("slack")
     plugin = FakePlatform("my_plugin")
-    with patch("yuki_conductor.cron_scheduler.chat_apps", return_value=["slack_socket"]):
+    with patch("yuki_conductor.cron_scheduler.channels", return_value=["slack_socket"]):
         assert _pick_platform(_task(), {"slack": slack, "my_plugin": plugin}) is slack
 
 
 def test_pick_platform_default_falls_back_to_plugin():
     plugin = FakePlatform("my_plugin")
-    with patch("yuki_conductor.cron_scheduler.chat_apps", return_value=["my_plugin"]):
+    with patch("yuki_conductor.cron_scheduler.channels", return_value=["my_plugin"]):
         assert _pick_platform(_task(), {"my_plugin": plugin}) is plugin
 
 
 def test_pick_platform_default_falls_back_to_web():
     web = FakePlatform("web")
-    with patch("yuki_conductor.cron_scheduler.chat_apps", return_value=[]):
+    with patch("yuki_conductor.cron_scheduler.channels", return_value=[]):
         assert _pick_platform(_task(), {"web": web}) is web
 
 
 def test_pick_platform_no_apps_returns_none():
-    with patch("yuki_conductor.cron_scheduler.chat_apps", return_value=[]):
+    with patch("yuki_conductor.cron_scheduler.channels", return_value=[]):
         assert _pick_platform(_task(), {}) is None
 
 
@@ -111,7 +111,7 @@ def test_run_cron_task_silence_does_not_route():
 
     with (
         patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result),
-        patch("yuki_conductor.cron_scheduler.chat_apps", return_value=["slack_socket"]),
+        patch("yuki_conductor.cron_scheduler.channels", return_value=["slack_socket"]),
     ):
         _run_cron_task(_task(), {"slack": slack})
 
@@ -133,12 +133,12 @@ def test_run_cron_task_no_apps_logs_only(caplog):
 
     with (
         patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result),
-        patch("yuki_conductor.cron_scheduler.chat_apps", return_value=[]),
+        patch("yuki_conductor.cron_scheduler.channels", return_value=[]),
     ):
         with caplog.at_level("INFO", logger="yuki_conductor.cron_scheduler"):
             _run_cron_task(_task(), {})
 
-    assert any("no chat apps enabled" in rec.message.lower() for rec in caplog.records)
+    assert any("no channels enabled" in rec.message.lower() for rec in caplog.records)
 
 
 class ReservingPlatform(FakePlatform):

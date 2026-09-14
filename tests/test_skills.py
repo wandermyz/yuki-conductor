@@ -70,7 +70,11 @@ def test_bundled_plugin_provides_only_global_skills():
 def test_restart_skill_is_project_scoped():
     skill_dir = project_dir() / ".claude" / "skills" / "yuki-conductor-restart"
     assert (skill_dir / "SKILL.md").is_file()
-    assert (skill_dir / "restart-daemon.ps1").is_file()
+
+
+def test_restart_script_is_shared_with_the_api():
+    """One script, two callers — the skill and POST /api/daemon/restart."""
+    assert (project_dir() / "bin" / "restart-daemon.ps1").is_file()
 
 
 def test_skill_plugin_dirs_includes_bundled():
@@ -79,32 +83,59 @@ def test_skill_plugin_dirs_includes_bundled():
     assert bundled in dirs
 
 
-def test_skill_plugin_dirs_discovers_entry_points(tmp_path):
-    plugin = tmp_path / "extra"
+def _plugin_dir(tmp_path, name):
+    plugin = tmp_path / name
     (plugin / ".claude-plugin").mkdir(parents=True)
     (plugin / ".claude-plugin" / "plugin.json").write_text(
-        json.dumps({"name": "extra", "version": "0.1.0", "description": "x"})
+        json.dumps({"name": name, "version": "0.1.0", "description": "x"})
     )
+    return plugin
 
-    ep = MagicMock()
-    ep.name = "extra"
-    ep.load.return_value = lambda: str(plugin)
 
-    with patch("importlib.metadata.entry_points", return_value=[ep]):
+def test_skill_plugin_dirs_includes_enabled_plugin_dirs(tmp_path):
+    plugin = _plugin_dir(tmp_path, "extra")
+
+    with patch(
+        "yuki_conductor.plugins.enabled_skill_dirs", return_value=[plugin]
+    ):
         dirs = skills.skill_plugin_dirs()
 
     assert str(plugin) in dirs
 
 
-def test_skill_plugin_dirs_skips_invalid_entry_point(tmp_path):
-    ep = MagicMock()
-    ep.name = "broken"
-    ep.load.return_value = lambda: str(tmp_path / "does-not-exist")
-
-    with patch("importlib.metadata.entry_points", return_value=[ep]):
+def test_skill_plugin_dirs_skips_invalid_dir(tmp_path):
+    missing = tmp_path / "does-not-exist"
+    with patch("yuki_conductor.plugins.enabled_skill_dirs", return_value=[missing]):
         dirs = skills.skill_plugin_dirs()
 
-    assert str(tmp_path / "does-not-exist") not in dirs
+    assert str(missing) not in dirs
+
+
+def test_disabled_plugin_contributes_no_skills(tmp_path):
+    """Toggling a plugin off must also stop advertising its skills."""
+    from yuki_conductor.plugin_config import PluginRecord
+    from yuki_conductor.plugins import discover_plugins
+
+    plugin = _plugin_dir(tmp_path, "gated")
+    root = tmp_path / "gated-plugin"
+    root.mkdir()
+    (root / "yuki-plugin.yaml").write_text(
+        "name: gated\n"
+        "injection_points:\n"
+        "  skills:\n"
+        f"    plugin_dir: {plugin}\n",
+        encoding="utf-8",
+    )
+
+    def dirs_for(enabled):
+        record = PluginRecord(name="gated", path=root, enabled=enabled)
+        with patch("yuki_conductor.plugins._entry_points", return_value=[]):
+            descs = discover_plugins([record])
+        with patch("yuki_conductor.plugins.discover_plugins", return_value=descs):
+            return skills.skill_plugin_dirs()
+
+    assert str(plugin) in dirs_for(True)
+    assert str(plugin) not in dirs_for(False)
 
 
 def test_bundled_plugin_dir_helper():
