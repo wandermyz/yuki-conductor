@@ -10,7 +10,9 @@
 # edits this file and offers a "Restart daemon" button.
 
 plugins:
-  # Built-in Slack Socket Mode channel. Can be disabled but not removed.
+  # Bundled Slack Socket Mode channel, shipped in plugins/slack with its own
+  # yuki-plugin.yaml like any other plugin. Can be disabled but not removed,
+  # since deleting the record would not delete the in-tree code.
   # Needs SLACK_BOT_TOKEN + SLACK_APP_TOKEN in ~/.yuki-conductor/.env.
   - name: slack
     builtin: true

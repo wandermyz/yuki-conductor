@@ -51,23 +51,20 @@ _CRON_PROMPT_PREFIX = (
 )
 
 
-# `slack` (legacy) is accepted as an alias for `slack_socket` since
-# the channel name is the former while platform.name is the latter.
-_TASK_APP_ALIASES = {"slack_socket": "slack"}
-
-
 def _pick_platform(
     task: CronTask,
     platforms_by_name: dict[str, MessagingPlatform],
 ) -> MessagingPlatform | None:
     """Resolve which platform a cron task should notify into.
 
+    Channel names and platform names are the same string, so a task's
+    ``chat_app:`` is looked up directly — no alias table.
+
     Returns None when the task should be skipped (explicit chat_app refers
     to a disabled platform) or when no platforms are enabled at all.
     """
     if task.chat_app:
-        requested = _TASK_APP_ALIASES.get(task.chat_app, task.chat_app)
-        platform = platforms_by_name.get(requested)
+        platform = platforms_by_name.get(task.chat_app)
         if platform is None:
             logger.warning(
                 f"Cron task={task.name} requested chat_app={task.chat_app!r} "
@@ -76,8 +73,7 @@ def _pick_platform(
         return platform
 
     # Default: derive preference from enabled-channel order + "web" fallback
-    preferred = [_TASK_APP_ALIASES.get(a, a) for a in channels()] + ["web"]
-    for name in preferred:
+    for name in [*channels(), "web"]:
         if name in platforms_by_name:
             return platforms_by_name[name]
     return None

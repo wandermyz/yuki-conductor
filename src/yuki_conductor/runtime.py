@@ -58,9 +58,9 @@ def _build_receiver(
 ) -> ChatAppReceiver:
     """Construct the receiver for a channel name.
 
-    Slack is described in the registry like any other plugin, so there is one
-    construction path: resolve the channel's ``module:attr`` factory and call
-    it. The builtin factory is a receiver class taking no stores.
+    Every channel — bundled Slack included — is described by a manifest and
+    built the same way: resolve the `module:attr` factory and call it with the
+    stores. There is no built-in special case.
     """
     if descriptors is None:
         descriptors = discover_plugins()
@@ -74,10 +74,8 @@ def _build_receiver(
             f"Unknown channel {name!r}; available: {', '.join(available) or '(none)'}"
         )
 
-    desc, channel = found
+    _desc, channel = found
     factory = load_factory(channel.factory)
-    if desc.builtin:
-        return factory()
     return factory(session_store=session_store, model_store=model_store)
 
 

@@ -49,7 +49,7 @@ def test_slack_only_builds_slack_receiver():
     fake = FakeReceiver("slack")
     with (
         _patch_block_forever(),
-        patch("yuki_conductor.runtime.channels", return_value=["slack_socket"]),
+        patch("yuki_conductor.runtime.channels", return_value=["slack"]),
         patch("yuki_conductor.plugin_config.ensure_file"),
         patch("yuki_conductor.runtime._build_receiver", return_value=fake) as build,
         patch("yuki_conductor.web_server.start_web_server"),
@@ -60,7 +60,7 @@ def test_slack_only_builds_slack_receiver():
         start()
 
     # First arg is the name string; remaining are stores
-    assert build.call_args[0][0] == "slack_socket"
+    assert build.call_args[0][0] == "slack"
     assert fake.started is True
     assert fake.startup_complete is True
     assert cron_mock.call_args.kwargs["platforms_by_name"] == {"slack": fake.platform}
@@ -91,25 +91,25 @@ def test_entry_point_plugin_discovery():
     load.assert_called_once_with("some_pkg:create_receiver")
 
 
-def test_builtin_factory_called_without_stores():
-    """The builtin Slack receiver class takes no stores, unlike plugin factories."""
+def test_bundled_plugin_uses_the_same_factory_contract():
+    """Bundled Slack is built exactly like an external plugin — stores and all."""
     fake = FakeReceiver("slack")
     from yuki_conductor.plugins import Channel, PluginDescriptor
+    from yuki_conductor.runtime import _build_receiver
+    from yuki_conductor.store import ModelStore, SessionStore
 
     desc = PluginDescriptor(
         name="slack",
         source="builtin",
         builtin=True,
         enabled=True,
-        channels=[Channel(name="slack_socket", factory="mod:Cls")],
+        channels=[Channel(name="slack", factory="mod:make")],
     )
     factory = MagicMock(return_value=fake)
+    sessions, models = SessionStore(), ModelStore()
     with patch("yuki_conductor.runtime.load_factory", return_value=factory):
-        from yuki_conductor.runtime import _build_receiver
-        from yuki_conductor.store import ModelStore, SessionStore
-
-        assert _build_receiver("slack_socket", SessionStore(), ModelStore(), [desc]) is fake
-    factory.assert_called_once_with()
+        assert _build_receiver("slack", sessions, models, [desc]) is fake
+    factory.assert_called_once_with(session_store=sessions, model_store=models)
 
 
 def test_unknown_channel_lists_available():

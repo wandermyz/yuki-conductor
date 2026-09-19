@@ -306,3 +306,14 @@ class SlackSocketReceiver:
             "message": "Socket Mode not connected",
             "details": details,
         }
+
+
+def create_receiver(session_store=None, model_store=None) -> SlackSocketReceiver:
+    """Channel factory, matching the signature every plugin's factory uses.
+
+    Slack predates the plugin registry and reads its own module-level stores,
+    so the arguments are accepted and ignored rather than threaded through —
+    but the signature is the plugin one, so the registry needs no special case
+    for a bundled channel.
+    """
+    return SlackSocketReceiver()

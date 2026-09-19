@@ -32,13 +32,13 @@ def test_single_plugin(monkeypatch):
 
 
 def test_multiple_preserves_order(monkeypatch):
-    monkeypatch.setenv("CHANNELS", "slack_socket,my_plugin")
-    assert channels() == ["slack_socket", "my_plugin"]
+    monkeypatch.setenv("CHANNELS", "slack,my_plugin")
+    assert channels() == ["slack", "my_plugin"]
 
 
 def test_whitespace_and_case_normalized(monkeypatch):
-    monkeypatch.setenv("CHANNELS", "  Slack_Socket , MY_PLUGIN  ")
-    assert channels() == ["slack_socket", "my_plugin"]
+    monkeypatch.setenv("CHANNELS", "  Slack , MY_PLUGIN  ")
+    assert channels() == ["slack", "my_plugin"]
 
 
 def test_override_wins_over_registry(monkeypatch, isolated_plugin_registry):
@@ -47,6 +47,6 @@ def test_override_wins_over_registry(monkeypatch, isolated_plugin_registry):
         "plugins:\n  - name: slack\n    builtin: true\n    enabled: true\n",
         encoding="utf-8",
     )
-    assert channels() == ["slack_socket"]
+    assert channels() == ["slack"]
     monkeypatch.setenv("CHANNELS", "none")
     assert channels() == []

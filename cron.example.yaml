@@ -8,7 +8,7 @@
 #   schedule:    Cron expression (minute hour day month weekday)
 #   description: Human-readable description shown in the chat app
 #   prompt:      The prompt to send to Claude Code
-#   chat_app:    (optional) "slack_socket" or an installed chat plugin's name.
+#   chat_app:    (optional) "slack" or an installed chat plugin's name.
 #                If omitted, the first enabled platform is used (slack
 #                preferred). If named but not enabled, the task is skipped
 #                with a warning.
@@ -30,7 +30,7 @@ tasks:
   - name: daily-dependency-check
     schedule: "0 10 * * 1"
     description: "Weekly dependency check (Mondays at 10am)"
-    chat_app: slack_socket
+    chat_app: slack
     # paused: true                 # uncomment to suspend without deleting
     prompt: >
       Check for outdated dependencies across all projects in this monorepo.

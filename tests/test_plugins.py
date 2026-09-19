@@ -14,7 +14,12 @@ from yuki_conductor.plugin_config import (
     remove_plugin,
     set_plugin_field,
 )
-from yuki_conductor.plugins import discover_plugins, enabled_channels, find_channel
+from yuki_conductor.plugins import (
+    bundled_plugin_dir,
+    discover_plugins,
+    enabled_channels,
+    find_channel,
+)
 
 
 def _write_plugin_dir(tmp_path: Path, name: str, **manifest) -> Path:
@@ -96,13 +101,23 @@ def test_unparseable_registry_is_surfaced_not_silent(isolated_plugin_registry):
     assert descs[0].name == "plugins.yaml"
 
 
-def test_builtin_slack_contributes_channel():
+def test_bundled_slack_is_an_ordinary_manifest_plugin():
+    """Slack has no special code path — it's plugins/slack/yuki-plugin.yaml."""
     with _no_entry_points():
         descs = discover_plugins([PluginRecord(name="slack", builtin=True, enabled=True)])
     assert len(descs) == 1
-    assert descs[0].builtin is True
-    assert descs[0].channel_names == ["slack_socket"]
-    assert descs[0].status == "ok"
+    (desc,) = descs
+    assert desc.builtin is True
+    assert desc.source == "builtin"
+    assert desc.status == "ok", desc.error
+    assert desc.channel_names == ["slack"]
+    # Resolved from the repo, not from the registry record.
+    assert desc.path == bundled_plugin_dir("slack")
+
+
+def test_bundled_plugin_dir_has_a_manifest():
+    """The bundled manifest must really exist — discovery reads it from disk."""
+    assert (bundled_plugin_dir("slack") / "yuki-plugin.yaml").is_file()
 
 
 def test_missing_path_is_reported_not_raised(tmp_path):
@@ -274,9 +289,9 @@ def test_enabled_channels_skips_disabled_and_broken(tmp_path):
 def test_find_channel_locates_provider():
     with _no_entry_points():
         descs = discover_plugins([PluginRecord(name="slack", builtin=True, enabled=True)])
-    found = find_channel("slack_socket", descs)
+    found = find_channel("slack", descs)
     assert found is not None
     desc, channel = found
     assert desc.name == "slack"
-    assert channel.factory.endswith("SlackSocketReceiver")
+    assert channel.factory == "yuki_conductor.slack_app:create_receiver"
     assert find_channel("nope", descs) is None

@@ -63,7 +63,7 @@ def load_records(path=None) -> list[PluginRecord]:
 
 
 def _write_default(path: Path) -> None:
-    """Seed a registry containing just the built-in Slack channel, disabled."""
+    """Seed a registry containing just the bundled Slack channel, disabled."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "# yuki-conductor plugin registry. See plugins.example.yaml.\n"

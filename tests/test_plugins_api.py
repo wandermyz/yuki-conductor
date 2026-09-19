@@ -25,13 +25,14 @@ def _echo_plugin(tmp_path):
     return d
 
 
-def test_list_includes_builtin_slack(client):
+def test_list_includes_bundled_slack(client):
     body = client.get("/api/plugins").json()
     names = [p["name"] for p in body["plugins"]]
     assert "slack" in names
     slack = next(p for p in body["plugins"] if p["name"] == "slack")
     assert slack["builtin"] is True
-    assert slack["channels"] == ["slack_socket"]
+    assert slack["channels"] == ["slack"]
+    assert slack["status"] == "ok", slack["error"]
 
 
 def test_list_reports_override(client, monkeypatch):

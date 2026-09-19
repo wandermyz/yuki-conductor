@@ -35,7 +35,7 @@ import importlib
 import importlib.metadata
 import logging
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -51,12 +51,12 @@ CHANNEL_GROUP = "yuki_conductor.chat_plugins"
 SKILL_GROUP = "yuki_conductor.skill_plugins"
 CLI_GROUP = "yuki_conductor.cli_plugins"
 
-# The in-tree Slack channel, described exactly like an external plugin so
-# receiver construction has one code path.
-BUILTIN_SLACK = "slack"
-_BUILTIN_CHANNELS = {
-    BUILTIN_SLACK: ["slack_socket"],
-}
+# Plugins shipped in-tree under plugins/<name>. They're ordinary manifest
+# plugins — same discovery, same factory contract — and differ only in that
+# they can't be removed from the registry, since deleting the record wouldn't
+# delete the code. "builtin" is therefore a property of *where a plugin lives*,
+# not a separate kind of plugin with its own code path.
+BUNDLED_PLUGINS_DIRNAME = "plugins"
 
 Source = Literal["builtin", "path", "entry_point"]
 Status = Literal["ok", "missing", "error"]
@@ -209,8 +209,6 @@ def _check_importable(desc: PluginDescriptor) -> PluginDescriptor:
 
 
 def _with_status(desc: PluginDescriptor, status: Status, error: str | None):
-    from dataclasses import replace
-
     return replace(desc, status=status, error=error)
 
 
@@ -219,19 +217,28 @@ def _with_status(desc: PluginDescriptor, status: Status, error: str | None):
 # --------------------------------------------------------------------------
 
 
+def bundled_plugin_dir(name: str) -> Path:
+    """Resolve a bundled plugin's directory inside the repo."""
+    from yuki_conductor.config import project_dir
+
+    return project_dir() / BUNDLED_PLUGINS_DIRNAME / name
+
+
 def _builtin_descriptor(record: PluginRecord) -> PluginDescriptor:
-    names = _BUILTIN_CHANNELS.get(record.name, [])
-    return PluginDescriptor(
+    """Describe a bundled plugin — the same path as any manifest plugin.
+
+    The only difference from an external plugin is that the directory is
+    resolved from the repo instead of the registry record, and the result is
+    flagged ``builtin`` so the UI hides Remove.
+    """
+    resolved = PluginRecord(
         name=record.name,
-        description="Slack Socket Mode — built in.",
-        source="builtin",
         enabled=record.enabled,
+        path=record.path or bundled_plugin_dir(record.name),
         builtin=True,
-        channels=[
-            Channel(name=n, factory="yuki_conductor.slack_app:SlackSocketReceiver")
-            for n in names
-        ],
     )
+    desc = _path_descriptor(resolved)
+    return replace(desc, source="builtin", builtin=True)
 
 
 def _path_descriptor(record: PluginRecord) -> PluginDescriptor:

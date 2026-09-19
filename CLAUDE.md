@@ -13,7 +13,7 @@ src/yuki_conductor/
   stream_events.py  — normalizes stream-json records into UI progress events
   skills.py         — skill discovery + system-prompt synthesis for spawned sessions
   runtime.py        — process orchestrator (starts receivers + web + cron)
-  slack_app.py      — Slack Bolt handlers + SlackSocketReceiver
+  slack_app.py      — Slack Bolt handlers + SlackSocketReceiver + create_receiver
   messaging/        — platform-agnostic messaging core
     platform.py        — MessagingPlatform / ChatAppReceiver Protocols + types
     conversation.py    — handle_incoming_message: shared run_claude orchestration
@@ -25,7 +25,8 @@ src/yuki_conductor/
   web_server.py     — FastAPI HTTP server (agent conductor web UI)
 web/                — React + Vite frontend (pnpm, TypeScript)
 plugins/
-  yuki-conductor/   — bundled plugin, injected into every session (cron skill)
+  yuki-conductor/   — bundled skill plugin, injected into every session (cron skill)
+  slack/            — bundled channel plugin (Slack Socket Mode)
 examples/
   echo-plugin/      — reference plugin: manifest, channel, skill dir
 .claude/skills/     — project-scoped skills, only advertised when cwd is this repo
@@ -62,10 +63,14 @@ registry file.
 
 Plugins reach the registry three ways, merged in that precedence order:
 
-1. **builtin** — Slack, shipped in-tree. Described in `plugins._BUILTIN_CHANNELS`
-   exactly like an external plugin, so `runtime._build_receiver` has one code
-   path: resolve the channel's `module:attr` factory and call it. A builtin can
-   be disabled but not removed.
+1. **builtin** — bundled in-tree under `plugins/<name>/`, with its own
+   `yuki-plugin.yaml` like any other plugin. Slack is the only one. There is no
+   built-in code path: `_builtin_descriptor` just resolves the directory from
+   the repo instead of the registry record, then runs the same manifest
+   discovery, and `runtime._build_receiver` calls the same `module:attr`
+   factory with the same arguments. "builtin" means *where it lives*, not a
+   different kind of plugin. It can be disabled but not removed, since deleting
+   the record wouldn't delete the code.
 2. **path** — a directory registered in `~/.yuki-conductor/workspace/plugins.yaml`,
    declaring itself in a `yuki-plugin.yaml` manifest at its root. See
    `examples/echo-plugin` for a complete one. If the manifest sets
@@ -174,7 +179,7 @@ can locate and invoke the yuki-conductor CLI.
 
 ## Cron Scheduler
 
-The daemon supports scheduled tasks via `~/.yuki-conductor/workspace/cron.yaml`. Each task specifies a cron expression, a description, a Claude prompt, and optionally `chat_app` (`slack_socket` or an installed chat plugin's name) to control where the notification goes. When the cron fires, the routed platform opens a new thread and runs Claude Code with the prompt, posting the result. The thread is session-tracked, so follow-up replies in that thread continue the conversation.
+The daemon supports scheduled tasks via `~/.yuki-conductor/workspace/cron.yaml`. Each task specifies a cron expression, a description, a Claude prompt, and optionally `chat_app` (`slack` or an installed chat plugin's name) to control where the notification goes. When the cron fires, the routed platform opens a new thread and runs Claude Code with the prompt, posting the result. The thread is session-tracked, so follow-up replies in that thread continue the conversation.
 
 A task may also set `paused: true`, which keeps the definition and its run history
 but excludes it from the scheduler entirely (`_build_task_state` filters it out, so

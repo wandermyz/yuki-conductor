@@ -59,16 +59,16 @@ def test_pick_platform_explicit_missing_skips():
     assert _pick_platform(_task(chat_app="other_plugin"), {"slack": slack}) is None
 
 
-def test_pick_platform_slack_socket_alias():
-    """`chat_app: slack_socket` (the channel-name spelling) maps to platform `slack`."""
+def test_pick_platform_explicit_slack():
+    """Channel name and platform name are the same string — no alias table."""
     slack = FakePlatform("slack")
-    assert _pick_platform(_task(chat_app="slack_socket"), {"slack": slack}) is slack
+    assert _pick_platform(_task(chat_app="slack"), {"slack": slack}) is slack
 
 
 def test_pick_platform_default_uses_channel_order():
     slack = FakePlatform("slack")
     plugin = FakePlatform("my_plugin")
-    with patch("yuki_conductor.cron_scheduler.channels", return_value=["slack_socket"]):
+    with patch("yuki_conductor.cron_scheduler.channels", return_value=["slack"]):
         assert _pick_platform(_task(), {"slack": slack, "my_plugin": plugin}) is slack
 
 
@@ -111,7 +111,7 @@ def test_run_cron_task_silence_does_not_route():
 
     with (
         patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result),
-        patch("yuki_conductor.cron_scheduler.channels", return_value=["slack_socket"]),
+        patch("yuki_conductor.cron_scheduler.channels", return_value=["slack"]),
     ):
         _run_cron_task(_task(), {"slack": slack})
 
