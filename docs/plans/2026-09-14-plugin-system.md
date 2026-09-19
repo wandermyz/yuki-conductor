@@ -81,17 +81,30 @@ its default notification target.
 
 The term "chat app" is retired throughout — `_build_receiver`'s error message,
 `runtime.start()`'s log line, the `docs/plans/chat-plugin-architecture.md`
-vocabulary, and CLAUDE.md's "Chat Apps" section become "Channels". `slack_socket`
-keeps its name as a channel.
+vocabulary, and CLAUDE.md's "Chat Apps" section become "Channels".
+
+The Slack channel is also renamed `slack_socket` → `slack`, so the channel name
+and `platform.name` are finally the same string. That deletes
+`cron_scheduler._TASK_APP_ALIASES`, an alias table whose only job was papering
+over the two names disagreeing. A `cron.yaml` with `chat_app: slack_socket`
+must be updated to `chat_app: slack`.
 
 ### Built-in vs. plugin
 
 Slack (`slack_socket`) is currently special-cased in `runtime._build_receiver`.
-It stays in-tree, but it gets registered as a **built-in plugin** in the
-registry rather than an `if name == ...` branch — same descriptor shape as an
-external plugin, flagged `builtin: true` so it can't be uninstalled (only
-disabled). That gives the registry at least one entry on a fresh install and
-keeps one code path for receiver construction.
+It stays in-tree, but as a **bundled plugin**: `plugins/slack/` with its own
+`yuki-plugin.yaml` and a `create_receiver` factory matching the standard
+signature, discovered through the same manifest path as any external plugin.
+`_builtin_descriptor` differs in exactly one respect — it resolves the plugin
+directory from the repo rather than from the registry record — and the result
+is flagged `builtin: true` so it can't be uninstalled, only disabled. Deleting
+the record wouldn't delete the code, so "builtin" describes *where a plugin
+lives*, not a distinct kind of plugin with its own code path.
+
+That matters more than it sounds: the first cut of this plan kept a
+`_BUILTIN_CHANNELS` dict and a `if desc.builtin: factory()` branch, which meant
+the "one construction path for every channel" claim was never exercised against
+the one channel that actually ships. It is now.
 
 ## 2. Plugin registry
 
@@ -178,6 +191,14 @@ every entry-point plugin. It **never raises** — a plugin whose path is gone
 comes back `status="missing"`, one that fails to import comes back
 `status="error"` with the message, and both still render in the UI. That's the
 fix for silent-disappearance.
+
+The same reasoning applies one level up, to the registry file itself: an
+unparseable `plugins.yaml` must not read as "no plugins configured", or every
+plugin disappears at once — the exact failure this design exists to prevent,
+reintroduced a layer higher. (This was found the hard way: the first
+implementation caught the parse error and returned `[]`.) A corrupt registry is
+surfaced as a synthetic `plugins.yaml` entry with `status="error"` carrying the
+parse message.
 
 `runtime.start()` then builds receivers from
 `discover_plugins()` filtered to `enabled and status == "ok"` and intersected
@@ -326,6 +347,23 @@ polling. Rebuild with `uv run yuki-conductor web rebuild`.
 **Phase 5 — docs.**
 CLAUDE.md gains a "Plugins" section replacing "Chat Apps"; the skill-discovery
 section notes that disabled plugins contribute no skills.
+
+## Status
+
+All five phases are implemented. Two things were added along the way that the
+plan didn't call for:
+
+- **`examples/echo-plugin`** — a complete reference plugin (manifest, working
+  channel, skill dir, `python_path`). It exists because "register a plugin by
+  path" needed something real to register, and it doubles as author docs.
+- **`web/e2e-plugins.mjs`** — a Playwright script covering the tab layout,
+  plugin list, detail pane, enable toggle, restart banner, add-form validation,
+  and the mobile back-button path.
+
+Verified against a daemon on a separate port with a throwaway data dir:
+registering by path, enabling, restarting, and the receiver coming up; web chat
+working with zero channel plugins enabled; and a broken plugin rendering its
+failure without taking startup down.
 
 ## Risks
 
