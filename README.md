@@ -78,13 +78,16 @@ uv run yuki-conductor run
 
 Open <http://localhost:2333>.
 
-Install it as a daemon that starts at login — a LaunchAgent on macOS, a per-user
-Scheduled Task on Windows, neither needing admin rights:
+On macOS, install it as a LaunchAgent that starts at login (no admin rights
+needed):
 
 ```bash
 uv run yuki-conductor daemon install
 uv run yuki-conductor daemon status
 ```
+
+On Windows the `daemon` subcommand is unsupported — keep `yuki-conductor run`
+alive with an external supervisor instead.
 
 ### Configuration
 
@@ -176,8 +179,8 @@ This reaches the web platform only.
 
 ```
 yuki-conductor run                              # Start the daemon in the foreground
-yuki-conductor daemon install|uninstall         # Manage the auto-start daemon
-yuki-conductor daemon restart|status|log        # Control and inspect it
+yuki-conductor daemon install|uninstall         # Manage the auto-start daemon (macOS only)
+yuki-conductor daemon restart|status|log        # Control and inspect it (macOS only)
 yuki-conductor web rebuild                      # Rebuild frontend + hot-reload browsers
 yuki-conductor send [-c <id>] "text"            # Push a message into a web conversation
 yuki-conductor simulate message "hello"         # Run a prompt with no chat app attached

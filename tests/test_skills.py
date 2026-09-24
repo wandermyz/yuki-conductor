@@ -72,11 +72,6 @@ def test_restart_skill_is_project_scoped():
     assert (skill_dir / "SKILL.md").is_file()
 
 
-def test_restart_script_is_shared_with_the_api():
-    """One script, two callers — the skill and POST /api/daemon/restart."""
-    assert (project_dir() / "bin" / "restart-daemon.ps1").is_file()
-
-
 def test_skill_plugin_dirs_includes_bundled():
     dirs = skills.skill_plugin_dirs()
     bundled = str(project_dir() / "plugins" / "yuki-conductor")

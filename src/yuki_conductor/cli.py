@@ -15,7 +15,9 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("run", help="Start Slack listener (foreground)")
 
     # daemon
-    daemon_parser = sub.add_parser("daemon", help="Manage LaunchAgent daemon")
+    daemon_parser = sub.add_parser(
+        "daemon", help="Manage the LaunchAgent daemon (macOS only)"
+    )
     daemon_parser.add_argument(
         "action",
         choices=["install", "uninstall", "restart", "status", "log"],

@@ -108,10 +108,9 @@ pretending to.
 
 `POST /api/daemon/restart` must not kill its own caller, since the web server
 runs *inside* the daemon. `daemon.spawn_detached_restart()` dispatches to
-`daemon_windows` (WMI `Win32_Process.Create` running `bin/restart-daemon.ps1`)
-or `daemon_macos` (`setsid` + `launchctl kickstart -k`), returns 202 at once,
-and the frontend polls `/api/status` until the socket comes back. That script is
-shared with the `yuki-conductor-restart` skill — one copy, two callers.
+`daemon_windows` (schedule `os._exit(0)` a few seconds out and let yuki-watcher
+relaunch) or `daemon_macos` (`setsid` + `launchctl kickstart -k`), returns 202 at
+once, and the frontend polls `/api/status` until the socket comes back.
 
 ### Web tabs
 
@@ -251,33 +250,19 @@ The `daemon` subcommand (`install`/`uninstall`/`restart`/`status`/`log`) is
 dispatched by platform in `daemon.py`:
 
 - macOS (`daemon_macos.py`) — a per-user LaunchAgent (`launchctl` + plist).
-- Windows (`daemon_windows.py`) — a per-user Task Scheduler task
-  (`schtasks` + a Logon-triggered task named `YukiConductor`) that launches
-  `bin/yuki-conductor-daemon.ps1`. No admin elevation required; runs only
-  while the user is logged in.
+  Shared helpers (uv discovery, web build, log tailing) live in
+  `daemon_common.py`.
+- Windows (`daemon_windows.py`) — **unsupported**; every action prints a message
+  and exits 1. yuki-watcher (`C:\Git\yuki-watcher`, a WinForms tray app) owns
+  the daemon there: it runs `uv run --project <repo> yuki-conductor run` and
+  relaunches it shortly after it exits. Don't reintroduce a Task Scheduler task
+  or an in-repo supervisor script — two supervisors race and produce duplicate
+  daemons fighting over port 2333.
 
-Shared helpers (uv discovery, web build, log tailing) live in
-`daemon_common.py`.
-
-To restart the Windows daemon manually instead of via the task, find the
-running `yuki-conductor` process, kill it, and spawn a new one:
-
-```
-# Find and kill
-taskkill /f /im yuki-conductor.exe 2>/dev/null; tasklist | grep yuki
-# Or: Get-Process *yuki* | Stop-Process -Force
-
-# Start in background
-uv run yuki-conductor run &
-```
-
-**From a session the daemon spawned, neither of those works.** The daemon is an
-ancestor of that session, so `_kill_daemon_processes()` refuses to kill it
-(printing a refusal to stderr while still exiting 0) and `schtasks /Run` starts a
-*second* daemon that can't bind port 2333 — the old one keeps serving stale code.
-Use the bundled `yuki-conductor-restart` skill, which launches
-`.claude/skills/yuki-conductor-restart/restart-daemon.ps1` via WMI
-`Win32_Process.Create` so it runs outside the caller's process tree.
+Because yuki-watcher restarts the process on exit, **restarting on Windows means
+exiting**: `spawn_detached_restart()` just schedules `os._exit(0)` a few seconds
+out so the HTTP response gets away first. That's what the web UI's Restart
+daemon button and the project-scoped `yuki-conductor-restart` skill both use.
 
 ## Outbound Messages
 
