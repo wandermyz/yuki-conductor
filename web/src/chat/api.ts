@@ -376,3 +376,105 @@ export function subscribeChatSocket(sub: ChatSocketSubscriber): () => void {
     subscribers.delete(sub);
   };
 }
+
+// --------------------------------------------------------------------------
+// Plugins
+// --------------------------------------------------------------------------
+
+export interface Plugin {
+  name: string;
+  description: string;
+  version: string | null;
+  source: "builtin" | "path" | "entry_point";
+  path: string | null;
+  enabled: boolean;
+  builtin: boolean;
+  channels: string[];
+  skill_dirs: string[];
+  cli_entry: string | null;
+  status: "ok" | "missing" | "error";
+  error: string | null;
+}
+
+export interface PluginList {
+  plugins: Plugin[];
+  /** Channel names the running daemon actually has up. */
+  active_channels: string[];
+  /** Non-null when the CHANNELS env var is overriding the registry. */
+  channels_override: string[] | null;
+  restart_required: boolean;
+}
+
+export async function listPlugins(): Promise<PluginList> {
+  const r = await fetch("/api/plugins");
+  if (!r.ok) throw new Error("Failed to list plugins");
+  return r.json();
+}
+
+async function pluginError(r: Response): Promise<never> {
+  let detail = `Request failed (${r.status})`;
+  try {
+    const body = await r.json();
+    if (body?.detail) detail = body.detail;
+  } catch {
+    /* keep the status-code message */
+  }
+  throw new Error(detail);
+}
+
+export async function addPlugin(path: string): Promise<{ name: string }> {
+  const r = await fetch("/api/plugins", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!r.ok) return pluginError(r);
+  return r.json();
+}
+
+export async function setPluginEnabled(
+  name: string,
+  enabled: boolean,
+): Promise<void> {
+  const r = await fetch(`/api/plugins/${encodeURIComponent(name)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!r.ok) return pluginError(r);
+}
+
+export async function removePlugin(name: string): Promise<void> {
+  const r = await fetch(`/api/plugins/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+  if (!r.ok) return pluginError(r);
+}
+
+/**
+ * Ask the daemon to restart itself. Returns as soon as the detached restarter
+ * is spawned — the daemon is still up at that point, so callers must poll
+ * `/api/status` to find out when the new one is serving.
+ */
+export async function restartDaemon(): Promise<void> {
+  const r = await fetch("/api/daemon/restart", { method: "POST" });
+  if (!r.ok) return pluginError(r);
+}
+
+/** Resolve once /api/status answers again, or reject after `timeoutMs`. */
+export async function waitForDaemon(timeoutMs = 90000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  // The old daemon is still answering for a few seconds, so ignore early
+  // successes: only a reply after a confirmed outage means the new one is up.
+  let sawOutage = false;
+  while (Date.now() < deadline) {
+    await new Promise((res) => setTimeout(res, 2000));
+    try {
+      const r = await fetch("/api/status", { cache: "no-store" });
+      if (r.ok && sawOutage) return;
+    } catch {
+      sawOutage = true;
+    }
+  }
+  throw new Error("Daemon did not come back within the timeout");
+}

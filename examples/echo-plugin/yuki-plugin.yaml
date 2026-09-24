@@ -1,0 +1,15 @@
+name: echo
+description: Example plugin — a no-op channel and a demo skill. Reference for plugin authors.
+version: 0.1.0
+
+# Make the package importable without an editable install. Resolved relative to
+# this file and appended to sys.path only when the plugin is enabled.
+python_path: ./src
+
+injection_points:
+  channels:
+    - name: echo
+      factory: yuki_echo_plugin:create_receiver
+
+  skills:
+    plugin_dir: ./claude-plugin

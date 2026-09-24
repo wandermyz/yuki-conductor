@@ -1,0 +1,10 @@
+name: slack
+description: Slack Socket Mode — threads become Claude sessions, with slash commands and live progress in the message status.
+version: 0.1.0
+
+# Bundled: ships in-tree, so no python_path is needed and it cannot be removed
+# from the registry — only disabled.
+injection_points:
+  channels:
+    - name: slack
+      factory: yuki_conductor.slack_app:create_receiver

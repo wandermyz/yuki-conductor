@@ -5,13 +5,15 @@
 ```
 src/yuki_conductor/
   cli.py            — argparse entry point (run, daemon, simulate)
-  config.py         — env loading, path constants, CHAT_APPS parsing
+  config.py         — env loading, path constants, CHANNELS override parsing
+  plugins.py        — plugin identity, injection points, discovery + status
+  plugin_config.py  — plugins.yaml parsing and surgical field edits
   store.py          — SQLite-backed session & model stores
   claude_runner.py  — subprocess wrapper for claude CLI (stream-json reader)
   stream_events.py  — normalizes stream-json records into UI progress events
   skills.py         — skill discovery + system-prompt synthesis for spawned sessions
   runtime.py        — process orchestrator (starts receivers + web + cron)
-  slack_app.py      — Slack Bolt handlers + SlackSocketReceiver
+  slack_app.py      — Slack Bolt handlers + SlackSocketReceiver + create_receiver
   messaging/        — platform-agnostic messaging core
     platform.py        — MessagingPlatform / ChatAppReceiver Protocols + types
     conversation.py    — handle_incoming_message: shared run_claude orchestration
@@ -23,7 +25,10 @@ src/yuki_conductor/
   web_server.py     — FastAPI HTTP server (agent conductor web UI)
 web/                — React + Vite frontend (pnpm, TypeScript)
 plugins/
-  yuki-conductor/   — bundled plugin, injected into every session (cron skill)
+  yuki-conductor/   — bundled skill plugin, injected into every session (cron skill)
+  slack/            — bundled channel plugin (Slack Socket Mode)
+examples/
+  echo-plugin/      — reference plugin: manifest, channel, skill dir
 .claude/skills/     — project-scoped skills, only advertised when cwd is this repo
 ```
 
@@ -37,23 +42,83 @@ Key files:
 - `~/.yuki-conductor/.secrets/` — one secret per file, mode 600 (referenced by the above; never in `workspace/`, which syncs to Obsidian)
 - `~/.yuki-conductor/workspace/yuki-conductor.db` — SQLite database for session and model tracking
 - `~/.yuki-conductor/workspace/cron.yaml` — Cron task definitions (see `cron.example.yaml` for format)
+- `~/.yuki-conductor/workspace/plugins.yaml` — plugin registry: installed and enabled (see `plugins.example.yaml`)
 - `~/.yuki-conductor/workspace/skills.yaml` — promotes user-scope skills to "always available" (see `skills.example.yaml` and Skill Discovery)
 - `~/.yuki-conductor/workspace/system-prompt.md` — optional personal system prompt appended to every spawned Claude run (see Skill Discovery)
 - `~/.yuki-conductor/workspace/attachments/`, `uploads/` — runtime file storage
 - `~/.yuki-conductor/daemon.log`, `daemon.err.log` — LaunchAgent logs
 
-## Chat Apps
+## Plugins and Channels
 
-The daemon's chat surfaces are selected by `CHAT_APPS` (comma-separated):
+A **plugin** is a named unit that contributes capability at one or more
+**injection points**. `plugins.py` owns the concept; `plugin_config.py` owns the
+registry file.
 
-- `slack_socket` (default) — slack-bolt Socket Mode using `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN`.
-- any other name — resolved as an installed chat-app plugin via the
-  `yuki_conductor.chat_plugins` entry-point group (see
-  `docs/plans/chat-plugin-architecture.md`). Plugins live in separate packages;
-  install one into the same environment and enable it by its entry-point name.
-- empty / `none` — no chat receivers. Web server and cron scheduler still run; cron notifications are logged instead of posted.
+| Injection point | Status | Contribution |
+| --- | --- | --- |
+| `channels` | implemented | a `ChatAppReceiver` factory — a chat surface the daemon listens on |
+| `skills` | implemented | a Claude Code plugin dir injected via `--plugin-dir` |
+| `cli` | implemented | subcommands grafted onto `yuki-conductor` |
+| `triggers` | planned | a source of automation events |
 
-Multiple values may be combined: `CHAT_APPS=slack_socket,my_plugin`. Each session is platform-tagged so replies always route back to the originating chat app.
+Plugins reach the registry three ways, merged in that precedence order:
+
+1. **builtin** — bundled in-tree under `plugins/<name>/`, with its own
+   `yuki-plugin.yaml` like any other plugin. Slack is the only one. There is no
+   built-in code path: `_builtin_descriptor` just resolves the directory from
+   the repo instead of the registry record, then runs the same manifest
+   discovery, and `runtime._build_receiver` calls the same `module:attr`
+   factory with the same arguments. "builtin" means *where it lives*, not a
+   different kind of plugin. It can be disabled but not removed, since deleting
+   the record wouldn't delete the code.
+2. **path** — a directory registered in `~/.yuki-conductor/workspace/plugins.yaml`,
+   declaring itself in a `yuki-plugin.yaml` manifest at its root. See
+   `examples/echo-plugin` for a complete one. If the manifest sets
+   `python_path:`, those dirs are **appended** to `sys.path` (appended, not
+   prepended, so a plugin can't shadow a stdlib module) when the plugin is
+   enabled — that's what makes "just point at a folder" work without an
+   editable install.
+3. **entry_point** — an installed package declaring `yuki_conductor.chat_plugins`
+   / `.skill_plugins` / `.cli_plugins`. Still supported with no manifest; the
+   three groups are merged by entry-point name into one plugin.
+
+`discover_plugins()` **never raises.** A missing path yields `status="missing"`,
+a failed import `status="error"` with the message; both still render in the UI
+and neither is fatal at startup. A *disabled* plugin is never imported at all —
+discovery reads manifests without executing plugin code.
+
+Enablement lives in `plugins.yaml`, not the environment. `CHANNELS` is only an
+override/ordering escape hatch: when set it wins outright (`none`/empty = no
+channels), and `runtime.start()` logs which source resolved the channel list.
+Order matters — the cron scheduler uses the first enabled platform as its
+default notification target.
+
+Toggling a plugin off also stops advertising its **skills** to spawned sessions
+(`skills.skill_plugin_dirs` → `plugins.enabled_skill_dirs`), which is what a
+user toggling it off expects.
+
+### Plugins tab
+
+`/api/plugins` (GET/POST/PATCH/DELETE) plus `POST /api/daemon/restart`, surfaced
+by `web/src/PluginsView.tsx`. Every mutation is a `plugins.yaml` edit that only
+takes effect when receivers are rebuilt, i.e. at startup — so each response
+carries `restart_required: true` and the UI shows a banner until a restart. This
+is deliberate: hot-swapping live receivers is a much bigger change than
+pretending to.
+
+`POST /api/daemon/restart` must not kill its own caller, since the web server
+runs *inside* the daemon. `daemon.spawn_detached_restart()` dispatches to
+`daemon_windows` (schedule `os._exit(0)` a few seconds out and let yuki-watcher
+relaunch) or `daemon_macos` (`setsid` + `launchctl kickstart -k`), returns 202 at
+once, and the frontend polls `/api/status` until the socket comes back.
+
+### Web tabs
+
+The tab bar holds four: Chat, Projects, Automations, and a `⋯` overflow.
+Sessions, Status, and Plugins live behind the overflow (`OVERFLOW_TABS` in
+`App.tsx`), which renders a list view and shows as active whenever one of its
+children is current. Deep links (`#sessions`, `#plugins`, …) remain valid.
+
 
 ## Skill Discovery
 
@@ -113,7 +178,7 @@ can locate and invoke the yuki-conductor CLI.
 
 ## Cron Scheduler
 
-The daemon supports scheduled tasks via `~/.yuki-conductor/workspace/cron.yaml`. Each task specifies a cron expression, a description, a Claude prompt, and optionally `chat_app` (`slack_socket` or an installed chat plugin's name) to control where the notification goes. When the cron fires, the routed platform opens a new thread and runs Claude Code with the prompt, posting the result. The thread is session-tracked, so follow-up replies in that thread continue the conversation.
+The daemon supports scheduled tasks via `~/.yuki-conductor/workspace/cron.yaml`. Each task specifies a cron expression, a description, a Claude prompt, and optionally `chat_app` (`slack` or an installed chat plugin's name) to control where the notification goes. When the cron fires, the routed platform opens a new thread and runs Claude Code with the prompt, posting the result. The thread is session-tracked, so follow-up replies in that thread continue the conversation.
 
 A task may also set `paused: true`, which keeps the definition and its run history
 but excludes it from the scheduler entirely (`_build_task_state` filters it out, so
@@ -122,9 +187,9 @@ pausing suspends the *schedule*, not the task. The Automations tab toggles it vi
 `PATCH /api/automations/{name}`; resuming deletes the key rather than writing
 `paused: false`.
 
-Routing rule when `chat_app:` is omitted: pick the first enabled platform, with `slack` preferred. If `chat_app:` names a platform that isn't in `CHAT_APPS`, the task is skipped with a warning rather than misrouted.
+Routing rule when `chat_app:` is omitted: pick the first enabled platform, with `slack` preferred. If `chat_app:` names a platform that isn't enabled, the task is skipped with a warning rather than misrouted.
 
-Required env var (only when `slack_socket` is enabled): `SLACK_CRON_CHANNEL` — the Slack channel ID to post cron results to.
+Required env var (only when the Slack channel is enabled): `SLACK_CRON_CHANNEL` — the Slack channel ID to post cron results to.
 
 ### Automations tab
 
@@ -185,33 +250,19 @@ The `daemon` subcommand (`install`/`uninstall`/`restart`/`status`/`log`) is
 dispatched by platform in `daemon.py`:
 
 - macOS (`daemon_macos.py`) — a per-user LaunchAgent (`launchctl` + plist).
-- Windows (`daemon_windows.py`) — a per-user Task Scheduler task
-  (`schtasks` + a Logon-triggered task named `YukiConductor`) that launches
-  `bin/yuki-conductor-daemon.ps1`. No admin elevation required; runs only
-  while the user is logged in.
+  Shared helpers (uv discovery, web build, log tailing) live in
+  `daemon_common.py`.
+- Windows (`daemon_windows.py`) — **unsupported**; every action prints a message
+  and exits 1. yuki-watcher (`C:\Git\yuki-watcher`, a WinForms tray app) owns
+  the daemon there: it runs `uv run --project <repo> yuki-conductor run` and
+  relaunches it shortly after it exits. Don't reintroduce a Task Scheduler task
+  or an in-repo supervisor script — two supervisors race and produce duplicate
+  daemons fighting over port 2333.
 
-Shared helpers (uv discovery, web build, log tailing) live in
-`daemon_common.py`.
-
-To restart the Windows daemon manually instead of via the task, find the
-running `yuki-conductor` process, kill it, and spawn a new one:
-
-```
-# Find and kill
-taskkill /f /im yuki-conductor.exe 2>/dev/null; tasklist | grep yuki
-# Or: Get-Process *yuki* | Stop-Process -Force
-
-# Start in background
-uv run yuki-conductor run &
-```
-
-**From a session the daemon spawned, neither of those works.** The daemon is an
-ancestor of that session, so `_kill_daemon_processes()` refuses to kill it
-(printing a refusal to stderr while still exiting 0) and `schtasks /Run` starts a
-*second* daemon that can't bind port 2333 — the old one keeps serving stale code.
-Use the bundled `yuki-conductor-restart` skill, which launches
-`.claude/skills/yuki-conductor-restart/restart-daemon.ps1` via WMI
-`Win32_Process.Create` so it runs outside the caller's process tree.
+Because yuki-watcher restarts the process on exit, **restarting on Windows means
+exiting**: `spawn_detached_restart()` just schedules `os._exit(0)` a few seconds
+out so the HTTP response gets away first. That's what the web UI's Restart
+daemon button and the project-scoped `yuki-conductor-restart` skill both use.
 
 ## Outbound Messages
 

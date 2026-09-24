@@ -1,5 +1,6 @@
 """macOS LaunchAgent daemon management."""
 
+import os
 import plistlib
 import subprocess
 import sys
@@ -69,6 +70,27 @@ def _restart():
     else:
         print("LaunchAgent not installed. Run 'daemon install' first.")
         sys.exit(1)
+
+
+def spawn_detached_restart(delay_seconds: int = 5) -> None:
+    """Bounce the LaunchAgent from a process outside this one.
+
+    `launchctl kickstart -k` kills the running instance, so calling it inline
+    from the web server would tear down the caller mid-response. Detaching via
+    `setsid` (new session, no controlling terminal) means the kill lands after
+    this process has already answered.
+    """
+    if not PLIST_PATH.exists():
+        raise RuntimeError("LaunchAgent not installed. Run 'daemon install' first.")
+
+    target = f"gui/{os.getuid()}/{PLIST_LABEL}"
+    script = f"sleep {delay_seconds}; launchctl kickstart -k {target}"
+    subprocess.Popen(
+        ["/bin/sh", "-c", script],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 def _status():

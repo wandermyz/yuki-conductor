@@ -41,7 +41,7 @@ tasks:
     prompt: >
       The prompt yuki-conductor will send to a fresh Claude Code run when the
       task fires. Write it as an instruction to Claude.
-    chat_app: slack_socket           # optional; where to post the result
+    chat_app: slack                  # optional; where to post the result
     origin_conversation: <conv-id>   # optional; conversation that set this up
     paused: true                     # optional; suspend the schedule without deleting
 ```

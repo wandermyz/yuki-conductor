@@ -13,9 +13,9 @@ tiers, and a skill declares its tier by *where it lives*:
 
 ``YUKI``
     yuki-conductor's own capabilities — the bundled ``plugins/yuki-conductor``
-    plugin plus any dirs contributed through the
-    ``yuki_conductor.skill_plugins`` entry-point group. Injected with
-    ``--plugin-dir`` and advertised in **every** session, whatever the cwd.
+    plugin plus any dirs contributed by **enabled** registry plugins (see
+    ``plugins.enabled_skill_dirs``). Injected with ``--plugin-dir`` and
+    advertised in **every** session, whatever the cwd.
 
 ``PROJECT``
     ``<cwd>/.claude/skills``. Advertised only when the session runs in that
@@ -43,7 +43,6 @@ private capabilities (internal CLIs, MCP servers) that must not be committed
 here.
 """
 
-import importlib.metadata
 import logging
 from dataclasses import dataclass
 from enum import Enum
@@ -57,9 +56,6 @@ from yuki_conductor.config import (
 )
 
 logger = logging.getLogger(__name__)
-
-_ENTRY_POINT_GROUP = "yuki_conductor.skill_plugins"
-
 
 class Tier(Enum):
     """Scope of a skill, which decides how prominently it is advertised."""
@@ -94,10 +90,15 @@ def _is_plugin_dir(path: Path) -> bool:
 def skill_plugin_dirs() -> list[str]:
     """Return plugin directories to inject into spawned Claude Code sessions.
 
-    The bundled yuki-conductor plugin comes first, followed by any directories
-    contributed by installed ``yuki_conductor.skill_plugins`` entry points.
+    The bundled yuki-conductor plugin comes first, followed by the dirs
+    contributed by every **enabled, healthy** registry plugin — whether it
+    declares them in a ``yuki-plugin.yaml`` manifest or through the
+    ``yuki_conductor.skill_plugins`` entry-point group. A disabled plugin
+    contributes nothing, so toggling it off also stops advertising its skills.
     Invalid or missing directories are skipped with a warning.
     """
+    from yuki_conductor.plugins import enabled_skill_dirs
+
     dirs: list[str] = []
 
     bundled = _bundled_plugin_dir()
@@ -106,18 +107,11 @@ def skill_plugin_dirs() -> list[str]:
     else:
         logger.warning("Bundled skill plugin missing at %s", bundled)
 
-    for ep in importlib.metadata.entry_points(group=_ENTRY_POINT_GROUP):
-        try:
-            path = Path(ep.load()())
-        except Exception:
-            logger.warning("Failed to load skill plugin %r", ep.name, exc_info=True)
-            continue
+    for path in enabled_skill_dirs():
         if _is_plugin_dir(path):
             dirs.append(str(path))
         else:
-            logger.warning(
-                "Skill plugin %r returned invalid plugin dir %s", ep.name, path
-            )
+            logger.warning("Skill plugin dir %s is not a valid plugin dir", path)
 
     return dirs
 

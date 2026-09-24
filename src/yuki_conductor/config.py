@@ -63,6 +63,7 @@ load_dotenv(DATA_DIR / ".env", override=True)
 WORKSPACE_DIR = DATA_DIR / "workspace"
 DB_FILE = WORKSPACE_DIR / "yuki-conductor.db"
 CRON_FILE = WORKSPACE_DIR / "cron.yaml"
+PLUGINS_FILE = WORKSPACE_DIR / "plugins.yaml"
 SYSTEM_PROMPT_FILE = WORKSPACE_DIR / "system-prompt.md"
 SKILLS_CONFIG_FILE = WORKSPACE_DIR / "skills.yaml"
 # Claude Code's user-scope skill directory, shared with interactive sessions.
@@ -86,22 +87,39 @@ CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 # 1M window.
 CLAUDE_DEFAULT_MODEL = os.environ.get("CLAUDE_DEFAULT_MODEL", "opus[1m]")
 
-def chat_apps() -> list[str]:
-    """Return ordered list of enabled chat-app plugin names.
+def channels_override() -> list[str] | None:
+    """Return the `CHANNELS` env override, or None when it isn't set.
 
-    Reads `CHAT_APPS` (comma-separated names; "" or "none" → empty list).
-    Defaults to ``["slack_socket"]`` when the env var is unset.
-    Order matters: cron scheduler uses it as platform preference order.
+    `CHANNELS` is no longer the source of truth for which channels are on —
+    ``workspace/plugins.yaml`` is (see ``plugins.discover_plugins``). It stays
+    as an escape hatch for when the registry is broken or the UI unreachable,
+    and it wins outright when present. "" or "none" means "no channels at all";
+    order is preserved because the cron scheduler uses it as platform
+    preference order.
     """
-    raw_apps = os.environ.get("CHAT_APPS")
+    raw_apps = os.environ.get("CHANNELS")
     if raw_apps is None:
-        return ["slack_socket"]
+        return None
 
     raw = raw_apps.strip()
     if raw == "" or raw.lower() == "none":
         return []
 
     return [p.strip().lower() for p in raw.split(",") if p.strip()]
+
+
+def channels() -> list[str]:
+    """Return the ordered list of enabled channel names.
+
+    The env override wins; otherwise the plugin registry decides.
+    """
+    override = channels_override()
+    if override is not None:
+        return override
+
+    from yuki_conductor.plugins import enabled_channels
+
+    return enabled_channels()
 
 
 def project_dir() -> Path:

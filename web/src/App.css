@@ -1158,3 +1158,252 @@
 .run-session-copy:hover {
   border-color: var(--accent);
 }
+
+/* ---- "More" overflow tab ---- */
+
+.more-view {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.more-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 640px;
+}
+
+.more-list button {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 14px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.more-list button:hover {
+  background: var(--bg-alt, rgba(128, 128, 128, 0.08));
+}
+
+.more-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.more-label {
+  font-size: 16px;
+  color: var(--text-h, var(--text));
+}
+
+.more-blurb {
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.more-chevron {
+  font-size: 22px;
+  opacity: 0.5;
+}
+
+/* ---- Plugins ---- */
+
+.alive-dot.ok {
+  background: #40c057;
+  box-shadow: 0 0 4px #40c057;
+}
+
+.alive-dot.disabled {
+  background: #868e96;
+}
+
+.alive-dot.missing {
+  background: #f59f00;
+}
+
+.alive-dot.error {
+  background: #e03131;
+  box-shadow: 0 0 4px #e03131;
+}
+
+.plugin-toolbar {
+  padding: 8px 12px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.restart-btn {
+  background: var(--accent);
+  color: #fff;
+}
+
+.restart-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.plugin-banner {
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(128, 128, 128, 0.08);
+}
+
+.plugin-banner.ok {
+  border-color: #40c057;
+  color: #40c057;
+}
+
+.plugin-banner.warn {
+  border-color: #f59f00;
+  color: #f59f00;
+}
+
+.plugin-banner.error {
+  border-color: #e03131;
+  color: #e03131;
+}
+
+.plugin-add {
+  padding: 4px 12px 10px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.plugin-add input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.plugin-add button {
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.plugin-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.plugin-list li {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plugin-list li:hover,
+.plugin-list li.active {
+  background: rgba(128, 128, 128, 0.1);
+}
+
+/* A plugin that's off or broken still lists — dimmed, like removed automations. */
+.plugin-list li.off .plugin-name,
+.plugin-list li.broken .plugin-name {
+  opacity: 0.65;
+}
+
+.plugin-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plugin-name {
+  font-size: 15px;
+  color: var(--text-h, var(--text));
+}
+
+.plugin-sub {
+  font-size: 12px;
+  opacity: 0.65;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-badges {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.plugin-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  opacity: 0.8;
+}
+
+.plugin-detail {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.plugin-description {
+  opacity: 0.8;
+  margin: 4px 0 12px;
+}
+
+.plugin-detail dd code {
+  display: block;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.plugin-error-box {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #e03131;
+  color: #e03131;
+  background: rgba(224, 49, 49, 0.06);
+}
+
+.plugin-error-line {
+  font-size: 13px;
+  color: #e03131;
+  margin-top: 8px;
+  flex-basis: 100%;
+}
+
+.plugin-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}

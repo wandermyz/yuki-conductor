@@ -1,256 +1,46 @@
-"""Tests for the Windows Task Scheduler daemon adapter.
+"""Tests for the Windows daemon adapter.
 
-These mock ``subprocess.run`` so they run on any platform (including macOS CI).
+Windows has no yuki-conductor-managed daemon: yuki-watcher supervises the
+process, so the subcommand is unsupported and restart is a self-exit.
 """
-
-from unittest import mock
 
 import pytest
 
 from yuki_conductor import daemon_windows
 
 
-@pytest.fixture(autouse=True)
-def _fake_env(monkeypatch, tmp_path):
-    monkeypatch.setenv("USERDOMAIN", "TESTDOM")
-    monkeypatch.setenv("USERNAME", "tester")
-    monkeypatch.setattr(daemon_windows, "_pwsh", lambda: "C:\\pwsh.exe")
+@pytest.mark.parametrize(
+    "action", ["install", "uninstall", "restart", "status", "log"]
+)
+def test_every_daemon_action_is_unsupported(action, capsys):
+    with pytest.raises(SystemExit) as exc:
+        daemon_windows.handle_daemon(action)
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "not supported on Windows" in err
+    assert "yuki-watcher" in err
 
 
-def test_current_user_from_env(monkeypatch):
-    monkeypatch.setenv("USERDOMAIN", "DOM")
-    monkeypatch.setenv("USERNAME", "alice")
-    assert daemon_windows._current_user() == "DOM\\alice"
+def test_spawn_detached_restart_exits_the_process(monkeypatch):
+    """Restart = exit; yuki-watcher relaunches. No detached helper involved."""
+    timers = []
 
+    class FakeTimer:
+        def __init__(self, delay, fn):
+            self.delay, self.fn = delay, fn
 
-def test_generate_task_xml_contains_key_fields():
-    xml = daemon_windows._generate_task_xml()
-    assert '<?xml version="1.0" encoding="UTF-16"?>' in xml
-    assert "<LogonTrigger>" in xml
-    assert "<UserId>TESTDOM\\tester</UserId>" in xml
-    assert "C:\\pwsh.exe" in xml
-    assert "yuki-conductor-daemon.ps1" in xml
-    assert "<RestartOnFailure>" in xml
-    assert "IgnoreNew" in xml
+        def start(self):
+            timers.append(self)
 
+    monkeypatch.setattr(daemon_windows.threading, "Timer", FakeTimer)
+    exited = []
+    monkeypatch.setattr(daemon_windows.os, "_exit", exited.append)
 
-def test_task_xml_has_repeating_recovery_trigger():
-    """A repeating trigger is the safety net for a dead supervisor."""
-    xml = daemon_windows._generate_task_xml()
-    assert "<TimeTrigger>" in xml
-    assert "<Interval>PT5M</Interval>" in xml
+    daemon_windows.spawn_detached_restart()
 
-
-def test_task_xml_window_is_visible():
-    """The console is the live log view, so it must not be launched hidden."""
-    xml = daemon_windows._generate_task_xml()
-    assert "-WindowStyle Hidden" not in xml
-
-
-def test_install_creates_and_runs_task():
-    with mock.patch.object(daemon_windows, "_schtasks") as sch:
-        sch.return_value = mock.Mock(returncode=0, stdout="")
-        daemon_windows._install()
-    calls = [c.args[0] for c in sch.call_args_list]
-    assert any(a[:2] == ["/Create", "/TN"] for a in calls)
-    assert any(a[:2] == ["/Run", "/TN"] for a in calls)
-
-
-def test_uninstall_when_not_installed(capsys):
-    with mock.patch.object(daemon_windows, "_task_installed", return_value=False):
-        daemon_windows._uninstall()
-    assert "not installed" in capsys.readouterr().out.lower()
-
-
-def test_uninstall_deletes_task():
-    with (
-        mock.patch.object(daemon_windows, "_task_installed", return_value=True),
-        mock.patch.object(daemon_windows, "_kill_daemon_processes", return_value=0),
-        mock.patch.object(daemon_windows, "_schtasks") as sch,
-    ):
-        sch.return_value = mock.Mock(returncode=0, stdout="")
-        daemon_windows._uninstall()
-    calls = [c.args[0] for c in sch.call_args_list]
-    assert any(a[:2] == ["/Delete", "/TN"] for a in calls)
-
-
-def test_status_ignores_schtasks_ready_text(monkeypatch, capsys):
-    """"Ready" from schtasks means installed-but-down, not healthy.
-
-    This previously scraped the Status: field, so a dead daemon reported
-    "Ready" and read as healthy. Liveness now comes from the process list.
-    """
-    monkeypatch.setattr(daemon_windows, "_task_installed", lambda: True)
-    monkeypatch.setattr(daemon_windows, "_classify_daemon_pids", lambda: ([], []))
-    daemon_windows._status()
-    out = capsys.readouterr().out
-    assert "Ready" not in out
-    assert "NOT running" in out
-
-
-def test_status_not_installed(capsys):
-    with mock.patch.object(daemon_windows, "_schtasks") as sch:
-        sch.return_value = mock.Mock(returncode=1, stdout="")
-        daemon_windows._status()
-    assert "Not installed" in capsys.readouterr().out
-
-
-def test_restart_not_installed_exits():
-    with mock.patch.object(daemon_windows, "_task_installed", return_value=False):
-        with pytest.raises(SystemExit):
-            daemon_windows._restart()
-
-
-def _proc(pid, ppid, cmdline):
-    return {"pid": pid, "ppid": ppid, "cmdline": cmdline}
-
-
-def test_daemon_pids_finds_whole_tree_and_skips_self(monkeypatch):
-    procs = [
-        _proc(100, 1, 'pwsh -File "C:\\repo\\bin\\yuki-conductor-daemon.ps1"'),
-        _proc(200, 100, "uv.exe run --project C:\\repo yuki-conductor run"),
-        _proc(300, 200, '"C:\\repo\\.venv\\Scripts\\yuki-conductor.exe" run'),
-        _proc(400, 1, "notepad.exe"),
-        # the restart command itself, plus its uv parent — must be spared
-        _proc(500, 1, "uv.exe run yuki-conductor daemon restart"),
-        _proc(600, 500, "yuki-conductor.exe daemon restart"),
-    ]
-    monkeypatch.setattr(daemon_windows, "_list_processes", lambda: procs)
-    monkeypatch.setattr(daemon_windows.os, "getpid", lambda: 600)
-    assert sorted(daemon_windows._daemon_pids()) == [100, 200, 300]
-
-
-def test_daemon_pids_spares_own_ancestors(monkeypatch):
-    """A caller spawned *by* the daemon must not kill the daemon out from under itself."""
-    procs = [
-        _proc(100, 1, "uv.exe run --project C:\\repo yuki-conductor run"),
-        _proc(200, 100, '"C:\\repo\\.venv\\Scripts\\yuki-conductor.exe" run'),
-        _proc(300, 200, "claude.sh -p ..."),
-    ]
-    monkeypatch.setattr(daemon_windows, "_list_processes", lambda: procs)
-    monkeypatch.setattr(daemon_windows.os, "getpid", lambda: 300)
-    killable, ancestral = daemon_windows._classify_daemon_pids()
-    assert killable == []
-    assert sorted(ancestral) == [100, 200]
-
-
-def test_kill_warns_when_running_inside_daemon(monkeypatch, capsys):
-    monkeypatch.setattr(
-        daemon_windows, "_classify_daemon_pids", lambda: ([], [100, 200])
-    )
-    with mock.patch.object(daemon_windows.subprocess, "run") as run:
-        assert daemon_windows._kill_daemon_processes() == 0
-    run.assert_not_called()
-    assert "Refusing to kill" in capsys.readouterr().err
-
-
-def test_daemon_pids_excludes_daemon_subcommands(monkeypatch):
-    procs = [_proc(10, 1, "yuki-conductor.exe daemon status")]
-    monkeypatch.setattr(daemon_windows, "_list_processes", lambda: procs)
-    monkeypatch.setattr(daemon_windows.os, "getpid", lambda: 999)
-    assert daemon_windows._daemon_pids() == []
-
-
-def test_kill_daemon_processes_uses_tree_kill(monkeypatch):
-    monkeypatch.setattr(
-        daemon_windows, "_classify_daemon_pids", lambda: ([100, 200], [])
-    )
-    with mock.patch.object(daemon_windows.subprocess, "run") as run:
-        killed = daemon_windows._kill_daemon_processes()
-    assert killed == 2
-    for call, pid in zip(run.call_args_list, ["100", "200"], strict=True):
-        assert call.args[0] == ["taskkill", "/PID", pid, "/T", "/F"]
-
-
-def test_restart_kills_tree_before_running(monkeypatch):
-    order = []
-    monkeypatch.setattr(daemon_windows, "_task_installed", lambda: True)
-    monkeypatch.setattr(daemon_windows, "build_web_frontend", lambda: None)
-    monkeypatch.setattr(
-        daemon_windows,
-        "_kill_daemon_processes",
-        lambda: (order.append("kill"), 2)[1],
-    )
-    monkeypatch.setattr(
-        daemon_windows, "_wait_for_log_release", lambda: order.append("wait") or True
-    )
-    with mock.patch.object(daemon_windows, "_schtasks") as sch:
-        sch.side_effect = lambda args, **kw: (
-            order.append(args[0]),
-            mock.Mock(returncode=0, stdout=""),
-        )[1]
-        daemon_windows._restart()
-    # Old tree must be dead and the log released before the new instance starts.
-    assert order == ["/End", "kill", "wait", "/Run"]
-
-
-def test_wait_for_log_release_returns_when_openable(monkeypatch, tmp_path):
-    log = tmp_path / "daemon.log"
-    log.write_text("x")
-    monkeypatch.setattr(daemon_windows, "LOG_FILE", log)
-    assert daemon_windows._wait_for_log_release(timeout=1.0) is True
-
-
-def test_stop_writes_sentinel_before_killing(monkeypatch, tmp_path):
-    """The supervisor must learn the stop is intentional before the kill lands.
-
-    If the sentinel appeared after the kill, the supervisor would already have
-    relaunched the daemon underneath us.
-    """
-    stop = tmp_path / "daemon.stop"
-    monkeypatch.setattr(daemon_windows, "STOP_FILE", stop)
-    order = []
-
-    def kill():
-        order.append(("kill", stop.exists()))
-        return 0
-
-    monkeypatch.setattr(daemon_windows, "_kill_daemon_processes", kill)
-    with mock.patch.object(daemon_windows, "_schtasks") as sch:
-        sch.return_value = mock.Mock(returncode=0, stdout="")
-        daemon_windows._stop_daemon()
-    assert order == [("kill", True)]
-
-
-def test_stop_removes_sentinel_afterwards(monkeypatch, tmp_path):
-    """A leftover sentinel would make the supervisor exit on its next start."""
-    stop = tmp_path / "daemon.stop"
-    monkeypatch.setattr(daemon_windows, "STOP_FILE", stop)
-    monkeypatch.setattr(daemon_windows, "_kill_daemon_processes", lambda: 0)
-    with mock.patch.object(daemon_windows, "_schtasks") as sch:
-        sch.return_value = mock.Mock(returncode=0, stdout="")
-        daemon_windows._stop_daemon()
-    assert not stop.exists()
-
-
-def test_status_reports_down_when_no_process(monkeypatch, capsys):
-    """schtasks says "Ready" for a dead daemon; status must not repeat that."""
-    monkeypatch.setattr(daemon_windows, "_task_installed", lambda: True)
-    monkeypatch.setattr(daemon_windows, "_classify_daemon_pids", lambda: ([], []))
-    daemon_windows._status()
-    assert "NOT running" in capsys.readouterr().out
-
-
-def test_status_reports_running_pids(monkeypatch, capsys):
-    monkeypatch.setattr(daemon_windows, "_task_installed", lambda: True)
-    monkeypatch.setattr(daemon_windows, "_classify_daemon_pids", lambda: ([42], [7]))
-    daemon_windows._status()
-    out = capsys.readouterr().out
-    assert "Running" in out and "7, 42" in out
-
-
-def test_wait_for_log_release_times_out(monkeypatch, tmp_path):
-    log = tmp_path / "daemon.log"
-    log.write_text("x")
-    monkeypatch.setattr(daemon_windows, "LOG_FILE", log)
-    import builtins
-
-    real_open = builtins.open
-
-    def locked(path, *a, **kw):
-        if str(path) == str(log):
-            raise PermissionError(13, "locked")
-        return real_open(path, *a, **kw)
-
-    monkeypatch.setattr(builtins, "open", locked)
-    assert daemon_windows._wait_for_log_release(timeout=0.1) is False
+    assert len(timers) == 1
+    # The response must get out before the process dies.
+    assert timers[0].delay == daemon_windows.RESTART_DELAY_SECONDS
+    assert not exited
+    timers[0].fn()
+    assert exited == [0]

@@ -1,349 +1,37 @@
-"""Windows Task Scheduler daemon management.
+"""Windows daemon management — delegated to yuki-watcher.
 
-The Windows equivalent of the macOS per-user LaunchAgent is a per-user
-Scheduled Task triggered `OnLogon` with `RestartOnFailure`. It runs in the
-user's session (so uv, claude, and the user's `~/.yuki-conductor/.env` are all
-available) and does not require admin elevation.
+There is no yuki-conductor-managed daemon on Windows. The
+[yuki-watcher](C:/Git/yuki-watcher) WinForms app launches `yuki-conductor run`
+and supervises it: if the process exits, yuki-watcher restarts it after a short
+delay. That makes install/uninstall/status meaningless here, and makes "restart"
+simply "exit" — the supervisor does the rest.
 """
 
-import json
 import os
-import re
-import subprocess
 import sys
-import tempfile
-import time
-from pathlib import Path
+import threading
 
-from yuki_conductor.config import DATA_DIR, LOG_FILE
-from yuki_conductor.daemon_common import build_web_frontend, print_logs, project_dir
+UNSUPPORTED_MESSAGE = (
+    "`yuki-conductor daemon` is not supported on Windows. The daemon is "
+    "launched and kept alive by yuki-watcher; use its Yuki Conductor tab to "
+    "start, stop, and view the daemon, or the web UI's Restart daemon button."
+)
 
-TASK_NAME = "YukiConductor"
-
-# Handshake telling the launcher's supervisor loop that an exit is intentional
-# and it should not relaunch. Must match $StopFile in yuki-conductor-daemon.ps1.
-STOP_FILE = DATA_DIR / "daemon.stop"
-
-# How long to wait for the old daemon to release its grip on daemon.log before
-# relaunching. The new process opens the log with a plain FileHandler, which
-# fails outright on Windows while another process holds the handle.
-LOG_RELEASE_TIMEOUT = 15.0
+# Give the HTTP response (and any in-flight reply) time to reach the client
+# before the process disappears.
+RESTART_DELAY_SECONDS = 3
 
 
-def _current_user() -> str:
-    """Return DOMAIN\\user for the current interactive user."""
-    domain = os.environ.get("USERDOMAIN")
-    user = os.environ.get("USERNAME")
-    if domain and user:
-        return f"{domain}\\{user}"
-    result = subprocess.run(
-        ["whoami"], capture_output=True, text=True, encoding="utf-8", errors="replace"
-    )
-    return result.stdout.strip()
+def spawn_detached_restart(delay_seconds: int = RESTART_DELAY_SECONDS) -> None:
+    """Restart by exiting; yuki-watcher relaunches the daemon.
 
-
-def _pwsh() -> str:
-    """Locate the PowerShell executable (prefer pwsh 7+, fall back to Windows PowerShell)."""
-    import shutil
-
-    for exe in ("pwsh", "powershell"):
-        found = shutil.which(exe)
-        if found:
-            return found
-    raise RuntimeError("Neither pwsh nor powershell found on PATH")
-
-
-def _launcher_script() -> Path:
-    return project_dir() / "bin" / "yuki-conductor-daemon.ps1"
-
-
-def _generate_task_xml() -> str:
-    user = _current_user()
-    pwsh = _pwsh()
-    script = _launcher_script()
-    repo = str(project_dir())
-    # Normal (not Hidden) window: the console is the daemon's live log view.
-    # -WindowStyle Hidden never actually suppressed the window anyway — pwsh is
-    # a console app, so Windows creates and shows the console before PowerShell
-    # parses the flag, producing a blank flash on every launch.
-    arguments = f'-NoProfile -NoExit -File "{script}"'
-    return (
-        '<?xml version="1.0" encoding="UTF-16"?>\n'
-        '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n'
-        "  <RegistrationInfo>\n"
-        f"    <Description>yuki-conductor chat-to-Claude daemon</Description>\n"
-        "  </RegistrationInfo>\n"
-        "  <Triggers>\n"
-        "    <LogonTrigger>\n"
-        "      <Enabled>true</Enabled>\n"
-        f"      <UserId>{user}</UserId>\n"
-        "    </LogonTrigger>\n"
-        # Safety net for the one case the in-script supervisor cannot cover:
-        # the supervisor itself dying (closed console, killed tree). Combined
-        # with IgnoreNew below this is a no-op whenever the daemon is alive.
-        "    <TimeTrigger>\n"
-        "      <Enabled>true</Enabled>\n"
-        "      <StartBoundary>2000-01-01T00:00:00</StartBoundary>\n"
-        "      <Repetition>\n"
-        "        <Interval>PT5M</Interval>\n"
-        "        <StopAtDurationEnd>false</StopAtDurationEnd>\n"
-        "      </Repetition>\n"
-        "    </TimeTrigger>\n"
-        "  </Triggers>\n"
-        "  <Principals>\n"
-        '    <Principal id="Author">\n'
-        f"      <UserId>{user}</UserId>\n"
-        "      <LogonType>InteractiveToken</LogonType>\n"
-        "      <RunLevel>LeastPrivilege</RunLevel>\n"
-        "    </Principal>\n"
-        "  </Principals>\n"
-        "  <Settings>\n"
-        "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n"
-        "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n"
-        "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n"
-        "    <AllowHardTerminate>true</AllowHardTerminate>\n"
-        "    <StartWhenAvailable>true</StartWhenAvailable>\n"
-        "    <RestartOnFailure>\n"
-        "      <Interval>PT1M</Interval>\n"
-        "      <Count>9999</Count>\n"
-        "    </RestartOnFailure>\n"
-        "    <Hidden>false</Hidden>\n"
-        "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n"
-        "  </Settings>\n"
-        "  <Actions>\n"
-        "    <Exec>\n"
-        f"      <Command>{pwsh}</Command>\n"
-        f"      <Arguments>{arguments}</Arguments>\n"
-        f"      <WorkingDirectory>{repo}</WorkingDirectory>\n"
-        "    </Exec>\n"
-        "  </Actions>\n"
-        "</Task>\n"
-    )
-
-
-def _schtasks(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["schtasks", *args],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=check,
-    )
-
-
-def _task_installed() -> bool:
-    result = _schtasks(["/Query", "/TN", TASK_NAME], check=False)
-    return result.returncode == 0
-
-
-def _list_processes() -> list[dict]:
-    """Return [{pid, ppid, cmdline}] for every process visible to this user."""
-    ps = (
-        "Get-CimInstance Win32_Process | "
-        "Select-Object ProcessId,ParentProcessId,CommandLine | "
-        "ConvertTo-Json -Compress"
-    )
-    result = subprocess.run(
-        [_pwsh(), "-NoProfile", "-Command", ps],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    if result.returncode != 0 or not result.stdout.strip():
-        return []
-    try:
-        raw = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return []
-    if isinstance(raw, dict):
-        raw = [raw]
-    return [
-        {
-            "pid": p.get("ProcessId"),
-            "ppid": p.get("ParentProcessId"),
-            "cmdline": p.get("CommandLine") or "",
-        }
-        for p in raw
-        if p.get("ProcessId")
-    ]
-
-
-# `yuki-conductor run`, however it was launched: directly, via the .exe
-# shim, or as `uv run --project <repo> yuki-conductor run`.
-_DAEMON_CMD_RE = re.compile(r"yuki-conductor(\.exe)?\"?\s+run(\s|$)", re.IGNORECASE)
-
-
-def _self_ancestry(procs: list[dict]) -> set[int]:
-    """PIDs of this process and all of its ancestors."""
-    by_pid = {p["pid"]: p for p in procs}
-    chain: set[int] = set()
-    pid = os.getpid()
-    while pid and pid not in chain:
-        chain.add(pid)
-        parent = by_pid.get(pid)
-        pid = parent["ppid"] if parent else None
-    return chain
-
-
-def _classify_daemon_pids() -> tuple[list[int], list[int]]:
-    """Split running daemon PIDs into (killable, in_own_ancestry).
-
-    `daemon restart` is itself often run as `yuki-conductor daemon restart`
-    under `uv run`; that chain never matches the daemon pattern, so it is not
-    at risk. But a Claude session *spawned by* the daemon has the daemon as an
-    ancestor — killing it there would take out the restart command mid-flight,
-    before `schtasks /Run` ever fires. Those PIDs are reported separately.
+    No detached helper process is needed: the supervisor is already watching
+    this process. `os._exit` rather than `sys.exit` because this runs on a
+    timer thread, where a raised SystemExit would only unwind that thread.
     """
-    procs = _list_processes()
-    own = _self_ancestry(procs)
-    launcher = _launcher_script().name.lower()
-    killable, ancestral = [], []
-    for proc in procs:
-        cmd = proc["cmdline"]
-        if launcher in cmd.lower() or _DAEMON_CMD_RE.search(cmd):
-            (ancestral if proc["pid"] in own else killable).append(proc["pid"])
-    return killable, ancestral
-
-
-def _daemon_pids() -> list[int]:
-    """PIDs of the running daemon that this process may safely kill."""
-    return _classify_daemon_pids()[0]
-
-
-def _kill_daemon_processes() -> int:
-    """Force-kill the daemon process tree(s). Returns the number of PIDs killed.
-
-    `schtasks /End` only stops the task's top-level pwsh; the `uv` →
-    `yuki-conductor` → `python` descendants are re-parented and survive, keeping
-    a lock on daemon.log and continuing to serve chat traffic with stale code.
-    """
-    pids, ancestral = _classify_daemon_pids()
-    if ancestral:
-        print(
-            f"Refusing to kill daemon process(es) {ancestral} — this command is "
-            "running inside them. Restart from a shell outside the daemon.",
-            file=sys.stderr,
-        )
-    for pid in pids:
-        subprocess.run(
-            ["taskkill", "/PID", str(pid), "/T", "/F"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-    return len(pids)
-
-
-def _wait_for_log_release(timeout: float = LOG_RELEASE_TIMEOUT) -> bool:
-    """Block until daemon.log can be opened for append, or `timeout` elapses."""
-    if not LOG_FILE.exists():
-        return True
-    deadline = time.monotonic() + timeout
-    while True:
-        try:
-            with open(LOG_FILE, "a", encoding="utf-8"):
-                return True
-        except PermissionError:
-            if time.monotonic() >= deadline:
-                return False
-            time.sleep(0.25)
-
-
-def _stop_daemon() -> None:
-    """End the scheduled task and kill any surviving daemon processes.
-
-    The launcher script supervises and relaunches the daemon on exit, so it
-    must be told this stop is intentional — otherwise it would immediately
-    start a new instance on top of the one we just killed. The sentinel file is
-    the handshake; the supervisor consumes it and exits its loop.
-    """
-    STOP_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STOP_FILE.touch()
-    try:
-        _schtasks(["/End", "/TN", TASK_NAME], check=False)
-        killed = _kill_daemon_processes()
-        if killed:
-            print(f"Killed {killed} lingering daemon process(es)")
-    finally:
-        # Killing the tree usually denies the supervisor its chance to consume
-        # the sentinel; a leftover file would block the next start.
-        STOP_FILE.unlink(missing_ok=True)
-
-
-def _install():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    xml = _generate_task_xml()
-    # schtasks /XML requires a UTF-16 encoded file matching the XML declaration.
-    fd, xml_path = tempfile.mkstemp(suffix=".xml")
-    os.close(fd)
-    try:
-        Path(xml_path).write_text(xml, encoding="utf-16")
-        _schtasks(["/Create", "/TN", TASK_NAME, "/XML", xml_path, "/F"])
-    finally:
-        os.unlink(xml_path)
-    _schtasks(["/Run", "/TN", TASK_NAME], check=False)
-    print(f"Installed and started scheduled task {TASK_NAME}")
-    print(f"Logs: {LOG_FILE}")
-
-
-def _uninstall():
-    if not _task_installed():
-        print("Scheduled task not installed")
-        return
-    _stop_daemon()
-    _schtasks(["/Delete", "/TN", TASK_NAME, "/F"])
-    print(f"Removed scheduled task {TASK_NAME}")
-
-
-def _restart():
-    if not _task_installed():
-        print("Scheduled task not installed. Run 'daemon install' first.")
-        sys.exit(1)
-    build_web_frontend()
-    _stop_daemon()
-    if not _wait_for_log_release():
-        print(
-            f"Warning: {LOG_FILE} is still locked after {LOG_RELEASE_TIMEOUT:.0f}s; "
-            "the restarted daemon may fail to start.",
-            file=sys.stderr,
-        )
-    _schtasks(["/Run", "/TN", TASK_NAME])
-    print(f"Restarted scheduled task {TASK_NAME}")
-
-
-def _status():
-    """Report whether the daemon is actually alive, not merely installed.
-
-    schtasks' own `Status:` field reports the *task* state, where "Ready" means
-    installed-but-not-running — i.e. the daemon is down. Reporting that verbatim
-    made a dead daemon look healthy, so liveness comes from the process list.
-    """
-    if not _task_installed():
-        print("Not installed")
-        return
-    pids = sorted(sum(_classify_daemon_pids(), []))
-    if pids:
-        print(f"Running (pid {', '.join(str(p) for p in pids)})")
-    else:
-        print("Installed but NOT running")
-        print(f"Check {LOG_FILE} / run 'daemon restart'")
-
-
-def _log():
-    print_logs()
+    threading.Timer(delay_seconds, lambda: os._exit(0)).start()
 
 
 def handle_daemon(action: str) -> None:
-    actions = {
-        "install": _install,
-        "uninstall": _uninstall,
-        "restart": _restart,
-        "status": _status,
-        "log": _log,
-    }
-    actions[action]()
+    print(UNSUPPORTED_MESSAGE, file=sys.stderr)
+    sys.exit(1)

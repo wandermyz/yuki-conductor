@@ -19,3 +19,4 @@ uv.lock
 .claude/worktrees/
 .ruff_cache/
 workspace/
+web/.e2e/

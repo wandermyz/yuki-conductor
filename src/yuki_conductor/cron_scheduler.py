@@ -7,7 +7,7 @@ from datetime import datetime
 from croniter import croniter
 
 from yuki_conductor.claude_runner import run_claude
-from yuki_conductor.config import WORKSPACE_DIR, chat_apps
+from yuki_conductor.config import WORKSPACE_DIR, channels
 from yuki_conductor.cron_config import CronTask, load_tasks
 from yuki_conductor.messaging import MessagingPlatform, OutgoingMessage
 from yuki_conductor.store import CronRunStore
@@ -51,23 +51,20 @@ _CRON_PROMPT_PREFIX = (
 )
 
 
-# `slack` (legacy) is accepted as an alias for `slack_socket` since
-# CHAT_APPS uses the latter while platform.name is the former.
-_TASK_APP_ALIASES = {"slack_socket": "slack"}
-
-
 def _pick_platform(
     task: CronTask,
     platforms_by_name: dict[str, MessagingPlatform],
 ) -> MessagingPlatform | None:
     """Resolve which platform a cron task should notify into.
 
+    Channel names and platform names are the same string, so a task's
+    ``chat_app:`` is looked up directly — no alias table.
+
     Returns None when the task should be skipped (explicit chat_app refers
     to a disabled platform) or when no platforms are enabled at all.
     """
     if task.chat_app:
-        requested = _TASK_APP_ALIASES.get(task.chat_app, task.chat_app)
-        platform = platforms_by_name.get(requested)
+        platform = platforms_by_name.get(task.chat_app)
         if platform is None:
             logger.warning(
                 f"Cron task={task.name} requested chat_app={task.chat_app!r} "
@@ -75,9 +72,8 @@ def _pick_platform(
             )
         return platform
 
-    # Default: derive preference from CHAT_APPS order + "web" fallback
-    preferred = [_TASK_APP_ALIASES.get(a, a) for a in chat_apps()] + ["web"]
-    for name in preferred:
+    # Default: derive preference from enabled-channel order + "web" fallback
+    for name in [*channels(), "web"]:
         if name in platforms_by_name:
             return platforms_by_name[name]
     return None
@@ -162,7 +158,7 @@ def _execute(
     logger.info(f"Cron task={task.name} completed with notification")
 
     if not platforms_by_name:
-        logger.info(f"Cron task={task.name} notification (no chat apps enabled): {display_text}")
+        logger.info(f"Cron task={task.name} notification (no channels enabled): {display_text}")
         return
 
     if platform is None:
@@ -293,6 +289,6 @@ def start_cron_scheduler(
     )
     thread.start()
     logger.info(
-        f"Cron scheduler started (chat apps: {sorted(platforms_by_name.keys()) or 'none'})"
+        f"Cron scheduler started (channels: {sorted(platforms_by_name.keys()) or 'none'})"
     )
     return stop_event

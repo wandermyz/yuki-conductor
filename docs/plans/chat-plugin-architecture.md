@@ -1,5 +1,11 @@
 # Chat Platform Plugin Architecture
 
+> **Superseded** by `2026-09-14-plugin-system.md`, which generalizes chat apps
+> into plugins with injection points. `CHAT_APPS` no longer exists: enablement
+> moved to `workspace/plugins.yaml`, and `CHANNELS` is only an override. The
+> entry-point mechanism described below still works. Kept for the design
+> rationale.
+
 ## Problem
 
 yuki-conductor currently has two chat platform implementations: a working Slack integration and a placeholder external-CLI adapter. Supporting new platforms — especially company-internal ones backed by MCP servers — requires a design where:
