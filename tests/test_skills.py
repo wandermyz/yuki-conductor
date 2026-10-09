@@ -517,5 +517,11 @@ def test_system_prompt_names_the_web_conversation():
     assert "yuki-conductor-send" in prompt
 
 
+def test_system_prompt_documents_attachment_tag():
+    assert "<attachment>/absolute/path/to/file</attachment>" in skills.system_prompt(
+        plugin_dirs=[], cwd=None
+    )
+
+
 def test_system_prompt_omits_conversation_section_when_absent():
     assert "## Your conversation" not in skills.system_prompt(plugin_dirs=[], cwd=None)

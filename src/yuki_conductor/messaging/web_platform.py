@@ -184,10 +184,17 @@ class WebPlatform:
             output_tokens=msg.output_tokens,
             cost_usd=msg.cost_usd,
         )
-        self._manager.broadcast(
-            conversation_key,
-            {"type": "message", "message": serialize_message(stored_msg)},
-        )
+        payload = {"type": "message", "message": serialize_message(stored_msg)}
+        if msg.pushed:
+            # Out-of-band: no `processing` event bookends this message, so
+            # the client can't rely on the end-of-turn hook to alert on it.
+            payload["pushed"] = True
+        self._manager.broadcast(conversation_key, payload)
+        if msg.pushed:
+            self._store.set_status(conversation_key, "unread")
+            # The status change has to reach browsers too, or the conversation
+            # only looks unread after a reload.
+            self._manager.broadcast(conversation_key, {"type": "status", "status": "unread"})
 
     def set_processing(self, conversation_key: str, message_id: str, on: bool) -> None:
         self._manager.set_processing(conversation_key, message_id, on)

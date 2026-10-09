@@ -241,7 +241,7 @@ Tests that exercise a cron run must not touch the real workspace DB; the autouse
 - `uv run ruff check --fix .` — run linter with auto-fix
 - `uv run yuki-conductor --help` — show CLI help
 - `uv run yuki-conductor simulate message "test"` — test without Slack
-- `uv run yuki-conductor send -c <conv-id> "text"` — push a message into a web chat conversation (see Outbound Messages)
+- `uv run yuki-conductor send -c <conv-id> "text"` — push a message (and `--attach` files) into a web or Slack conversation (see Outbound Messages)
 - `uv run yuki-conductor web rebuild` — rebuild frontend + auto-reload connected browsers
 - `cd web && pnpm dev` — start frontend dev server (proxies /api to port 2333)
 - `cd web && pnpm build` — build frontend for production (output: web/dist/)
@@ -276,31 +276,43 @@ daemon button and the project-scoped `yuki-conductor-restart` skill both use.
 
 ## Outbound Messages
 
-A spawned Claude run normally speaks only through its final response. The
-`send` subcommand gives it a second channel: `yuki-conductor send [-c <conv-id>]
-"text"` POSTs to `/api/push` on the running daemon, which persists the text as
-an assistant message and broadcasts it over the chat WebSocket. Connected
-browsers see it immediately; a reconnecting one finds it in scrollback. Omitting
-`-c` opens a new conversation instead. This only reaches the **web** platform.
+Every message to the user, whatever produced it, ends up as one
+`OutgoingMessage(text, attachments)` handed to the owning platform's `send()`.
+There are three producers:
 
-Every pushed message gets `web_server.PUSH_MARKER` appended to its text, so a
-proactive note from a cron task reads differently from a reply to something the
-user actually said. The marker is baked into the stored text rather than carried
-as metadata, so it survives a reload; the `pushed` flag on the WebSocket payload
-is transport-only and drives the notification sound.
+| Producer | How the model speaks | Parsed by |
+| --- | --- | --- |
+| Reply to a turn | final response text | `handle_incoming_message` → `split_response` |
+| Cron result | final response text + `<notify>`/`<silence>` | `cron_scheduler._execute` → `split_response` |
+| Push (mid-turn) | `yuki-conductor send [-c id] [--attach PATH] "text"` | `/api/push` |
 
-For the run to address the right thread it must know its conversation id, so
+Files in a final response are `<attachment>/abs/path</attachment>` tags (bare
+names resolve under `workspace/attachments/`). `split_response` strips them and
+returns the paths as attachments. The same tag carries user uploads *into* the
+prompt (`_build_prompt`). `skills._PROMPT_HEADER` documents the tag for the
+model, because nothing else tells it the tag exists.
+
+`/api/push` looks up the platform that owns the conversation: a
+`ConversationStore` row means web, and otherwise the `SessionStore`
+`session_type` names a receiver's platform (Slack). Omitting `-c` opens a new
+web conversation. The message is sent with `pushed=True`; `WebPlatform` uses
+that to tag the WebSocket payload (drives the notification sound) and mark the
+conversation unread. `web_server.PUSH_MARKER` is appended to the text itself so
+a push still reads differently from a reply after a reload. Attachment paths
+must be absolute, since the daemon reads them from the same disk as the run.
+
+For the run to address its thread it must know the conversation id, so
 `skills.system_prompt(conversation_key=...)` renders a "Your conversation"
-section naming it, and `run_claude(web_conversation_id=...)` threads it through.
-Web-platform turns pass their own conversation key; other platforms pass None,
-since their keys aren't addressable by `send`.
+section and `run_claude(push_conversation_id=...)` threads it through. Turns
+pass their own key when the platform is in `messaging.PUSHABLE_PLATFORMS`.
 
 Cron tasks get the same treatment via `WebPlatform.reserve_thread()`, which
 allocates the conversation *before* the run so a long task can post progress
 into the same thread its final result lands in. `discard_thread()` cleans up the
-empty reservation when the run ends in `<silence>` and posted nothing.
+empty reservation when the run ends in `<silence>` and posted nothing. Slack has
+no reservation, so a cron run on Slack can't push until its thread exists.
 
-The `yuki-conductor-send` skill (bundled plugin) documents this for the model.
+The `yuki-conductor-send` skill (bundled plugin) documents `send` for the model.
 
 ## Frontend Deployment Gotchas
 

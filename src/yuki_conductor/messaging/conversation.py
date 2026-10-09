@@ -2,7 +2,6 @@
 
 import logging
 import re
-from pathlib import Path
 
 from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import ATTACHMENTS_DIR
@@ -26,23 +25,29 @@ def _build_prompt(text: str, attachments: list[Attachment]) -> str:
     return prefix + text
 
 
-def _split_response(text: str) -> tuple[str, list[Attachment]]:
-    """Pull <attachment>filename</attachment> tags out of Claude's reply.
+# Platforms whose conversation keys `/api/push` can route back to.
+PUSHABLE_PLATFORMS = ("web", "slack")
 
-    Filenames are looked up under ATTACHMENTS_DIR. Missing files are dropped
-    with a warning rather than failing the whole reply.
+
+def split_response(text: str) -> tuple[str, list[Attachment]]:
+    """Pull <attachment>path</attachment> tags out of Claude's reply.
+
+    Absolute paths are used as-is; bare filenames are looked up under
+    ATTACHMENTS_DIR. Missing files are dropped with a warning rather than
+    failing the whole reply.
     """
     matches = _ATTACHMENT_RE.findall(text)
     if not matches:
         return text, []
 
     attachments: list[Attachment] = []
-    for filename in matches:
-        path = ATTACHMENTS_DIR / filename
-        if not path.exists():
+    for ref in matches:
+        # Joining an absolute path onto a directory yields the absolute path.
+        path = ATTACHMENTS_DIR / ref.strip()
+        if not path.is_file():
             logger.warning(f"Claude referenced missing attachment: {path}")
             continue
-        attachments.append(Attachment(filename=Path(filename).name, local_path=path))
+        attachments.append(Attachment(filename=path.name, local_path=path))
 
     cleaned = _ATTACHMENT_RE.sub("", text).strip()
     return cleaned, attachments
@@ -95,10 +100,9 @@ def handle_incoming_message(
                 model=msg.model,
                 conversation_key=msg.conversation_key,
                 cwd=msg.cwd,
-                # Only the web platform's keys are addressable by
-                # `yuki-conductor send`, so only those are advertised.
-                web_conversation_id=(
-                    msg.conversation_key if msg.platform == "web" else None
+                # Only keys `/api/push` can route are advertised.
+                push_conversation_id=(
+                    msg.conversation_key if msg.platform in PUSHABLE_PLATFORMS else None
                 ),
                 on_event=_event_sink(platform, msg.conversation_key),
             )
@@ -120,7 +124,7 @@ def handle_incoming_message(
                 title_hint=msg.title_hint if msg.is_thread_start else None,
             )
 
-        reply_text, reply_attachments = _split_response(result.text)
+        reply_text, reply_attachments = split_response(result.text)
         outgoing = OutgoingMessage(
             text=reply_text,
             attachments=reply_attachments,

@@ -9,7 +9,7 @@ from croniter import croniter
 from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import WORKSPACE_DIR, channels
 from yuki_conductor.cron_config import CronTask, load_tasks
-from yuki_conductor.messaging import MessagingPlatform, OutgoingMessage
+from yuki_conductor.messaging import MessagingPlatform, OutgoingMessage, split_response
 from yuki_conductor.store import CronRunStore
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,7 @@ def _execute(
             )
 
     prefixed_prompt = _CRON_PROMPT_PREFIX + task.prompt
-    result = run_claude(prefixed_prompt, web_conversation_id=reserved)
+    result = run_claude(prefixed_prompt, push_conversation_id=reserved)
 
     response_text = result.text or ""
     should_notify = "<notify>" in response_text
@@ -164,12 +164,15 @@ def _execute(
     if platform is None:
         return
 
+    text, attachments = split_response(display_text)
     try:
         if reserved is not None:
-            platform.send(reserved, OutgoingMessage(text=display_text))
+            platform.send(reserved, OutgoingMessage(text=text, attachments=attachments))
             conversation_key = reserved
         else:
-            conversation_key = platform.start_thread(display_text, title=title)
+            conversation_key = platform.start_thread(text, title=title)
+            if attachments:
+                platform.send(conversation_key, OutgoingMessage(text="", attachments=attachments))
     except Exception:
         logger.error(
             f"Failed to start cron thread on platform={platform.name} for task={task.name}",

@@ -40,6 +40,8 @@ class OutgoingMessage:
     input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None
+    # Sent out-of-band via `/api/push` rather than as the reply to a turn.
+    pushed: bool = False
 
 
 class MessagingPlatform(Protocol):

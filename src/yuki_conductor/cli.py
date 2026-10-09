@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+from pathlib import Path
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -44,14 +45,24 @@ def main(argv: list[str] | None = None) -> None:
 
     # send
     send_parser = sub.add_parser(
-        "send", help="Push a message into a web chat conversation"
+        "send", help="Push a message into a web chat or Slack conversation"
     )
-    send_parser.add_argument("text", help="Message text (use - to read stdin)")
+    send_parser.add_argument(
+        "text", nargs="?", default="", help="Message text (use - to read stdin)"
+    )
     send_parser.add_argument(
         "--conversation",
         "-c",
         default=None,
-        help="Web conversation id to post into. Omit to open a new conversation.",
+        help="Conversation id to post into. Omit to open a new web conversation.",
+    )
+    send_parser.add_argument(
+        "--attach",
+        "-a",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="File to attach (repeatable)",
     )
     send_parser.add_argument(
         "--title",
@@ -123,14 +134,20 @@ def main(argv: list[str] | None = None) -> None:
         from yuki_conductor.web_server import WEB_PORT
 
         text = sys.stdin.read() if args.text == "-" else args.text
-        if not text.strip():
+        if not text.strip() and not args.attach:
             print("Refusing to send an empty message", file=sys.stderr)
+            sys.exit(1)
+        attachments = [str(Path(a).resolve()) for a in args.attach]
+        missing = [a for a in attachments if not Path(a).is_file()]
+        if missing:
+            print(f"Not a file: {', '.join(missing)}", file=sys.stderr)
             sys.exit(1)
 
         payload = {
             "text": text,
             "conversation_id": args.conversation,
             "title": args.title,
+            "attachments": attachments,
         }
         req = urllib.request.Request(
             f"http://127.0.0.1:{WEB_PORT}/api/push",
@@ -147,7 +164,7 @@ def main(argv: list[str] | None = None) -> None:
         except urllib.error.URLError as exc:
             print(f"Daemon not reachable on port {WEB_PORT}: {exc.reason}", file=sys.stderr)
             sys.exit(1)
-        print(f"Sent to conversation {body['conversation_id']}")
+        print(f"Sent to {body['platform']} conversation {body['conversation_id']}")
     elif args.command == "web":
         if args.web_command is None:
             web_parser.print_help()

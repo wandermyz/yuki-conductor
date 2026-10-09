@@ -171,16 +171,17 @@ See [skills.example.yaml](skills.example.yaml). A personal system prompt at
 
 ## Outbound messages
 
-A spawned run normally speaks only through its final response. `send` gives it a
-second channel:
+A spawned run normally speaks only through its final response, and attaches files
+by writing `<attachment>/absolute/path</attachment>` in it. `send` gives it a second
+channel for messages and files mid-turn:
 
 ```bash
 uv run yuki-conductor send -c <conversation-id> "halfway done, tests are green"
+uv run yuki-conductor send -c <conversation-id> --attach /tmp/plot.png "latest run"
 ```
 
-The text is persisted as an assistant message and broadcast over the chat WebSocket,
-so connected browsers see it immediately and reconnecting ones find it in scrollback.
-This reaches the web platform only.
+The daemon delivers it through whichever platform owns the conversation (web chat
+or a Slack thread), the same way it delivers a normal reply.
 
 ## CLI reference
 
@@ -189,7 +190,7 @@ yuki-conductor run                              # Start the daemon in the foregr
 yuki-conductor daemon install|uninstall         # Manage the auto-start daemon (macOS, Linux)
 yuki-conductor daemon restart|status|log        # Control and inspect it (macOS, Linux)
 yuki-conductor web rebuild                      # Rebuild frontend + hot-reload browsers
-yuki-conductor send [-c <id>] "text"            # Push a message into a web conversation
+yuki-conductor send [-c <id>] [-a FILE] "text"  # Push a message/files into a conversation
 yuki-conductor simulate message "hello"         # Run a prompt with no chat app attached
 yuki-conductor simulate reply <ts> "follow up"  # Resume a session by thread id
 ```
