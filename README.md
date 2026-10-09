@@ -102,6 +102,7 @@ alive with an external supervisor instead.
 | `CLAUDE_BIN` | Claude CLI path or name (default `claude`) |
 | `CLAUDE_TIMEOUT` | Idle timeout in seconds — a run is stopped only after this long with no output |
 | `WEB_PORT` | Web UI port (default `2333`) |
+| `WEB_FAVICON` | Path to a custom favicon image for the web UI (default: bundled `favicon.svg`) |
 | `YUKI_CONDUCTOR_DATA_DIR` | Override the `~/.yuki-conductor` location |
 
 For Slack setup, see [docs/slack-app-setup.md](docs/slack-app-setup.md).

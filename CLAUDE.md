@@ -38,6 +38,7 @@ The personal workspace lives outside the repo at `~/.yuki-conductor/` (override 
 
 Key files:
 - `~/.yuki-conductor/.env` — secrets and env overrides (loaded at startup, overrides the Claude env file)
+- `~/.yuki-conductor/favicon.png` — optional personal web favicon, served by `/api/favicon` when `.env` sets `WEB_FAVICON` (falls back to the bundled `favicon.svg`)
 - `~/.zshenv.d/claude.zsh` — exports `ANTHROPIC_AUTH_TOKEN` (read from `.secrets/claude-auth-token`), shared with interactive shells; `config.py` sources this one file under `zsh -f` at startup so the LaunchAgent authenticates the same way a terminal does. The endpoint is *not* here — `ANTHROPIC_BASE_URL` lives in `~/.claude/settings.json` under `env`, which applies to Claude Code only rather than every process that starts a zsh.
 - `~/.yuki-conductor/.secrets/` — one secret per file, mode 600 (referenced by the above; never in `workspace/`, which syncs to Obsidian)
 - `~/.yuki-conductor/workspace/yuki-conductor.db` — SQLite database for session and model tracking

@@ -46,6 +46,9 @@ def set_receivers(receivers: list) -> None:
 
 WEB_PORT = int(os.environ.get("WEB_PORT", "2333"))
 SLACK_WORKSPACE = os.environ.get("SLACK_WORKSPACE", "wandermyz")
+# Optional path to a personal favicon image. It lives outside the repo (set it
+# in ~/.yuki-conductor/.env) so a private avatar never ends up in git.
+WEB_FAVICON = os.environ.get("WEB_FAVICON", "")
 
 # Appended to every `/api/push` message so a proactive note from a cron task or
 # background run reads differently from a reply to something the user asked.
@@ -82,6 +85,19 @@ def _clear_restart_required() -> None:
 
 def create_api() -> FastAPI:
     api = FastAPI(title="Agent Conductor")
+
+    @api.get("/api/favicon")
+    def favicon():
+        """Serve `WEB_FAVICON` if it exists, else the bundled default icon."""
+        if WEB_FAVICON:
+            custom = Path(WEB_FAVICON).expanduser()
+            if custom.is_file():
+                return FileResponse(custom)
+            logger.warning("WEB_FAVICON %s not found; using default", custom)
+        default = _WEB_DIST / "favicon.svg"
+        if not default.is_file():
+            raise HTTPException(status_code=404)
+        return FileResponse(default)
 
     @api.get("/api/status")
     def plugin_status():
