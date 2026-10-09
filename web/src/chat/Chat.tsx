@@ -80,6 +80,11 @@ function isImage(mime: string | null, filename: string): boolean {
   return /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(filename);
 }
 
+function isVideo(mime: string | null, filename: string): boolean {
+  if (mime?.startsWith("video/")) return true;
+  return /\.(mp4|webm|mov|m4v)$/i.test(filename);
+}
+
 /* ---------- Conversation status helpers ---------- */
 
 function formatTokens(n: number): string {
@@ -410,6 +415,8 @@ function MessageBubble({ msg, onRetry }: { msg: ChatMessage; onRetry: (msg: Chat
               <a key={a.id} href={a.url} target="_blank" rel="noreferrer">
                 <img src={a.url} alt={a.filename} />
               </a>
+            ) : isVideo(a.mime_type, a.filename) ? (
+              <video key={a.id} src={a.url} controls loop playsInline preload="metadata" />
             ) : (
               <a key={a.id} className="file-link" href={a.url} download>
                 📎 {a.filename}

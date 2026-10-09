@@ -592,7 +592,8 @@
   gap: 6px;
 }
 
-.bubble-attachments img {
+.bubble-attachments img,
+.bubble-attachments video {
   max-width: 100%;
   max-height: 360px;
   border-radius: 8px;
