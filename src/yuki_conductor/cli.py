@@ -16,7 +16,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # daemon
     daemon_parser = sub.add_parser(
-        "daemon", help="Manage the LaunchAgent daemon (macOS only)"
+        "daemon", help="Manage the auto-start daemon (macOS LaunchAgent / Linux systemd user service)"
     )
     daemon_parser.add_argument(
         "action",

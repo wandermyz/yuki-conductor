@@ -1,8 +1,8 @@
 """Daemon management dispatcher.
 
 Routes `yuki-conductor daemon <action>` to the platform-specific adapter.
-macOS manages its own daemon as a LaunchAgent (`daemon_macos`). Windows does
-not: yuki-watcher supervises the process there, so `daemon_windows` reports the
+macOS manages its own daemon as a LaunchAgent (`daemon_macos`), Linux as a
+systemd user service (`daemon_linux`). Windows does not: yuki-watcher supervises the process there, so `daemon_windows` reports the
 subcommand as unsupported and implements restart as a plain exit.
 """
 
@@ -18,6 +18,7 @@ def spawn_detached_restart() -> None:
 
     On macOS the restart is handed to a process outside this one's tree, since
     bouncing the LaunchAgent inline would kill the web server mid-response. On
+    Linux a delayed `systemctl --no-block` hands the job to systemd. On
     Windows the process simply schedules its own exit and yuki-watcher relaunches
     it. Either way this returns as soon as the restart is committed; it says
     nothing about whether it succeeds, and the caller polls for the daemon
@@ -31,6 +32,10 @@ def _impl():
         from yuki_conductor import daemon_macos
 
         return daemon_macos
+    if sys.platform.startswith("linux"):
+        from yuki_conductor import daemon_linux
+
+        return daemon_linux
     if sys.platform == "win32":
         from yuki_conductor import daemon_windows
 
