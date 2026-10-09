@@ -45,6 +45,7 @@ def set_receivers(receivers: list) -> None:
     _receivers = receivers
 
 WEB_PORT = int(os.environ.get("WEB_PORT", "2333"))
+WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
 SLACK_WORKSPACE = os.environ.get("SLACK_WORKSPACE", "wandermyz")
 # Optional path to a personal favicon image. It lives outside the repo (set it
 # in ~/.yuki-conductor/.env) so a private avatar never ends up in git.
@@ -825,9 +826,9 @@ def start_web_server() -> FastAPI:
     app = create_api()
 
     def _run():
-        uvicorn.run(app, host="0.0.0.0", port=WEB_PORT, log_level="info")
+        uvicorn.run(app, host=WEB_HOST, port=WEB_PORT, log_level="info")
 
     thread = threading.Thread(target=_run, daemon=True, name="web-server")
     thread.start()
-    logger.info(f"Web server started on port {WEB_PORT}")
+    logger.info(f"Web server started on {WEB_HOST}:{WEB_PORT}")
     return app

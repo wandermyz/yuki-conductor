@@ -133,7 +133,7 @@ def main(argv: list[str] | None = None) -> None:
             "title": args.title,
         }
         req = urllib.request.Request(
-            f"http://localhost:{WEB_PORT}/api/push",
+            f"http://127.0.0.1:{WEB_PORT}/api/push",
             method="POST",
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
@@ -157,7 +157,7 @@ def main(argv: list[str] | None = None) -> None:
 
             from yuki_conductor.web_server import WEB_PORT
 
-            url = f"http://localhost:{WEB_PORT}/api/admin/rebuild"
+            url = f"http://127.0.0.1:{WEB_PORT}/api/admin/rebuild"
             try:
                 req = urllib.request.Request(url, method="POST", data=b"")
                 with urllib.request.urlopen(req, timeout=120) as resp:

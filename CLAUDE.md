@@ -332,7 +332,7 @@ Keep the code clean. **No backward compatibility is required.** This project has
 ## Architecture
 
 - **Session tracking**: SQLite database at `~/.yuki-conductor/workspace/yuki-conductor.db` maps `thread_ts → (session_id, channel_id)` and `channel_id → model`
-- **Web server**: FastAPI on port 2333 (env: `WEB_PORT`), serves React frontend and `/api/sessions` + chat endpoints. Starts in a daemon thread alongside any enabled chat-app receivers.
+- **Web server**: FastAPI on 127.0.0.1:2333 (env: `WEB_HOST`, `WEB_PORT`), serves React frontend and `/api/sessions` + chat endpoints. Starts in a daemon thread alongside any enabled chat-app receivers.
 - **Concurrency**: slack-bolt's default thread pool (10 threads); each handler blocks on `subprocess.run`
 - **Claude invocation**: `claude -p --dangerously-skip-permissions --output-format stream-json --verbose [-r session_id] "prompt"`. stdout is NDJSON; `stream_events.py` normalizes each record into a `StreamEvent` (tool calls, text, thinking, tool results) which `run_claude(on_event=...)` delivers live, and the terminal `result` record becomes the returned `ClaudeResult`.
 - **Progress surfaces**: platforms opt into live steps by implementing `on_stream_event`. Web buffers steps in `ConnectionManager` (memory only — never persisted) and broadcasts `{"type": "step"}`; `GET /api/chat/steps` replays the buffer so a reconnecting browser resumes mid-run. Slack folds steps into the shimmering assistant status (coalesced to one `setStatus` call per couple of seconds) and posts nothing until the final reply. Platforms without the hook just get the final response.
