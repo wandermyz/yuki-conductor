@@ -21,7 +21,7 @@ src/yuki_conductor/
     web_platform.py    — Web chat adapter
   cron_scheduler.py — cron task scheduler (reads ~/.yuki-conductor/workspace/cron.yaml)
   cron_config.py    — cron.yaml parsing, cadence prose, surgical field edits
-  daemon.py         — macOS LaunchAgent management
+  daemon.py         — daemon management dispatcher (daemon_macos / daemon_linux / daemon_windows)
   web_server.py     — FastAPI HTTP server (agent conductor web UI)
 web/                — React + Vite frontend (pnpm, TypeScript)
 plugins/
@@ -47,7 +47,7 @@ Key files:
 - `~/.yuki-conductor/workspace/skills.yaml` — promotes user-scope skills to "always available" (see `skills.example.yaml` and Skill Discovery)
 - `~/.yuki-conductor/workspace/system-prompt.md` — optional personal system prompt appended to every spawned Claude run (see Skill Discovery)
 - `~/.yuki-conductor/workspace/attachments/`, `uploads/` — runtime file storage
-- `~/.yuki-conductor/daemon.log`, `daemon.err.log` — LaunchAgent logs
+- `~/.yuki-conductor/daemon.log`, `daemon.err.log` — daemon logs (LaunchAgent / systemd unit)
 
 ## Plugins and Channels
 
@@ -110,7 +110,8 @@ pretending to.
 `POST /api/daemon/restart` must not kill its own caller, since the web server
 runs *inside* the daemon. `daemon.spawn_detached_restart()` dispatches to
 `daemon_windows` (schedule `os._exit(0)` a few seconds out and let yuki-watcher
-relaunch) or `daemon_macos` (`setsid` + `launchctl kickstart -k`), returns 202 at
+relaunch), `daemon_macos` (`setsid` + `launchctl kickstart -k`), or
+`daemon_linux` (delayed `systemctl --user restart --no-block`), returns 202 at
 once, and the frontend polls `/api/status` until the socket comes back.
 
 ### Web tabs
@@ -253,6 +254,14 @@ dispatched by platform in `daemon.py`:
 - macOS (`daemon_macos.py`) — a per-user LaunchAgent (`launchctl` + plist).
   Shared helpers (uv discovery, web build, log tailing) live in
   `daemon_common.py`.
+- Linux (`daemon_linux.py`) — a systemd user service,
+  `~/.config/systemd/user/yuki-conductor.service`, driven by `systemctl --user`.
+  It has `Restart=always`; run `loginctl enable-linger` for it to start at boot
+  rather than at login. `spawn_detached_restart()` can't use the macOS `setsid`
+  trick — `KillMode=control-group` kills every process in the unit's cgroup,
+  detached or not — so it queues `systemctl --user restart --no-block` on a
+  timer thread instead; the job then belongs to the systemd manager and
+  survives the kill.
 - Windows (`daemon_windows.py`) — **unsupported**; every action prints a message
   and exits 1. yuki-watcher (`C:\Git\yuki-watcher`, a WinForms tray app) owns
   the daemon there: it runs `uv run --project <repo> yuki-conductor run` and

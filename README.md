@@ -52,7 +52,7 @@ Everything personal — the database, cron definitions, secrets, attachments —
 - Python 3.11+ and [uv](https://docs.astral.sh/uv/)
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code), installed and authenticated
 - Node.js and pnpm, to build the web frontend
-- macOS, or Windows 10/11 with PowerShell 7+
+- macOS, Linux with systemd, or Windows 10/11 with PowerShell 7+
 - A Slack workspace *only* if you want the Slack surface
 
 ### Setup
@@ -85,6 +85,11 @@ needed):
 uv run yuki-conductor daemon install
 uv run yuki-conductor daemon status
 ```
+
+On Linux, the same commands install a systemd user service
+(`~/.config/systemd/user/yuki-conductor.service`). It starts at login; run
+`loginctl enable-linger` to start it at boot and keep it running while logged
+out.
 
 On Windows the `daemon` subcommand is unsupported — keep `yuki-conductor run`
 alive with an external supervisor instead.
@@ -181,8 +186,8 @@ This reaches the web platform only.
 
 ```
 yuki-conductor run                              # Start the daemon in the foreground
-yuki-conductor daemon install|uninstall         # Manage the auto-start daemon (macOS only)
-yuki-conductor daemon restart|status|log        # Control and inspect it (macOS only)
+yuki-conductor daemon install|uninstall         # Manage the auto-start daemon (macOS, Linux)
+yuki-conductor daemon restart|status|log        # Control and inspect it (macOS, Linux)
 yuki-conductor web rebuild                      # Rebuild frontend + hot-reload browsers
 yuki-conductor send [-c <id>] "text"            # Push a message into a web conversation
 yuki-conductor simulate message "hello"         # Run a prompt with no chat app attached
