@@ -101,3 +101,35 @@ def test_processing_off_called_even_on_exception():
             pass
 
     assert platform.processing[-1] == ("conv-1", "msg-1", False)
+
+
+def test_split_response_accepts_absolute_paths(tmp_path):
+    from yuki_conductor.messaging import split_response
+
+    img = tmp_path / "out.png"
+    img.write_bytes(b"png")
+    text, atts = split_response(f"look <attachment>{img}</attachment>")
+    assert text == "look"
+    assert [(a.filename, a.local_path) for a in atts] == [("out.png", img)]
+
+
+def test_split_response_resolves_bare_names_under_attachments_dir(tmp_path, monkeypatch):
+    from yuki_conductor.messaging import conversation
+
+    monkeypatch.setattr(conversation, "ATTACHMENTS_DIR", tmp_path)
+    (tmp_path / "a.txt").write_text("x")
+    text, atts = conversation.split_response("<attachment>a.txt</attachment> <attachment>gone.txt</attachment>")
+    assert text == ""
+    assert [a.local_path for a in atts] == [tmp_path / "a.txt"]
+
+
+def test_push_conversation_id_only_for_pushable_platforms():
+    platform = StubPlatform()
+    fake = ClaudeResult(text="ok", session_id="s")
+    for name, expected in [("web", "k"), ("slack", "k"), ("echo", None)]:
+        msg = IncomingMessage(
+            platform=name, conversation_key="k", message_id="m", text="hi", is_thread_start=True
+        )
+        with patch("yuki_conductor.messaging.conversation.run_claude", return_value=fake) as run:
+            handle_incoming_message(platform, msg)
+        assert run.call_args.kwargs["push_conversation_id"] == expected

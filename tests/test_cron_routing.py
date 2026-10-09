@@ -167,7 +167,7 @@ def test_reserved_conversation_is_passed_to_the_run_and_reused():
     ) as run:
         _run_cron_task(_task(), {"web": platform})
 
-    assert run.call_args.kwargs["web_conversation_id"] == "web-reserved-0"
+    assert run.call_args.kwargs["push_conversation_id"] == "web-reserved-0"
     # Reused rather than opening a second thread the user has to find.
     assert platform.threads == []
     assert [key for key, _ in platform.sent] == ["web-reserved-0"]
@@ -194,7 +194,7 @@ def test_platform_without_reserve_still_starts_a_thread():
     ) as run:
         _run_cron_task(_task(chat_app="slack"), {"slack": platform})
 
-    assert run.call_args.kwargs["web_conversation_id"] is None
+    assert run.call_args.kwargs["push_conversation_id"] is None
     assert platform.threads == [("ping", "desc t1")]
 
 
@@ -325,3 +325,38 @@ def test_trigger_task_still_runs_a_paused_task(isolated_cron_run_store):
                 thread.join(timeout=5)
 
     assert isolated_cron_run_store.last_run("t1")["status"] == "success"
+
+
+# ---- Attachments in cron results ----
+
+
+def test_cron_result_attachments_are_delivered(tmp_path):
+    report = tmp_path / "report.png"
+    report.write_bytes(b"png")
+    platform = ReservingPlatform()
+    result = ClaudeResult(
+        text=f"here it is <attachment>{report}</attachment> <notify>", session_id="s"
+    )
+    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+        _run_cron_task(_task(), {"web": platform})
+
+    [(key, msg)] = platform.sent
+    assert key == "web-reserved-0"
+    assert msg.text == "here it is"
+    assert [a.local_path for a in msg.attachments] == [report]
+
+
+def test_cron_attachments_follow_a_new_thread(tmp_path):
+    report = tmp_path / "report.png"
+    report.write_bytes(b"png")
+    platform = FakePlatform("slack")
+    result = ClaudeResult(
+        text=f"done <attachment>{report}</attachment> <notify>", session_id="s"
+    )
+    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+        _run_cron_task(_task(chat_app="slack"), {"slack": platform})
+
+    assert platform.threads == [("done", "desc t1")]
+    [(key, msg)] = platform.sent
+    assert key == "slack-thread-0"
+    assert [a.local_path for a in msg.attachments] == [report]

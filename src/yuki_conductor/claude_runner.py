@@ -150,7 +150,7 @@ def run_claude(
     model: str | None = None,
     conversation_key: str | None = None,
     cwd: str | None = None,
-    web_conversation_id: str | None = None,
+    push_conversation_id: str | None = None,
     on_event: Callable[[StreamEvent], None] | None = None,
 ) -> ClaudeResult:
     """Run claude CLI and return the result.
@@ -170,9 +170,9 @@ def run_claude(
             None, `CLAUDE_DEFAULT_MODEL` is passed explicitly — see the note on
             that constant for why the flag is never omitted.
         cwd: Working directory for claude. Defaults to CLAUDE_WORKING_DIR.
-        web_conversation_id: Web conversation this run belongs to, if any. Named
-            in the system prompt so the run can push messages back into it via
-            `yuki-conductor send`.
+        push_conversation_id: Conversation this run belongs to, if `/api/push`
+            can route to it. Named in the system prompt so the run can push
+            messages back into it via `yuki-conductor send`.
         on_event: Called from the reader thread for every intermediate step.
             Exceptions raised by the callback are logged and swallowed so a
             broken UI subscriber can't kill the run.
@@ -183,7 +183,7 @@ def run_claude(
     # Passing it inline blows Windows' 32767-char command-line limit, so it goes
     # through a temp file instead; `prompt_file` is removed once the run ends.
     prompt_file = _write_temp_prompt(
-        system_prompt(plugin_dirs, cwd=effective_cwd, conversation_key=web_conversation_id)
+        system_prompt(plugin_dirs, cwd=effective_cwd, conversation_key=push_conversation_id)
     )
     args = [
         "-p",

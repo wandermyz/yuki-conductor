@@ -107,7 +107,9 @@ def test_push_into_existing_conversation(client):
         "/api/push", json={"conversation_id": conv["id"], "text": "progress update"}
     )
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "conversation_id": conv["id"], "created": False}
+    assert r.json() == {
+        "ok": True, "conversation_id": conv["id"], "platform": "web", "created": False,
+    }
 
     msgs = client.get(f"/api/conversations/{conv['id']}/messages").json()
     assert [m["role"] for m in msgs] == ["assistant"]
@@ -131,6 +133,56 @@ def test_push_without_conversation_creates_one(client):
 def test_push_rejects_unknown_conversation(client):
     r = client.post("/api/push", json={"conversation_id": "nope", "text": "hi"})
     assert r.status_code == 404
+
+
+def test_push_with_attachment_stores_it(client, tmp_path):
+    img = tmp_path / "pic.png"
+    img.write_bytes(b"\x89PNG")
+    conv = client.post("/api/conversations", json={"title": "watched"}).json()
+    r = client.post(
+        "/api/push", json={"conversation_id": conv["id"], "attachments": [str(img)]}
+    )
+    assert r.status_code == 200
+
+    [msg] = client.get(f"/api/conversations/{conv['id']}/messages").json()
+    assert msg["text"] == web_server.PUSH_MARKER
+    [att] = msg["attachments"]
+    assert att["filename"] == "pic.png"
+    assert client.get(att["url"]).content == b"\x89PNG"
+
+
+def test_push_rejects_missing_attachment(client, tmp_path):
+    conv = client.post("/api/conversations", json={"title": None}).json()
+    for bad in [str(tmp_path / "nope.png"), "relative.png"]:
+        r = client.post(
+            "/api/push",
+            json={"conversation_id": conv["id"], "text": "hi", "attachments": [bad]},
+        )
+        assert r.status_code == 400
+    assert client.get(f"/api/conversations/{conv['id']}/messages").json() == []
+
+
+def test_push_routes_slack_thread_to_slack_platform(client, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    sent = []
+    slack = SimpleNamespace(name="slack", send=lambda key, msg: sent.append((key, msg)))
+    monkeypatch.setattr(web_server, "_receivers", [SimpleNamespace(platform=slack)])
+    web_server.store.set("1700000000.0001", value="", channel_id="C1", session_type="slack")
+    img = tmp_path / "pic.png"
+    img.write_bytes(b"png")
+
+    r = client.post(
+        "/api/push",
+        json={"conversation_id": "1700000000.0001", "text": "hi", "attachments": [str(img)]},
+    )
+    assert r.status_code == 200
+    assert r.json()["platform"] == "slack"
+    [(key, msg)] = sent
+    assert key == "1700000000.0001"
+    assert msg.text == f"hi\n\n{web_server.PUSH_MARKER}"
+    assert msg.pushed is True
+    assert [a.local_path for a in msg.attachments] == [img]
 
 
 def test_push_rejects_empty_text(client):
