@@ -6,9 +6,10 @@ with `get_harness` and run a turn with `process.run_agent`.
 
 from yuki_conductor.harness.base import Harness, RunResult, StreamEvent
 from yuki_conductor.harness.claude_code import ClaudeCodeHarness
+from yuki_conductor.harness.pi import PiHarness
 
 HARNESSES: dict[str, Harness] = {
-    h.name: h for h in (ClaudeCodeHarness(),)
+    h.name: h for h in (ClaudeCodeHarness(), PiHarness())
 }
 
 

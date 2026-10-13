@@ -91,6 +91,12 @@ CLAUDE_DEFAULT_MODEL = os.environ.get("CLAUDE_DEFAULT_MODEL", "opus[1m]")
 # A conversation keeps the harness it started with.
 DEFAULT_HARNESS = os.environ.get("DEFAULT_HARNESS", "claude-code")
 
+# pi (https://github.com/earendil-works/pi). Its providers live in
+# ~/.pi/agent/models.json, which is personal machine config: yuki-conductor
+# only names the model, as `provider/id`.
+PI_BIN = os.environ.get("PI_BIN", "pi")
+PI_DEFAULT_MODEL = os.environ.get("PI_DEFAULT_MODEL", "strata/qwen3.8-flash-next-iq2_xs")
+
 def channels_override() -> list[str] | None:
     """Return the `CHANNELS` env override, or None when it isn't set.
 
