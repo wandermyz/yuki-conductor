@@ -55,3 +55,14 @@ def test_update_title_bumps_updated_at(tmp_path: Path):
     refreshed = s.get_conversation(c.id)
     assert refreshed.title == "new"
     assert refreshed.updated_at >= original_updated_at
+
+
+def test_harness_defaults_to_claude_code_and_round_trips(tmp_path: Path):
+    s = ConversationStore(db_path=tmp_path / "t.db")
+    default = s.create_conversation(platform="web")
+    pi = s.create_conversation(platform="web", harness="pi")
+    assert s.get_conversation(default.id).harness == "claude-code"
+    assert s.get_conversation(pi.id).harness == "pi"
+    assert {c.id: c.harness for c in s.list_conversations()} == {
+        default.id: "claude-code", pi.id: "pi",
+    }

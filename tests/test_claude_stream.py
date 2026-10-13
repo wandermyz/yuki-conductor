@@ -2,7 +2,7 @@
 
 import json
 
-from yuki_conductor.stream_events import parse_stream_line
+from yuki_conductor.harness.claude_code import parse_stream_line
 
 
 def _line(record: dict) -> str:

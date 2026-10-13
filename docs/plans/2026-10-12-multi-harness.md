@@ -1,8 +1,12 @@
 # Multi-Harness Support
 
-> Status: **planned, not started.** Written 2026-10-12 to capture the design
-> conversation before implementation. Updated 2026-10-13: pi is installed
-> and configured for Strata, and GPU sharing with ComfyUI is handled outside
+> Status: **pi implemented (2026-10-13); dsh and OpenCode not started.**
+> Phases 1–3 are done for pi, plus the web half of phase 6 (a harness toggle
+> in the new-chat picker and a badge) and phase 7's docs. Not yet done: a
+> Slack `/yuki-harness`, per-harness models (`/yuki-model` is still
+> Claude-only), harness on the Status and Automations tabs, and the
+> `CLAUDE_TIMEOUT` → `AGENT_TIMEOUT` rename. Written 2026-10-12; updated
+> 2026-10-13 when pi was installed and GPU sharing moved out of
 > yuki-conductor (see "GPU sharing is not yuki-conductor's job").
 
 ## Goal
@@ -390,7 +394,7 @@ first:
      threads only.
 3. Project default: an optional `harness` on `ProjectStore` rows. Nice to have
    and can slip.
-4. `DEFAULT_HARNESS` in `.env`, default `claude-code`.
+4. The first harness in `HARNESSES` (`.env`, default `claude-code`), which also decides which harnesses exist on the machine at all.
 
 `IncomingMessage` gets `harness: str | None` next to `model`.
 
@@ -400,7 +404,7 @@ Add to `config.py`:
 
 | Setting | Default |
 | --- | --- |
-| `DEFAULT_HARNESS` | `claude-code` |
+| `HARNESSES` | `claude-code` (comma-separated, first = default; `claude-code,pi` on the Strata machine) |
 | `PI_BIN` | `pi` |
 | `PI_DEFAULT_MODEL` | `strata/qwen3.8-flash-next-iq2_xs` |
 | `OPENCODE_BIN` | `opencode` |
@@ -443,7 +447,7 @@ Each phase ends with `uv run pytest` and `uv run ruff check .` green.
 2. **Storage and selection.**
    - Add the `harness` columns and the `get_session` / `set_session_id`
      signature change.
-   - Implement the selection order, `DEFAULT_HARNESS`, per-harness models, and
+   - Implement the selection order, `HARNESSES`, per-harness models, and
      the `core_prompt` / `skills_prompt` split.
 3. **Pi adapter, targeting Strata.** This comes first among the new harnesses
    because it's the Strata recommendation and its JSON schema is fully

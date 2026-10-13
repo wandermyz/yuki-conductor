@@ -10,6 +10,7 @@ import {
   fetchSteps,
   fetchAllUsage,
   listConversations,
+  listHarnesses,
   listMessages,
   listProjects,
   subscribeChatSocket,
@@ -24,6 +25,7 @@ import type {
   Conversation,
   ConversationUsage,
   ConvStatus,
+  HarnessInfo,
   Project,
   StreamStep,
   WSEvent,
@@ -448,6 +450,11 @@ function MessageBubble({ msg, onRetry }: { msg: ChatMessage; onRetry: (msg: Chat
 
 /* ---------- Live step stream ---------- */
 
+/** What the UI calls the agent behind a conversation. */
+function agentName(conv: Conversation): string {
+  return conv.harness === "claude-code" ? "Claude" : conv.harness;
+}
+
 const STEP_ICONS: Record<StreamStep["kind"], string> = {
   init: "●",
   text: "✎",
@@ -459,7 +466,15 @@ const STEP_ICONS: Record<StreamStep["kind"], string> = {
 /** How many trailing steps stay visible; older ones collapse away. */
 const VISIBLE_STEPS = 8;
 
-function StepList({ steps, running }: { steps: StreamStep[]; running: boolean }) {
+function StepList({
+  steps,
+  running,
+  agent,
+}: {
+  steps: StreamStep[];
+  running: boolean;
+  agent: string;
+}) {
   const visible = steps.slice(-VISIBLE_STEPS);
   const hidden = steps.length - visible.length;
   return (
@@ -473,18 +488,20 @@ function StepList({ steps, running }: { steps: StreamStep[]; running: boolean })
           <span className="step-label">{s.label}</span>
         </div>
       ))}
-      {running && <div className="responding-shimmer">Claude is responding…</div>}
+      {running && <div className="responding-shimmer">{agent} is responding…</div>}
     </div>
   );
 }
 
 function Composer({
   conversationId,
+  agent,
   onSend,
   onStop,
   disabled,
 }: {
   conversationId: string;
+  agent: string;
   onSend: (text: string, files: AttachmentRef[]) => void;
   onStop: () => void;
   disabled: boolean;
@@ -600,7 +617,7 @@ function Composer({
               submit();
             }
           }}
-          placeholder="Message Claude…"
+          placeholder={`Message ${agent}…`}
           disabled={disabled}
         />
         {disabled ? (
@@ -691,6 +708,7 @@ function ChatThread({
           ←
         </button>
         <h2 className="chat-thread-title">{conv.title || "New chat"}</h2>
+        {conv.harness !== "claude-code" && <span className="chat-list-harness">{conv.harness}</span>}
         <div className="menu-anchor">
           <button
             className="chat-list-menu-btn"
@@ -719,10 +737,18 @@ function ChatThread({
         {headMessages.map((m) => (
           <MessageBubble key={m.id} msg={m} onRetry={onRetry} />
         ))}
-        {(processing || steps.length > 0) && <StepList steps={steps} running={processing} />}
+        {(processing || steps.length > 0) && (
+          <StepList steps={steps} running={processing} agent={agentName(conv)} />
+        )}
         {finalMessage && <MessageBubble key={finalMessage.id} msg={finalMessage} onRetry={onRetry} />}
       </div>
-      <Composer conversationId={conv.id} onSend={onSend} onStop={onStop} disabled={processing} />
+      <Composer
+        conversationId={conv.id}
+        agent={agentName(conv)}
+        onSend={onSend}
+        onStop={onStop}
+        disabled={processing}
+      />
     </div>
   );
 }
@@ -749,6 +775,9 @@ export default function Chat({
   const [usage, setUsage] = useState<Record<string, ConversationUsage>>({});
   const [projects, setProjects] = useState<Project[]>([]);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
+  // Harnesses a new conversation can use, and the one the picker has selected.
+  const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
+  const [newHarness, setNewHarness] = useState<string | null>(null);
 
   // Keep a ref to `selected` so the WS handler can read the latest value
   const selectedRef = useRef(selected);
@@ -879,6 +908,12 @@ export default function Chat({
     fetchStatuses().then((s) => setStatuses(s as Record<string, ConvStatus>)).catch(console.error);
     fetchAllUsage().then(setUsage).catch(console.error);
     listProjects().then(setProjects).catch(console.error);
+    listHarnesses()
+      .then((h) => {
+        setHarnesses(h.harnesses.filter((x) => x.available));
+        setNewHarness(h.default);
+      })
+      .catch(console.error);
     // A run may already be in flight from before this page loaded.
     fetchProcessing().then((p) => setProcessingConvs(new Set(Object.keys(p)))).catch(console.error);
     fetchSteps().then(setStepsByConv).catch(console.error);
@@ -895,7 +930,7 @@ export default function Chat({
 
   const newChat = async (projectName?: string) => {
     try {
-      const c = await createConversation(undefined, projectName);
+      const c = await createConversation(undefined, projectName, newHarness ?? undefined);
       setConversations((prev) => [c, ...prev]);
       setMessagesByConv((prev) => ({ ...prev, [c.id]: [] }));
       setSelected(c.id);
@@ -906,7 +941,8 @@ export default function Chat({
   };
 
   const handleNewChat = () => {
-    if (projects.length === 0) {
+    // The picker also chooses the harness, so it opens whenever there's a choice.
+    if (projects.length === 0 && harnesses.length < 2) {
       newChat();
     } else {
       setShowProjectPicker(true);
@@ -1029,6 +1065,21 @@ export default function Chat({
       {showProjectPicker && (
         <div className="modal-overlay" onClick={() => setShowProjectPicker(false)}>
           <div className="modal-content project-picker" onClick={(e) => e.stopPropagation()}>
+            {harnesses.length > 1 && (
+              <div className="harness-picker" role="radiogroup" aria-label="Agent">
+                {harnesses.map((h) => (
+                  <button
+                    key={h.name}
+                    role="radio"
+                    aria-checked={newHarness === h.name}
+                    className={`harness-option ${newHarness === h.name ? "active" : ""}`}
+                    onClick={() => setNewHarness(h.name)}
+                  >
+                    {h.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <h3 className="modal-title">Select Project</h3>
             <ul className="project-picker-list">
               <li>
@@ -1092,6 +1143,7 @@ export default function Chat({
                   {st === "unread" && <span className="status-dot" title="Unread" />}
                   {st === "done" && <span className="status-check" title="Done">&#10003;</span>}
                   <span className="chat-list-title">{c.title || "New chat"}</span>
+                  {c.harness !== "claude-code" && <span className="chat-list-harness">{c.harness}</span>}
                   {c.project && <span className="chat-list-project">{c.project}</span>}
                 </div>
                 <div className="chat-list-meta">

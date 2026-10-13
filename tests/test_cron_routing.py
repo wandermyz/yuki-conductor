@@ -1,9 +1,8 @@
 """Tests for cron task → MessagingPlatform routing."""
 
 import threading
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from yuki_conductor.claude_runner import ClaudeResult
 from yuki_conductor.cron_config import CronTask
 from yuki_conductor.cron_scheduler import (
     _build_task_state,
@@ -11,6 +10,7 @@ from yuki_conductor.cron_scheduler import (
     _run_cron_task,
     _tasks_changed,
 )
+from yuki_conductor.harness.base import RunResult
 from yuki_conductor.messaging.platform import OutgoingMessage
 
 
@@ -30,7 +30,10 @@ class FakePlatform:
     def get_session_id(self, conversation_key):
         return None
 
-    def set_session_id(self, conversation_key, session_id, title_hint=None):
+    def get_harness(self, conversation_key):
+        return None
+
+    def set_session_id(self, conversation_key, session_id, title_hint=None, harness="claude-code"):
         self.session_writes.append((conversation_key, session_id, title_hint))
 
     def start_thread(self, text, title=None):
@@ -92,9 +95,9 @@ def test_pick_platform_no_apps_returns_none():
 def test_run_cron_task_notify_routes_to_explicit_app():
     plugin = FakePlatform("my_plugin")
     slack = FakePlatform("slack")
-    fake_result = ClaudeResult(text="hello world <notify>", session_id="sess-1")
+    fake_result = RunResult(text="hello world <notify>", session_id="sess-1")
 
-    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result):
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=fake_result):
         _run_cron_task(
             _task(chat_app="my_plugin"),
             {"slack": slack, "my_plugin": plugin},
@@ -107,10 +110,10 @@ def test_run_cron_task_notify_routes_to_explicit_app():
 
 def test_run_cron_task_silence_does_not_route():
     slack = FakePlatform("slack")
-    fake_result = ClaudeResult(text="quiet check <silence>", session_id="sess-1")
+    fake_result = RunResult(text="quiet check <silence>", session_id="sess-1")
 
     with (
-        patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result),
+        patch("yuki_conductor.cron_scheduler.run_agent", return_value=fake_result),
         patch("yuki_conductor.cron_scheduler.channels", return_value=["slack"]),
     ):
         _run_cron_task(_task(), {"slack": slack})
@@ -120,19 +123,19 @@ def test_run_cron_task_silence_does_not_route():
 
 def test_run_cron_task_explicit_missing_app_is_skipped():
     slack = FakePlatform("slack")
-    fake_result = ClaudeResult(text="x <notify>", session_id="sess-1")
+    fake_result = RunResult(text="x <notify>", session_id="sess-1")
 
-    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result):
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=fake_result):
         _run_cron_task(_task(chat_app="other_plugin"), {"slack": slack})
 
     assert slack.threads == []
 
 
 def test_run_cron_task_no_apps_logs_only(caplog):
-    fake_result = ClaudeResult(text="reminder <notify>", session_id="sess-1")
+    fake_result = RunResult(text="reminder <notify>", session_id="sess-1")
 
     with (
-        patch("yuki_conductor.cron_scheduler.run_claude", return_value=fake_result),
+        patch("yuki_conductor.cron_scheduler.run_agent", return_value=fake_result),
         patch("yuki_conductor.cron_scheduler.channels", return_value=[]),
     ):
         with caplog.at_level("INFO", logger="yuki_conductor.cron_scheduler"):
@@ -149,7 +152,7 @@ class ReservingPlatform(FakePlatform):
         self.reserved: list[str] = []
         self.discarded: list[str] = []
 
-    def reserve_thread(self, title=None):
+    def reserve_thread(self, title=None, harness="claude-code"):
         key = f"{self.name}-reserved-{len(self.reserved)}"
         self.reserved.append(key)
         return key
@@ -161,9 +164,9 @@ class ReservingPlatform(FakePlatform):
 
 def test_reserved_conversation_is_passed_to_the_run_and_reused():
     platform = ReservingPlatform()
-    result = ClaudeResult(text="all done <notify>", session_id="sess-1")
+    result = RunResult(text="all done <notify>", session_id="sess-1")
     with patch(
-        "yuki_conductor.cron_scheduler.run_claude", return_value=result
+        "yuki_conductor.cron_scheduler.run_agent", return_value=result
     ) as run:
         _run_cron_task(_task(), {"web": platform})
 
@@ -178,8 +181,8 @@ def test_reserved_conversation_is_passed_to_the_run_and_reused():
 
 def test_silent_run_discards_the_reserved_conversation():
     platform = ReservingPlatform()
-    result = ClaudeResult(text="nothing to report <silence>", session_id="sess-1")
-    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+    result = RunResult(text="nothing to report <silence>", session_id="sess-1")
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=result):
         _run_cron_task(_task(), {"web": platform})
 
     assert platform.discarded == ["web-reserved-0"]
@@ -188,9 +191,9 @@ def test_silent_run_discards_the_reserved_conversation():
 
 def test_platform_without_reserve_still_starts_a_thread():
     platform = FakePlatform("slack")
-    result = ClaudeResult(text="ping <notify>", session_id="sess-1")
+    result = RunResult(text="ping <notify>", session_id="sess-1")
     with patch(
-        "yuki_conductor.cron_scheduler.run_claude", return_value=result
+        "yuki_conductor.cron_scheduler.run_agent", return_value=result
     ) as run:
         _run_cron_task(_task(chat_app="slack"), {"slack": platform})
 
@@ -203,8 +206,8 @@ def test_platform_without_reserve_still_starts_a_thread():
 
 def test_successful_run_is_recorded(isolated_cron_run_store):
     platform = FakePlatform("slack")
-    result = ClaudeResult(text="ping <notify>", session_id="sess-1")
-    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+    result = RunResult(text="ping <notify>", session_id="sess-1")
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=result):
         _run_cron_task(_task(chat_app="slack"), {"slack": platform})
 
     run = isolated_cron_run_store.last_run("t1")
@@ -216,8 +219,8 @@ def test_successful_run_is_recorded(isolated_cron_run_store):
 
 
 def test_silent_run_is_recorded_as_not_notified(isolated_cron_run_store):
-    result = ClaudeResult(text="nothing <silence>", session_id="sess-1")
-    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+    result = RunResult(text="nothing <silence>", session_id="sess-1")
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=result):
         _run_cron_task(_task(), {})
 
     run = isolated_cron_run_store.last_run("t1")
@@ -227,8 +230,8 @@ def test_silent_run_is_recorded_as_not_notified(isolated_cron_run_store):
 
 
 def test_claude_error_result_is_recorded_as_error(isolated_cron_run_store):
-    result = ClaudeResult(text="it broke", session_id=None, is_error=True)
-    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+    result = RunResult(text="it broke", session_id=None, is_error=True)
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=result):
         _run_cron_task(_task(), {})
 
     run = isolated_cron_run_store.last_run("t1")
@@ -238,7 +241,7 @@ def test_claude_error_result_is_recorded_as_error(isolated_cron_run_store):
 
 def test_raised_exception_is_recorded_as_error(isolated_cron_run_store):
     with patch(
-        "yuki_conductor.cron_scheduler.run_claude",
+        "yuki_conductor.cron_scheduler.run_agent",
         side_effect=RuntimeError("subprocess died"),
     ):
         _run_cron_task(_task(), {})
@@ -251,8 +254,8 @@ def test_raised_exception_is_recorded_as_error(isolated_cron_run_store):
 
 def test_reserved_conversation_is_recorded_on_the_run(isolated_cron_run_store):
     platform = ReservingPlatform()
-    result = ClaudeResult(text="done <notify>", session_id="sess-1")
-    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+    result = RunResult(text="done <notify>", session_id="sess-1")
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=result):
         _run_cron_task(_task(), {"web": platform})
 
     assert isolated_cron_run_store.last_run("t1")["conversation_id"] == "web-reserved-0"
@@ -264,10 +267,10 @@ def test_reserved_conversation_is_recorded_on_the_run(isolated_cron_run_store):
 def test_trigger_task_runs_a_defined_task(isolated_cron_run_store):
     from yuki_conductor import cron_scheduler
 
-    result = ClaudeResult(text="manual go <notify>", session_id="sess-1")
+    result = RunResult(text="manual go <notify>", session_id="sess-1")
     with (
         patch.object(cron_scheduler, "_load_cron_tasks", return_value=[_task()]),
-        patch.object(cron_scheduler, "run_claude", return_value=result),
+        patch.object(cron_scheduler, "run_agent", return_value=result),
     ):
         assert cron_scheduler.trigger_task("t1") is True
         for thread in threading.enumerate():
@@ -314,10 +317,10 @@ def test_trigger_task_still_runs_a_paused_task(isolated_cron_run_store):
 
     paused = _task()
     paused.paused = True
-    result = ClaudeResult(text="manual go <notify>", session_id="sess-1")
+    result = RunResult(text="manual go <notify>", session_id="sess-1")
     with (
         patch.object(cron_scheduler, "_load_cron_tasks", return_value=[paused]),
-        patch.object(cron_scheduler, "run_claude", return_value=result),
+        patch.object(cron_scheduler, "run_agent", return_value=result),
     ):
         assert cron_scheduler.trigger_task("t1") is True
         for thread in threading.enumerate():
@@ -334,10 +337,10 @@ def test_cron_result_attachments_are_delivered(tmp_path):
     report = tmp_path / "report.png"
     report.write_bytes(b"png")
     platform = ReservingPlatform()
-    result = ClaudeResult(
+    result = RunResult(
         text=f"here it is <attachment>{report}</attachment> <notify>", session_id="s"
     )
-    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=result):
         _run_cron_task(_task(), {"web": platform})
 
     [(key, msg)] = platform.sent
@@ -350,13 +353,65 @@ def test_cron_attachments_follow_a_new_thread(tmp_path):
     report = tmp_path / "report.png"
     report.write_bytes(b"png")
     platform = FakePlatform("slack")
-    result = ClaudeResult(
+    result = RunResult(
         text=f"done <attachment>{report}</attachment> <notify>", session_id="s"
     )
-    with patch("yuki_conductor.cron_scheduler.run_claude", return_value=result):
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=result):
         _run_cron_task(_task(chat_app="slack"), {"slack": platform})
 
     assert platform.threads == [("done", "desc t1")]
     [(key, msg)] = platform.sent
     assert key == "slack-thread-0"
     assert [a.local_path for a in msg.attachments] == [report]
+
+
+def test_cron_task_harness_reaches_the_run_and_the_thread(monkeypatch):
+    from yuki_conductor.harness import HARNESSES
+
+    other = MagicMock(name="other-harness")
+    other.name, other.label = "other", "Other"
+    monkeypatch.setitem(HARNESSES, "other", other)
+
+    class Recording(ReservingPlatform):
+        def reserve_thread(self, title=None, harness="claude-code"):
+            self.reserved_harness = harness
+            return super().reserve_thread(title=title, harness=harness)
+
+    platform = Recording()
+    task = _task()
+    task.harness = "other"
+    result = RunResult(text="done <notify>", session_id="sess-1")
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=result) as run:
+        _run_cron_task(task, {"web": platform})
+
+    assert run.call_args.args[0] is other
+    # Recorded on the thread up front, so replies resume with the same harness.
+    assert platform.reserved_harness == "other"
+
+
+def test_cron_task_naming_a_disabled_harness_is_recorded_and_not_run(isolated_cron_run_store):
+    """A prompt written for one agent mustn't silently run on another."""
+    platform = ReservingPlatform()
+    task = _task()
+    task.harness = "not-enabled-here"
+    with patch("yuki_conductor.cron_scheduler.run_agent") as run:
+        _run_cron_task(task, {"web": platform})
+
+    run.assert_not_called()
+    assert platform.reserved == []
+    [row] = isolated_cron_run_store.list_runs("t1")
+    assert row["status"] == "error"
+    assert "isn't enabled" in row["error"]
+
+
+def test_cron_task_harness_is_read_from_yaml(tmp_path):
+    from yuki_conductor.cron_config import load_tasks
+
+    path = tmp_path / "cron.yaml"
+    path.write_text(
+        "tasks:\n"
+        "  - name: a\n    schedule: '* * * * *'\n    prompt: hi\n    harness: pi\n"
+        "  - name: b\n    schedule: '* * * * *'\n    prompt: hi\n",
+        encoding="utf-8",
+    )
+    assert [t.harness for t in load_tasks(path)] == ["pi", None]

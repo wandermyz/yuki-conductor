@@ -9,14 +9,17 @@ src/yuki_conductor/
   plugins.py        — plugin identity, injection points, discovery + status
   plugin_config.py  — plugins.yaml parsing and surgical field edits
   store.py          — SQLite-backed session & model stores
-  claude_runner.py  — subprocess wrapper for claude CLI (stream-json reader)
-  stream_events.py  — normalizes stream-json records into UI progress events
+  harness/          — the agent CLIs a turn can run on (see Harnesses)
+    base.py            — StreamEvent, RunResult, Harness / StreamParser protocols
+    process.py         — run_agent: subprocess, idle watchdog, cancel registry
+    claude_code.py     — Claude Code: command line + stream-json parser
+    pi.py              — pi: command line + `--mode json` parser
   skills.py         — skill discovery + system-prompt synthesis for spawned sessions
   runtime.py        — process orchestrator (starts receivers + web + cron)
   slack_app.py      — Slack Bolt handlers + SlackSocketReceiver + create_receiver
   messaging/        — platform-agnostic messaging core
     platform.py        — MessagingPlatform / ChatAppReceiver Protocols + types
-    conversation.py    — handle_incoming_message: shared run_claude orchestration
+    conversation.py    — handle_incoming_message: harness choice + run_agent orchestration
     slack_platform.py  — Slack adapter
     web_platform.py    — Web chat adapter
   cron_scheduler.py — cron task scheduler (reads ~/.yuki-conductor/workspace/cron.yaml)
@@ -165,8 +168,13 @@ Claude Code directly — nothing is written to `~/.claude/skills`.
 The repo's own `.claude/skills/` holds `yuki-conductor-restart`, which only makes
 sense while working *in* this repo, so it is project-scoped rather than bundled.
 
-`run_claude` passes `--setting-sources user,project,local`; without it a headless
-run loads no settings at all and the last three tiers aren't even resolvable.
+`ClaudeCodeHarness` passes `--setting-sources user,project,local`; without it a
+headless run loads no settings at all and the last three tiers aren't even
+resolvable.
+
+All of this is **Claude Code only**. pi lists skills natively, so it gets
+`skills.core_prompt()` instead: the attachment contract, the conversation id and
+the workspace prompt, without the synthesized listing.
 
 Finally, if `~/.yuki-conductor/workspace/system-prompt.md` exists, its contents
 are appended verbatim. That file is outside the repo, so it's where private
@@ -289,8 +297,9 @@ There are three producers:
 Files in a final response are `<attachment>/abs/path</attachment>` tags (bare
 names resolve under `workspace/attachments/`). `split_response` strips them and
 returns the paths as attachments. The same tag carries user uploads *into* the
-prompt (`_build_prompt`). `skills._PROMPT_HEADER` documents the tag for the
-model, because nothing else tells it the tag exists.
+prompt (`_build_prompt`). `skills._ATTACHMENTS` documents the tag for the
+model, because nothing else tells it the tag exists; both `system_prompt()` and
+`core_prompt()` include it, so it works on every harness.
 
 `/api/push` looks up the platform that owns the conversation: a
 `ConversationStore` row means web, and otherwise the `SessionStore`
@@ -302,8 +311,8 @@ a push still reads differently from a reply after a reload. Attachment paths
 must be absolute, since the daemon reads them from the same disk as the run.
 
 For the run to address its thread it must know the conversation id, so
-`skills.system_prompt(conversation_key=...)` renders a "Your conversation"
-section and `run_claude(push_conversation_id=...)` threads it through. Turns
+`skills.system_prompt(conversation_key=...)` (and `core_prompt`) renders a "Your
+conversation" section and `run_agent(push_conversation_id=...)` threads it through. Turns
 pass their own key when the platform is in `messaging.PUSHABLE_PLATFORMS`.
 
 Cron tasks get the same treatment via `WebPlatform.reserve_thread()`, which
@@ -352,15 +361,66 @@ Keep the code clean. **No backward compatibility is required.** This project has
 
 ## Architecture
 
-- **Session tracking**: SQLite database at `~/.yuki-conductor/workspace/yuki-conductor.db` maps `thread_ts → (session_id, channel_id)` and `channel_id → model`
+- **Session tracking**: SQLite database at `~/.yuki-conductor/workspace/yuki-conductor.db` maps `thread_ts → (session_id, channel_id, harness)` and `channel_id → model`
 - **Web server**: FastAPI on 127.0.0.1:2333 (env: `WEB_HOST`, `WEB_PORT`), serves React frontend and `/api/sessions` + chat endpoints. Starts in a daemon thread alongside any enabled chat-app receivers.
 - **Concurrency**: slack-bolt's default thread pool (10 threads); each handler blocks on `subprocess.run`
-- **Claude invocation**: `claude -p --dangerously-skip-permissions --output-format stream-json --verbose [-r session_id] "prompt"`. stdout is NDJSON; `stream_events.py` normalizes each record into a `StreamEvent` (tool calls, text, thinking, tool results) which `run_claude(on_event=...)` delivers live, and the terminal `result` record becomes the returned `ClaudeResult`.
+- **Agent invocation**: `harness.process.run_agent(harness, prompt, ...)` spawns the harness's CLI and reads its stdout line by line; the harness's parser turns each record into a `StreamEvent` (tool calls, text, thinking, tool results) delivered live via `on_event`, and its final state into the returned `RunResult`. See Harnesses.
 - **Progress surfaces**: platforms opt into live steps by implementing `on_stream_event`. Web buffers steps in `ConnectionManager` (memory only — never persisted) and broadcasts `{"type": "step"}`; `GET /api/chat/steps` replays the buffer so a reconnecting browser resumes mid-run. Slack folds steps into the shimmering assistant status (coalesced to one `setStatus` call per couple of seconds) and posts nothing until the final reply. Platforms without the hook just get the final response.
 - **Environment**: Must unset `CLAUDECODE` env var in subprocess to avoid nested session errors
+
+## Harnesses
+
+A turn runs on one **harness**, an agent CLI. `harness/__init__.py` knows these
+(`KNOWN_HARNESSES`):
+
+| Name | CLI | Notes |
+| --- | --- | --- |
+| `claude-code` | `claude -p --output-format stream-json --verbose …` | Windows shims; skill listing synthesized (see Skill Discovery) |
+| `pi` | `pi --mode json --no-approve --model <provider/id> …` | `PI_BIN`, `PI_DEFAULT_MODEL` (`strata/qwen3.8-flash-next-iq2_xs`); providers live in `~/.pi/agent`, not here |
+
+**Which exist on a machine is the `HARNESSES` setting** in
+`~/.yuki-conductor/.env`, e.g. `HARNESSES=claude-code,pi`. It's a
+comma-separated list in preference order; the first entry is the default for a
+new conversation. It defaults to `claude-code` alone, since pi needs its own
+install and config. Only enabled harnesses are registered (`HARNESSES` in
+`harness/__init__.py`), so a disabled one is never offered, scheduled or run:
+
+- the web picker lists only enabled harnesses whose CLI is on PATH;
+- a cron task naming a disabled harness is recorded as an error run and not run,
+  like a missing `chat_app`;
+- an existing conversation bound to a disabled harness gets a "not enabled on
+  this machine" reply rather than switching harness, since another harness
+  couldn't resume its session anyway;
+- a *new* conversation asking for a disabled harness falls back to the default.
+
+- **A conversation keeps its harness for life**, since a session id only works
+  with the harness that made it. Web stores it on the conversation row when the
+  conversation is created; Slack stores it on the `sessions` row at the first
+  write (`SessionStore.set` never changes it); cron's `harness:` key is recorded
+  on the reserved thread up front.
+- **How a turn's harness is chosen:** `conversation.resolve_harness` takes the
+  platform's record first, then `IncomingMessage.harness`, then
+  `default_harness()`.
+- **How a new one is chosen:**
+  - web: the toggle in the new-chat picker (`GET /api/harnesses`);
+  - cron: a task's `harness:`;
+  - otherwise the default (first in `HARNESSES`).
+- **Slack's `/yuki-<skill>` catch-all** forwards Claude's `/<skill>` syntax, so it
+  always runs on Claude Code.
+- **pi exits 0 even when the model call failed.** `PiStreamParser` reads the
+  outcome from the last assistant message's `stopReason`.
+- **pi and the GPU:** pi usually runs on Strata, which shares the GPU with
+  ComfyUI. That sharing is handled entirely outside this repo, by
+  `gpu-workload` in wandering-vibe. yuki-conductor never checks or switches the
+  GPU; when Strata refuses with its "before_load command failed" 503, the parser
+  just turns that into a readable "GPU busy" reply.
+- Adding a harness means a module in `harness/` with a `launch()` and a
+  stateful parser, plus fixtures recorded from real runs. See
+  `docs/plans/2026-10-12-multi-harness.md`.
 
 ## Testing
 
 - `test_store.py` — unit tests for SQLite store (roundtrip, concurrent access, separate tables)
-- `test_claude_runner.py` — mocked subprocess tests (flag construction, errors, timeouts)
+- `test_harness_claude_code.py` — Claude Code through `run_agent` with a mocked subprocess (flag construction, errors, timeouts, cancel)
+- `test_harness_pi.py` — pi command line, plus its parser against real recorded runs in `tests/fixtures/harness/pi/` (system prompt scrubbed)
 - `test_cli_simulate.py` — integration tests via simulate commands

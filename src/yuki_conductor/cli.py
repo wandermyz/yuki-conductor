@@ -104,12 +104,13 @@ def main(argv: list[str] | None = None) -> None:
         if args.sim_command is None:
             sim_parser.print_help()
             sys.exit(1)
-        from yuki_conductor.claude_runner import run_claude
+        from yuki_conductor.harness import get_harness
+        from yuki_conductor.harness.process import run_agent
         from yuki_conductor.store import SessionStore
 
         store = SessionStore()
         if args.sim_command == "message":
-            result = run_claude(args.text)
+            result = run_agent(get_harness("claude-code"), args.text)
             fake_ts = f"sim_{id(result)}"
             if result.session_id:
                 store.set(fake_ts, result.session_id)
@@ -121,7 +122,7 @@ def main(argv: list[str] | None = None) -> None:
             if session_id is None:
                 print(f"No session found for thread_ts={args.thread_ts}", file=sys.stderr)
                 sys.exit(1)
-            result = run_claude(args.text, session_id=session_id)
+            result = run_agent(get_harness("claude-code"), args.text, session_id=session_id)
             if result.session_id:
                 store.set(args.thread_ts, result.session_id)
             print(f"session_id: {result.session_id}")

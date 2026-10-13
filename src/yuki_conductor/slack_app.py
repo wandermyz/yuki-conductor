@@ -14,7 +14,6 @@ import time
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
-from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import (
     CLAUDE_BIN,
     CLAUDE_DEFAULT_MODEL,
@@ -23,6 +22,8 @@ from yuki_conductor.config import (
     slack_bot_token,
 )
 from yuki_conductor.formatting import markdown_to_mrkdwn
+from yuki_conductor.harness import get_harness
+from yuki_conductor.harness.process import run_agent
 from yuki_conductor.messaging import IncomingMessage, handle_incoming_message
 from yuki_conductor.messaging.slack_platform import (
     SESSION_TYPE,
@@ -121,7 +122,8 @@ def create_app() -> App:
         model = model_store.get(channel)
 
         respond(f"Running `/{skill_name}`...")
-        result = run_claude(prompt, model=model)
+        # Forwards Claude's `/<skill>` slash syntax, so it stays on Claude Code.
+        result = run_agent(get_harness("claude-code"), prompt, model=model)
         if result.text:
             respond(markdown_to_mrkdwn(result.text))
 

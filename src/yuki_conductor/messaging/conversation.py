@@ -1,10 +1,11 @@
-"""Platform-agnostic core: turn an IncomingMessage into a Claude run + reply."""
+"""Platform-agnostic core: turn an IncomingMessage into an agent run + reply."""
 
 import logging
 import re
 
-from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import ATTACHMENTS_DIR
+from yuki_conductor.harness import HARNESSES, default_harness, get_harness
+from yuki_conductor.harness.process import run_agent
 from yuki_conductor.messaging.platform import (
     Attachment,
     IncomingMessage,
@@ -54,7 +55,7 @@ def split_response(text: str) -> tuple[str, list[Attachment]]:
 
 
 def _event_sink(platform: MessagingPlatform, conversation_key: str):
-    """Adapt a platform's optional `on_stream_event` into a run_claude callback.
+    """Adapt a platform's optional `on_stream_event` into a run_agent callback.
 
     Platforms predating streaming (and test stubs) may not implement the hook;
     those runs simply produce no intermediate updates.
@@ -72,14 +73,46 @@ def _event_sink(platform: MessagingPlatform, conversation_key: str):
     return sink
 
 
+class HarnessUnavailable(Exception):
+    """The conversation is bound to a harness this machine doesn't enable."""
+
+
+def resolve_harness(platform: MessagingPlatform, msg: IncomingMessage) -> str:
+    """Pick the harness for this turn.
+
+    Whatever the platform already recorded for the conversation wins, even on
+    its first message: a web conversation is created with its harness before
+    anything is sent, and session ids only work with the harness that created
+    them. If that harness isn't enabled here, the turn fails rather than
+    quietly switching harness. With no record (a brand-new Slack thread), the
+    message's choice applies if enabled, else the default harness.
+    """
+    bound = platform.get_harness(msg.conversation_key)
+    if bound:
+        if bound not in HARNESSES:
+            raise HarnessUnavailable(
+                f"This conversation runs on {bound}, which isn't enabled on this "
+                "machine (see the HARNESSES setting). Start a new conversation instead."
+            )
+        return bound
+    name = msg.harness or default_harness()
+    if name not in HARNESSES:
+        logger.warning(
+            "Harness %r for %s isn't enabled; using %s",
+            name, msg.conversation_key, default_harness(),
+        )
+        name = default_harness()
+    return name
+
+
 def handle_incoming_message(
     platform: MessagingPlatform,
     msg: IncomingMessage,
 ) -> None:
-    """Run Claude for an incoming message and send the reply through the platform.
+    """Run the conversation's agent for an incoming message and send the reply.
 
     This is the only place that knows about session resolution, attachment
-    plumbing, and the run_claude contract. Platforms own their own session-id
+    plumbing, and the run_agent contract. Platforms own their own session-id
     persistence (Slack via SessionStore, web via ConversationStore).
     """
     platform.set_processing(msg.conversation_key, msg.message_id, on=True)
@@ -88,13 +121,20 @@ def handle_incoming_message(
             None if msg.is_thread_start else platform.get_session_id(msg.conversation_key)
         )
 
+        try:
+            harness = resolve_harness(platform, msg)
+        except HarnessUnavailable as exc:
+            logger.warning("%s: %s", msg.conversation_key, exc)
+            platform.send(msg.conversation_key, OutgoingMessage(text=str(exc)))
+            return
         prompt = _build_prompt(msg.text, msg.attachments)
         logger.info(
-            "Running Claude for %s (session=%s, model=%s)",
-            msg.conversation_key, session_id, msg.model,
+            "Running %s for %s (session=%s, model=%s)",
+            harness, msg.conversation_key, session_id, msg.model,
         )
         try:
-            result = run_claude(
+            result = run_agent(
+                get_harness(harness),
                 prompt,
                 session_id=session_id,
                 model=msg.model,
@@ -108,12 +148,12 @@ def handle_incoming_message(
             )
         except Exception:
             logger.error(
-                "Claude invocation failed for %s", msg.conversation_key, exc_info=True,
+                "%s invocation failed for %s", harness, msg.conversation_key, exc_info=True,
             )
             raise
         logger.info(
-            "Claude finished for %s (tokens: %s in / %s out, cost: $%s)",
-            msg.conversation_key,
+            "%s finished for %s (tokens: %s in / %s out, cost: $%s)",
+            harness, msg.conversation_key,
             result.input_tokens, result.output_tokens, result.cost_usd,
         )
 
@@ -122,6 +162,7 @@ def handle_incoming_message(
                 msg.conversation_key,
                 result.session_id,
                 title_hint=msg.title_hint if msg.is_thread_start else None,
+                harness=harness,
             )
 
         reply_text, reply_attachments = split_response(result.text)

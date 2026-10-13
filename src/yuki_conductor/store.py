@@ -118,6 +118,11 @@ class SessionStore:
                     con.execute(
                         "ALTER TABLE sessions ADD COLUMN project TEXT"
                     )
+                if "harness" not in cols:
+                    con.execute(
+                        "ALTER TABLE sessions ADD COLUMN harness TEXT NOT NULL "
+                        "DEFAULT 'claude-code'"
+                    )
                 con.commit()
             finally:
                 con.close()
@@ -146,6 +151,18 @@ class SessionStore:
             finally:
                 con.close()
 
+    def get_harness(self, key: str) -> str | None:
+        """Return the harness a session was created with, or None if unknown."""
+        with self._lock:
+            con = self._connect()
+            try:
+                row = con.execute(
+                    "SELECT harness FROM sessions WHERE key = ?", (key,)
+                ).fetchone()
+                return row[0] if row and row[0] else None
+            finally:
+                con.close()
+
     def get_session_type(self, key: str) -> str | None:
         """Return the session_type stored for a key, or None if unknown."""
         with self._lock:
@@ -162,19 +179,23 @@ class SessionStore:
 
     def set(self, key: str, value: str, channel_id: str | None = None,
             title: str | None = _SENTINEL, session_type: str = "slack",
-            project: str | None = _SENTINEL) -> None:
+            project: str | None = _SENTINEL, harness: str = "claude-code") -> None:
         """Store session_id (and optionally channel_id/title) for a thread_ts.
 
         When updating an existing row, title and project are preserved if not
-        explicitly passed (avoids wiping them on thread-reply updates).
+        explicitly passed (avoids wiping them on thread-reply updates). The
+        harness of an existing row is never changed: a session id only works
+        with the harness that created it.
         """
         with self._lock:
             con = self._connect()
             try:
                 existing = con.execute(
-                    "SELECT title, session_type, project FROM sessions WHERE key = ?",
+                    "SELECT title, session_type, project, harness FROM sessions WHERE key = ?",
                     (key,),
                 ).fetchone()
+                if existing:
+                    harness = existing[3]
                 if title is self._SENTINEL:
                     title = existing[0] if existing else None
                 if title and len(title) > self.MAX_TITLE_LEN:
@@ -183,9 +204,9 @@ class SessionStore:
                     project = existing[2] if existing else None
                 con.execute(
                     "INSERT OR REPLACE INTO sessions "
-                    "(key, value, channel_id, title, session_type, project) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (key, value, channel_id, title, session_type, project),
+                    "(key, value, channel_id, title, session_type, project, harness) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (key, value, channel_id, title, session_type, project, harness),
                 )
                 con.commit()
             finally:
@@ -579,7 +600,7 @@ MODEL_ALIASES = {
     "opus1m": "opus[1m]",
 }
 
-# Clearing a channel's pin doesn't mean "no --model flag" — run_claude always
+# Clearing a channel's pin doesn't mean "no --model flag" — run_agent always
 # passes one, falling back to CLAUDE_DEFAULT_MODEL (opus[1m]). The flag can't be
 # omitted, because a `-r` resume would then rehydrate the canonical model id and
 # silently drop the 1M context window. The bare aliases above resolve to the

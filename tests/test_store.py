@@ -110,7 +110,7 @@ def test_default_is_not_a_pinnable_model():
 
 
 def test_model_clear_restores_default(tmp_path: Path):
-    """An unset channel returns None, which run_claude turns into CLAUDE_DEFAULT_MODEL."""
+    """An unset channel returns None, which the Claude Code harness turns into CLAUDE_DEFAULT_MODEL."""
     models = ModelStore(db_path=tmp_path / "test.db")
     assert models.get("C123") is None
 
@@ -150,3 +150,15 @@ def test_model_clear_does_not_touch_sessions(tmp_path: Path):
 
     assert models.get("C1") is None
     assert sessions.get("C1") == "session_val"
+
+
+def test_session_harness_is_fixed_by_the_first_write(tmp_path: Path):
+    """A later write can't move a session to another harness."""
+    store = SessionStore(db_path=tmp_path / "test.db")
+    assert store.get_harness("ts1") is None
+    store.set("ts1", "sess-a", harness="pi")
+    store.set("ts1", "sess-b", harness="claude-code")
+    assert store.get("ts1") == "sess-b"
+    assert store.get_harness("ts1") == "pi"
+    store.set("ts2", "sess-c")
+    assert store.get_harness("ts2") == "claude-code"

@@ -233,8 +233,17 @@ class SlackPlatform:
         value = SessionStore().get(conversation_key)
         return value or None
 
+    def get_harness(self, conversation_key: str) -> str | None:
+        from yuki_conductor.store import SessionStore
+
+        return SessionStore().get_harness(conversation_key)
+
     def set_session_id(
-        self, conversation_key: str, session_id: str, title_hint: str | None = None
+        self,
+        conversation_key: str,
+        session_id: str,
+        title_hint: str | None = None,
+        harness: str = "claude-code",
     ) -> None:
         from yuki_conductor.store import SessionStore
 
@@ -242,6 +251,7 @@ class SlackPlatform:
         kwargs = {
             "channel_id": self._lookup_channel(conversation_key),
             "session_type": "slack",
+            "harness": harness,
         }
         if title_hint is not None:
             kwargs["title"] = title_hint

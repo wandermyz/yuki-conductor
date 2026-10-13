@@ -16,6 +16,7 @@ class EchoPlatform:
     def __init__(self, session_store=None, model_store=None):
         self._session_store = session_store
         self._sessions: dict[str, str] = {}
+        self._harnesses: dict[str, str] = {}
 
     def send(self, conversation_key, msg):
         logger.info("[echo] %s: %s", conversation_key, msg.text)
@@ -29,8 +30,13 @@ class EchoPlatform:
     def get_session_id(self, conversation_key):
         return self._sessions.get(conversation_key)
 
-    def set_session_id(self, conversation_key, session_id, title_hint=None):
+    def get_harness(self, conversation_key):
+        return self._harnesses.get(conversation_key)
+
+    def set_session_id(self, conversation_key, session_id, title_hint=None, harness="claude-code"):
         self._sessions[conversation_key] = session_id
+        # A conversation keeps the harness it started with.
+        self._harnesses.setdefault(conversation_key, harness)
 
     def send_notification(self, text):
         logger.info("[echo] notification: %s", text)
