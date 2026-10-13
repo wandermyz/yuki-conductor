@@ -184,6 +184,18 @@ def test_new_conversation_without_a_choice_uses_the_default(monkeypatch):
     assert platform.harnesses["conv-h"] == "other"
 
 
+def test_first_message_uses_the_harness_the_conversation_was_created_with(monkeypatch):
+    """Web creates the conversation, with its harness, before the first message.
+
+    Regression: the first message is a thread start, and once ignored the stored
+    harness, so a conversation created as pi ran its first turn on the default.
+    """
+    platform = StubPlatform()
+    platform.harnesses["conv-h"] = "other"
+    harness, _ = _run_and_capture_harness(platform, _start(), monkeypatch)
+    assert harness.name == "other"
+
+
 def test_existing_conversation_keeps_its_harness(monkeypatch):
     """A session id only works with the harness that created it."""
     platform = StubPlatform()

@@ -76,13 +76,14 @@ def _event_sink(platform: MessagingPlatform, conversation_key: str):
 def resolve_harness(platform: MessagingPlatform, msg: IncomingMessage) -> str:
     """Pick the harness for this turn.
 
-    A conversation that already has one keeps it: session ids only work with
-    the harness that created them. A new one takes the message's choice, else
-    DEFAULT_HARNESS. An unknown name falls back to the default rather than
-    failing the turn.
+    Whatever the platform already recorded for the conversation wins, even on
+    its first message: a web conversation is created with its harness before
+    anything is sent, and session ids only work with the harness that created
+    them. With no record (a brand-new Slack thread), the message's choice
+    applies, else DEFAULT_HARNESS. An unknown name falls back to the default
+    rather than failing the turn.
     """
-    name = None if msg.is_thread_start else platform.get_harness(msg.conversation_key)
-    name = name or msg.harness or DEFAULT_HARNESS
+    name = platform.get_harness(msg.conversation_key) or msg.harness or DEFAULT_HARNESS
     if name not in HARNESSES:
         logger.warning("Unknown harness %r for %s; using %s", name, msg.conversation_key, DEFAULT_HARNESS)
         name = DEFAULT_HARNESS
