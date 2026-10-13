@@ -6,9 +6,10 @@ from datetime import datetime
 
 from croniter import croniter
 
-from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import WORKSPACE_DIR, channels
 from yuki_conductor.cron_config import CronTask, load_tasks
+from yuki_conductor.harness import get_harness
+from yuki_conductor.harness.process import run_agent
 from yuki_conductor.messaging import MessagingPlatform, OutgoingMessage, split_response
 from yuki_conductor.store import CronRunStore
 
@@ -124,7 +125,9 @@ def _execute(
             )
 
     prefixed_prompt = _CRON_PROMPT_PREFIX + task.prompt
-    result = run_claude(prefixed_prompt, push_conversation_id=reserved)
+    result = run_agent(
+        get_harness("claude-code"), prefixed_prompt, push_conversation_id=reserved
+    )
 
     response_text = result.text or ""
     should_notify = "<notify>" in response_text

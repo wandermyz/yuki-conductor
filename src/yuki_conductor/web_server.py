@@ -23,9 +23,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from yuki_conductor import zellij_manager
-from yuki_conductor.claude_runner import cancel_process
 from yuki_conductor.config import WEB_UPLOADS_DIR
 from yuki_conductor.conversation_store import ConversationStore
+from yuki_conductor.harness.process import cancel_process
 from yuki_conductor.messaging import (
     Attachment,
     IncomingMessage,

@@ -110,7 +110,7 @@ def test_default_is_not_a_pinnable_model():
 
 
 def test_model_clear_restores_default(tmp_path: Path):
-    """An unset channel returns None, which run_claude turns into CLAUDE_DEFAULT_MODEL."""
+    """An unset channel returns None, which the Claude Code harness turns into CLAUDE_DEFAULT_MODEL."""
     models = ModelStore(db_path=tmp_path / "test.db")
     assert models.get("C123") is None
 

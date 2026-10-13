@@ -43,11 +43,11 @@ def test_create_and_list_conversation(client):
 
 
 def test_post_message_invokes_claude_and_persists_reply(client, monkeypatch):
-    from yuki_conductor.claude_runner import ClaudeResult
+    from yuki_conductor.harness.base import RunResult
 
-    fake = ClaudeResult(text="hello from claude", session_id="claude-1")
+    fake = RunResult(text="hello from claude", session_id="claude-1")
     monkeypatch.setattr(
-        "yuki_conductor.messaging.conversation.run_claude", lambda *a, **k: fake
+        "yuki_conductor.messaging.conversation.run_agent", lambda *a, **k: fake
     )
 
     conv = client.post("/api/conversations", json={"title": None}).json()

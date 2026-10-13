@@ -33,7 +33,7 @@ tiers, and a skill declares its tier by *where it lives*:
     Everything else in ``~/.claude/skills`` — listed so the session knows the
     same skills an interactive one would, without special emphasis.
 
-The last three tiers are only reachable because ``run_claude`` passes
+The last three tiers are only reachable because ``ClaudeCodeHarness`` passes
 ``--setting-sources user,project,local``; a headless run loads no settings, and
 therefore no skills, by default.
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from yuki_conductor.stream_events import StreamEvent
+from yuki_conductor.harness.base import StreamEvent
 
 
 @dataclass

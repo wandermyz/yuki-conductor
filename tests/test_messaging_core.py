@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from yuki_conductor.claude_runner import ClaudeResult
+from yuki_conductor.harness.base import RunResult
 from yuki_conductor.messaging import IncomingMessage, handle_incoming_message
 from yuki_conductor.messaging.platform import OutgoingMessage
 
@@ -44,8 +44,8 @@ def test_thread_start_persists_session_and_sends_reply():
         title_hint="hi claude",
     )
 
-    fake = ClaudeResult(text="hello back", session_id="claude-session-1")
-    with patch("yuki_conductor.messaging.conversation.run_claude", return_value=fake) as mock_run:
+    fake = RunResult(text="hello back", session_id="claude-session-1")
+    with patch("yuki_conductor.messaging.conversation.run_agent", return_value=fake) as mock_run:
         handle_incoming_message(platform, msg)
 
     mock_run.assert_called_once()
@@ -70,8 +70,8 @@ def test_thread_reply_resumes_session():
         is_thread_start=False,
     )
 
-    fake = ClaudeResult(text="continuing", session_id="claude-session-1")
-    with patch("yuki_conductor.messaging.conversation.run_claude", return_value=fake) as mock_run:
+    fake = RunResult(text="continuing", session_id="claude-session-1")
+    with patch("yuki_conductor.messaging.conversation.run_agent", return_value=fake) as mock_run:
         handle_incoming_message(platform, msg)
 
     args, kwargs = mock_run.call_args
@@ -92,7 +92,7 @@ def test_processing_off_called_even_on_exception():
     )
 
     with patch(
-        "yuki_conductor.messaging.conversation.run_claude",
+        "yuki_conductor.messaging.conversation.run_agent",
         side_effect=RuntimeError("boom"),
     ):
         try:
@@ -125,11 +125,11 @@ def test_split_response_resolves_bare_names_under_attachments_dir(tmp_path, monk
 
 def test_push_conversation_id_only_for_pushable_platforms():
     platform = StubPlatform()
-    fake = ClaudeResult(text="ok", session_id="s")
+    fake = RunResult(text="ok", session_id="s")
     for name, expected in [("web", "k"), ("slack", "k"), ("echo", None)]:
         msg = IncomingMessage(
             platform=name, conversation_key="k", message_id="m", text="hi", is_thread_start=True
         )
-        with patch("yuki_conductor.messaging.conversation.run_claude", return_value=fake) as run:
+        with patch("yuki_conductor.messaging.conversation.run_agent", return_value=fake) as run:
             handle_incoming_message(platform, msg)
         assert run.call_args.kwargs["push_conversation_id"] == expected

@@ -5,19 +5,19 @@ from unittest.mock import patch
 from yuki_conductor.cli import main
 
 
-def _mock_claude_run(prompt, session_id=None, timeout=None):
-    from yuki_conductor.claude_runner import ClaudeResult
+def _mock_claude_run(harness, prompt, session_id=None, timeout=None):
+    from yuki_conductor.harness.base import RunResult
 
     if session_id:
-        return ClaudeResult(text=f"Resumed: {prompt}", session_id=session_id)
-    return ClaudeResult(text=f"Response: {prompt}", session_id="sess_test_123")
+        return RunResult(text=f"Resumed: {prompt}", session_id=session_id)
+    return RunResult(text=f"Response: {prompt}", session_id="sess_test_123")
 
 
 def test_simulate_message(tmp_path, capsys):
     db_path = tmp_path / "test.db"
 
     with (
-        patch("yuki_conductor.claude_runner.run_claude", side_effect=_mock_claude_run),
+        patch("yuki_conductor.harness.process.run_agent", side_effect=_mock_claude_run),
         patch("yuki_conductor.store.DB_FILE", db_path),
     ):
         main(["simulate", "message", "What is 2+2?"])
@@ -31,7 +31,7 @@ def test_simulate_message_then_reply(tmp_path, capsys):
     db_path = tmp_path / "test.db"
 
     with (
-        patch("yuki_conductor.claude_runner.run_claude", side_effect=_mock_claude_run),
+        patch("yuki_conductor.harness.process.run_agent", side_effect=_mock_claude_run),
         patch("yuki_conductor.store.DB_FILE", db_path),
     ):
         main(["simulate", "message", "Hello"])
@@ -44,7 +44,7 @@ def test_simulate_message_then_reply(tmp_path, capsys):
             break
 
     with (
-        patch("yuki_conductor.claude_runner.run_claude", side_effect=_mock_claude_run),
+        patch("yuki_conductor.harness.process.run_agent", side_effect=_mock_claude_run),
         patch("yuki_conductor.store.DB_FILE", db_path),
     ):
         main(["simulate", "reply", thread_ts, "Follow up"])

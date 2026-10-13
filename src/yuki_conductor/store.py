@@ -579,7 +579,7 @@ MODEL_ALIASES = {
     "opus1m": "opus[1m]",
 }
 
-# Clearing a channel's pin doesn't mean "no --model flag" — run_claude always
+# Clearing a channel's pin doesn't mean "no --model flag" — run_agent always
 # passes one, falling back to CLAUDE_DEFAULT_MODEL (opus[1m]). The flag can't be
 # omitted, because a `-r` resume would then rehydrate the canonical model id and
 # silently drop the 1M context window. The bare aliases above resolve to the

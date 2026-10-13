@@ -3,8 +3,9 @@
 import logging
 import re
 
-from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import ATTACHMENTS_DIR
+from yuki_conductor.harness import get_harness
+from yuki_conductor.harness.process import run_agent
 from yuki_conductor.messaging.platform import (
     Attachment,
     IncomingMessage,
@@ -54,7 +55,7 @@ def split_response(text: str) -> tuple[str, list[Attachment]]:
 
 
 def _event_sink(platform: MessagingPlatform, conversation_key: str):
-    """Adapt a platform's optional `on_stream_event` into a run_claude callback.
+    """Adapt a platform's optional `on_stream_event` into a run_agent callback.
 
     Platforms predating streaming (and test stubs) may not implement the hook;
     those runs simply produce no intermediate updates.
@@ -79,7 +80,7 @@ def handle_incoming_message(
     """Run Claude for an incoming message and send the reply through the platform.
 
     This is the only place that knows about session resolution, attachment
-    plumbing, and the run_claude contract. Platforms own their own session-id
+    plumbing, and the run_agent contract. Platforms own their own session-id
     persistence (Slack via SessionStore, web via ConversationStore).
     """
     platform.set_processing(msg.conversation_key, msg.message_id, on=True)
@@ -94,7 +95,8 @@ def handle_incoming_message(
             msg.conversation_key, session_id, msg.model,
         )
         try:
-            result = run_claude(
+            result = run_agent(
+                get_harness("claude-code"),
                 prompt,
                 session_id=session_id,
                 model=msg.model,
