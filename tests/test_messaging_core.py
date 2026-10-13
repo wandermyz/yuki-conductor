@@ -1,6 +1,6 @@
 """Tests for the platform-agnostic conversation core."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from yuki_conductor.harness.base import RunResult
 from yuki_conductor.messaging import IncomingMessage, handle_incoming_message
@@ -15,6 +15,7 @@ class StubPlatform:
         self.processing: list[tuple[str, str, bool]] = []
         self.sessions: dict[str, str] = {}
         self.title_hints: dict[str, str | None] = {}
+        self.harnesses: dict[str, str] = {}
 
     def send(self, conversation_key: str, msg: OutgoingMessage) -> None:
         self.sent.append((conversation_key, msg))
@@ -25,11 +26,19 @@ class StubPlatform:
     def get_session_id(self, conversation_key: str) -> str | None:
         return self.sessions.get(conversation_key)
 
+    def get_harness(self, conversation_key: str) -> str | None:
+        return self.harnesses.get(conversation_key)
+
     def set_session_id(
-        self, conversation_key: str, session_id: str, title_hint: str | None = None
+        self,
+        conversation_key: str,
+        session_id: str,
+        title_hint: str | None = None,
+        harness: str = "claude-code",
     ) -> None:
         self.sessions[conversation_key] = session_id
         self.title_hints[conversation_key] = title_hint
+        self.harnesses.setdefault(conversation_key, harness)
 
 
 def test_thread_start_persists_session_and_sends_reply():
@@ -133,3 +142,62 @@ def test_push_conversation_id_only_for_pushable_platforms():
         with patch("yuki_conductor.messaging.conversation.run_agent", return_value=fake) as run:
             handle_incoming_message(platform, msg)
         assert run.call_args.kwargs["push_conversation_id"] == expected
+
+
+# --------------------------------------------------------------------------
+# Harness selection
+# --------------------------------------------------------------------------
+
+
+def _run_and_capture_harness(platform, msg, monkeypatch, default="claude-code"):
+    from yuki_conductor.harness import HARNESSES
+    from yuki_conductor.messaging import conversation
+
+    other = MagicMock(name="other-harness")
+    other.name = "other"
+    monkeypatch.setitem(HARNESSES, "other", other)
+    monkeypatch.setattr(conversation, "DEFAULT_HARNESS", default)
+    fake = RunResult(text="ok", session_id="s-new")
+    with patch("yuki_conductor.messaging.conversation.run_agent", return_value=fake) as run:
+        handle_incoming_message(platform, msg)
+    return run.call_args.args[0], platform
+
+
+def _start(key="conv-h", harness=None):
+    return IncomingMessage(
+        platform="web", conversation_key=key, message_id="m", text="hi",
+        is_thread_start=True, harness=harness,
+    )
+
+
+def test_new_conversation_uses_the_requested_harness(monkeypatch):
+    harness, platform = _run_and_capture_harness(StubPlatform(), _start(harness="other"), monkeypatch)
+    assert harness.name == "other"
+    assert platform.harnesses["conv-h"] == "other"
+
+
+def test_new_conversation_without_a_choice_uses_the_default(monkeypatch):
+    harness, platform = _run_and_capture_harness(
+        StubPlatform(), _start(), monkeypatch, default="other"
+    )
+    assert harness.name == "other"
+    assert platform.harnesses["conv-h"] == "other"
+
+
+def test_existing_conversation_keeps_its_harness(monkeypatch):
+    """A session id only works with the harness that created it."""
+    platform = StubPlatform()
+    platform.sessions["conv-h"] = "s-old"
+    platform.harnesses["conv-h"] = "other"
+    reply = IncomingMessage(
+        platform="web", conversation_key="conv-h", message_id="m2", text="more",
+        harness="claude-code",
+    )
+    harness, _ = _run_and_capture_harness(platform, reply, monkeypatch)
+    assert harness.name == "other"
+    assert platform.harnesses["conv-h"] == "other"
+
+
+def test_unknown_harness_falls_back_to_the_default(monkeypatch):
+    harness, _ = _run_and_capture_harness(StubPlatform(), _start(harness="nope"), monkeypatch)
+    assert harness.name == "claude-code"

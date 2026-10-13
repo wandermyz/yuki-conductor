@@ -29,6 +29,8 @@ class IncomingMessage:
     title_hint: str | None = None
     model: str | None = None
     cwd: str | None = None
+    # Harness for a *new* conversation; an existing one keeps its own.
+    harness: str | None = None
 
 
 @dataclass
@@ -63,13 +65,26 @@ class MessagingPlatform(Protocol):
         ...
 
     def get_session_id(self, conversation_key: str) -> str | None:
-        """Return the Claude session id to resume, or None to start fresh."""
+        """Return the harness session id to resume, or None to start fresh."""
+        ...
+
+    def get_harness(self, conversation_key: str) -> str | None:
+        """Return the harness a conversation is bound to, or None if it has none yet."""
         ...
 
     def set_session_id(
-        self, conversation_key: str, session_id: str, title_hint: str | None = None
+        self,
+        conversation_key: str,
+        session_id: str,
+        title_hint: str | None = None,
+        harness: str = "claude-code",
     ) -> None:
-        """Persist the Claude session id (and optional initial title) for resume."""
+        """Persist the session id (and optional initial title) for resume.
+
+        `harness` is recorded the first time only; a conversation never
+        changes harness, since session ids only work with the harness that
+        created them.
+        """
         ...
 
     def send_notification(self, text: str) -> None:

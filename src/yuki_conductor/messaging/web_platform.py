@@ -211,12 +211,21 @@ class WebPlatform:
         conv = self._store.get_conversation(conversation_key)
         return conv.claude_session_id if conv else None
 
+    def get_harness(self, conversation_key: str) -> str | None:
+        conv = self._store.get_conversation(conversation_key)
+        return conv.harness if conv else None
+
     def set_session_id(
-        self, conversation_key: str, session_id: str, title_hint: str | None = None
+        self,
+        conversation_key: str,
+        session_id: str,
+        title_hint: str | None = None,
+        harness: str = "claude-code",
     ) -> None:
         # title_hint is unused: the web flow titles the conversation directly
-        # from the first message in web_server.py.
-        del title_hint
+        # from the first message in web_server.py. harness is unused too: a web
+        # conversation's harness is fixed when the conversation is created.
+        del title_hint, harness
         self._store.update_conversation(
             conversation_key, claude_session_id=session_id
         )
@@ -238,15 +247,16 @@ class WebPlatform:
         )
         return conv.id
 
-    def reserve_thread(self, title: str | None = None) -> str:
+    def reserve_thread(self, title: str | None = None, harness: str = "claude-code") -> str:
         """Create an empty conversation and return its id.
 
         Lets a producer (the cron scheduler) know the conversation id *before*
         running Claude, so the run can be told where to push interim messages
         via `yuki-conductor send`. Pair with `discard_thread` to clean up if
-        the run turns out to have nothing to say.
+        the run turns out to have nothing to say. The harness is recorded now,
+        so replies in the thread resume with the harness that ran the task.
         """
-        conv = self._store.create_conversation(platform="web", title=title)
+        conv = self._store.create_conversation(platform="web", title=title, harness=harness)
         return conv.id
 
     def discard_thread(self, conversation_key: str) -> bool:

@@ -87,6 +87,10 @@ CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 # 1M window.
 CLAUDE_DEFAULT_MODEL = os.environ.get("CLAUDE_DEFAULT_MODEL", "opus[1m]")
 
+# Harness for a new conversation that names none (web picker, cron `harness:`).
+# A conversation keeps the harness it started with.
+DEFAULT_HARNESS = os.environ.get("DEFAULT_HARNESS", "claude-code")
+
 def channels_override() -> list[str] | None:
     """Return the `CHANNELS` env override, or None when it isn't set.
 

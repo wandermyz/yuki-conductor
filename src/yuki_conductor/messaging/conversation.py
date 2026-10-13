@@ -1,10 +1,10 @@
-"""Platform-agnostic core: turn an IncomingMessage into a Claude run + reply."""
+"""Platform-agnostic core: turn an IncomingMessage into an agent run + reply."""
 
 import logging
 import re
 
-from yuki_conductor.config import ATTACHMENTS_DIR
-from yuki_conductor.harness import get_harness
+from yuki_conductor.config import ATTACHMENTS_DIR, DEFAULT_HARNESS
+from yuki_conductor.harness import HARNESSES, get_harness
 from yuki_conductor.harness.process import run_agent
 from yuki_conductor.messaging.platform import (
     Attachment,
@@ -73,11 +73,27 @@ def _event_sink(platform: MessagingPlatform, conversation_key: str):
     return sink
 
 
+def resolve_harness(platform: MessagingPlatform, msg: IncomingMessage) -> str:
+    """Pick the harness for this turn.
+
+    A conversation that already has one keeps it: session ids only work with
+    the harness that created them. A new one takes the message's choice, else
+    DEFAULT_HARNESS. An unknown name falls back to the default rather than
+    failing the turn.
+    """
+    name = None if msg.is_thread_start else platform.get_harness(msg.conversation_key)
+    name = name or msg.harness or DEFAULT_HARNESS
+    if name not in HARNESSES:
+        logger.warning("Unknown harness %r for %s; using %s", name, msg.conversation_key, DEFAULT_HARNESS)
+        name = DEFAULT_HARNESS
+    return name
+
+
 def handle_incoming_message(
     platform: MessagingPlatform,
     msg: IncomingMessage,
 ) -> None:
-    """Run Claude for an incoming message and send the reply through the platform.
+    """Run the conversation's agent for an incoming message and send the reply.
 
     This is the only place that knows about session resolution, attachment
     plumbing, and the run_agent contract. Platforms own their own session-id
@@ -89,14 +105,15 @@ def handle_incoming_message(
             None if msg.is_thread_start else platform.get_session_id(msg.conversation_key)
         )
 
+        harness = resolve_harness(platform, msg)
         prompt = _build_prompt(msg.text, msg.attachments)
         logger.info(
-            "Running Claude for %s (session=%s, model=%s)",
-            msg.conversation_key, session_id, msg.model,
+            "Running %s for %s (session=%s, model=%s)",
+            harness, msg.conversation_key, session_id, msg.model,
         )
         try:
             result = run_agent(
-                get_harness("claude-code"),
+                get_harness(harness),
                 prompt,
                 session_id=session_id,
                 model=msg.model,
@@ -110,12 +127,12 @@ def handle_incoming_message(
             )
         except Exception:
             logger.error(
-                "Claude invocation failed for %s", msg.conversation_key, exc_info=True,
+                "%s invocation failed for %s", harness, msg.conversation_key, exc_info=True,
             )
             raise
         logger.info(
-            "Claude finished for %s (tokens: %s in / %s out, cost: $%s)",
-            msg.conversation_key,
+            "%s finished for %s (tokens: %s in / %s out, cost: $%s)",
+            harness, msg.conversation_key,
             result.input_tokens, result.output_tokens, result.cost_usd,
         )
 
@@ -124,6 +141,7 @@ def handle_incoming_message(
                 msg.conversation_key,
                 result.session_id,
                 title_hint=msg.title_hint if msg.is_thread_start else None,
+                harness=harness,
             )
 
         reply_text, reply_attachments = split_response(result.text)

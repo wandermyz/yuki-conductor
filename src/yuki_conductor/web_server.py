@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import shutil
 import sys
 import threading
 import time
@@ -23,8 +24,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from yuki_conductor import zellij_manager
-from yuki_conductor.config import WEB_UPLOADS_DIR
+from yuki_conductor.config import DEFAULT_HARNESS, WEB_UPLOADS_DIR
 from yuki_conductor.conversation_store import ConversationStore
+from yuki_conductor.harness import HARNESSES
 from yuki_conductor.harness.process import cancel_process
 from yuki_conductor.messaging import (
     Attachment,
@@ -293,6 +295,7 @@ def create_api() -> FastAPI:
     class ConversationCreate(BaseModel):
         title: str | None = None
         project: str | None = None
+        harness: str | None = None  # None: DEFAULT_HARNESS; fixed for the conversation's life
 
     class ConversationUpdate(BaseModel):
         title: str | None = None
@@ -310,6 +313,7 @@ def create_api() -> FastAPI:
             "title": c.title,
             "project": c.project,
             "claude_session_id": c.claude_session_id,
+            "harness": c.harness,
             "created_at": c.created_at,
             "updated_at": c.updated_at,
         }
@@ -318,10 +322,24 @@ def create_api() -> FastAPI:
     def list_conversations(platform: str | None = Query(default="web")):
         return [_conv_to_dict(c) for c in conv_store.list_conversations(platform=platform)]
 
+    @api.get("/api/harnesses")
+    def list_harnesses():
+        """Harnesses a new conversation can use; `default` is preselected."""
+        return {
+            "default": DEFAULT_HARNESS,
+            "harnesses": [
+                {"name": h.name, "label": h.label, "available": shutil.which(h.bin) is not None}
+                for h in HARNESSES.values()
+            ],
+        }
+
     @api.post("/api/conversations")
     def create_conversation(body: ConversationCreate):
+        harness = body.harness or DEFAULT_HARNESS
+        if harness not in HARNESSES:
+            raise HTTPException(status_code=400, detail=f"Unknown harness {harness!r}")
         conv = conv_store.create_conversation(
-            platform="web", title=body.title, project=body.project
+            platform="web", title=body.title, project=body.project, harness=harness
         )
         return _conv_to_dict(conv)
 

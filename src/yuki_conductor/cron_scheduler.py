@@ -6,9 +6,9 @@ from datetime import datetime
 
 from croniter import croniter
 
-from yuki_conductor.config import WORKSPACE_DIR, channels
+from yuki_conductor.config import DEFAULT_HARNESS, WORKSPACE_DIR, channels
 from yuki_conductor.cron_config import CronTask, load_tasks
-from yuki_conductor.harness import get_harness
+from yuki_conductor.harness import HARNESSES, get_harness
 from yuki_conductor.harness.process import run_agent
 from yuki_conductor.messaging import MessagingPlatform, OutgoingMessage, split_response
 from yuki_conductor.store import CronRunStore
@@ -110,6 +110,10 @@ def _execute(
 ) -> None:
     title = task.label
     platform = _pick_platform(task, platforms_by_name) if platforms_by_name else None
+    harness = task.harness or DEFAULT_HARNESS
+    if harness not in HARNESSES:
+        logger.warning(f"Cron task={task.name} names unknown harness {harness!r}; using {DEFAULT_HARNESS}")
+        harness = DEFAULT_HARNESS
 
     # Reserve the destination conversation up front where the platform supports
     # it, so the run itself can push interim messages into the same thread via
@@ -117,7 +121,7 @@ def _execute(
     reserved: str | None = None
     if platform is not None and hasattr(platform, "reserve_thread"):
         try:
-            reserved = platform.reserve_thread(title=title)
+            reserved = platform.reserve_thread(title=title, harness=harness)
         except Exception:
             logger.error(
                 f"Failed to reserve thread on platform={platform.name} for task={task.name}",
@@ -126,7 +130,7 @@ def _execute(
 
     prefixed_prompt = _CRON_PROMPT_PREFIX + task.prompt
     result = run_agent(
-        get_harness("claude-code"), prefixed_prompt, push_conversation_id=reserved
+        get_harness(harness), prefixed_prompt, push_conversation_id=reserved
     )
 
     response_text = result.text or ""
@@ -137,7 +141,7 @@ def _execute(
         run_store.finish_run(
             run_id,
             status="error",
-            error=display_text or "Claude run failed with no output",
+            error=display_text or f"{get_harness(harness).label} run failed with no output",
             session_id=result.session_id,
             conversation_id=reserved,
         )
@@ -184,7 +188,9 @@ def _execute(
         return
 
     if result.session_id:
-        platform.set_session_id(conversation_key, result.session_id, title_hint=title)
+        platform.set_session_id(
+            conversation_key, result.session_id, title_hint=title, harness=harness
+        )
 
 
 def _build_task_state(tasks: list[CronTask]) -> tuple[list[tuple[CronTask, croniter]], dict[str, datetime]]:
@@ -204,7 +210,7 @@ def _build_task_state(tasks: list[CronTask]) -> tuple[list[tuple[CronTask, croni
 def _tasks_changed(old: list[CronTask], new: list[CronTask]) -> bool:
     """Check if the task list has changed (by comparing as tuples)."""
     def to_tuple(t: CronTask) -> tuple:
-        return (t.name, t.schedule, t.description, t.prompt, t.chat_app, t.paused)
+        return (t.name, t.schedule, t.description, t.prompt, t.chat_app, t.paused, t.harness)
     return [to_tuple(t) for t in old] != [to_tuple(t) for t in new]
 
 

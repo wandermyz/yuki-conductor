@@ -1,7 +1,7 @@
 """Tests for cron task → MessagingPlatform routing."""
 
 import threading
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from yuki_conductor.cron_config import CronTask
 from yuki_conductor.cron_scheduler import (
@@ -30,7 +30,10 @@ class FakePlatform:
     def get_session_id(self, conversation_key):
         return None
 
-    def set_session_id(self, conversation_key, session_id, title_hint=None):
+    def get_harness(self, conversation_key):
+        return None
+
+    def set_session_id(self, conversation_key, session_id, title_hint=None, harness="claude-code"):
         self.session_writes.append((conversation_key, session_id, title_hint))
 
     def start_thread(self, text, title=None):
@@ -149,7 +152,7 @@ class ReservingPlatform(FakePlatform):
         self.reserved: list[str] = []
         self.discarded: list[str] = []
 
-    def reserve_thread(self, title=None):
+    def reserve_thread(self, title=None, harness="claude-code"):
         key = f"{self.name}-reserved-{len(self.reserved)}"
         self.reserved.append(key)
         return key
@@ -360,3 +363,40 @@ def test_cron_attachments_follow_a_new_thread(tmp_path):
     [(key, msg)] = platform.sent
     assert key == "slack-thread-0"
     assert [a.local_path for a in msg.attachments] == [report]
+
+
+def test_cron_task_harness_reaches_the_run_and_the_thread(monkeypatch):
+    from yuki_conductor.harness import HARNESSES
+
+    other = MagicMock(name="other-harness")
+    other.name, other.label = "other", "Other"
+    monkeypatch.setitem(HARNESSES, "other", other)
+
+    class Recording(ReservingPlatform):
+        def reserve_thread(self, title=None, harness="claude-code"):
+            self.reserved_harness = harness
+            return super().reserve_thread(title=title, harness=harness)
+
+    platform = Recording()
+    task = _task()
+    task.harness = "other"
+    result = RunResult(text="done <notify>", session_id="sess-1")
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=result) as run:
+        _run_cron_task(task, {"web": platform})
+
+    assert run.call_args.args[0] is other
+    # Recorded on the thread up front, so replies resume with the same harness.
+    assert platform.reserved_harness == "other"
+
+
+def test_cron_task_harness_is_read_from_yaml(tmp_path):
+    from yuki_conductor.cron_config import load_tasks
+
+    path = tmp_path / "cron.yaml"
+    path.write_text(
+        "tasks:\n"
+        "  - name: a\n    schedule: '* * * * *'\n    prompt: hi\n    harness: pi\n"
+        "  - name: b\n    schedule: '* * * * *'\n    prompt: hi\n",
+        encoding="utf-8",
+    )
+    assert [t.harness for t in load_tasks(path)] == ["pi", None]

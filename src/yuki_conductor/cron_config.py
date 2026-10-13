@@ -35,6 +35,7 @@ class CronTask:
     display_name: str | None = None  # user-facing label, renameable from the UI
     origin_conversation: str | None = None  # web conversation that created the task
     paused: bool = False  # when true the scheduler never fires it (manual runs still work)
+    harness: str | None = None  # "claude-code" | "pi" | None (DEFAULT_HARNESS)
 
     @property
     def label(self) -> str:
@@ -186,6 +187,7 @@ def load_tasks(path=None) -> list[CronTask]:
                 display_name=entry.get("display_name"),
                 origin_conversation=entry.get("origin_conversation"),
                 paused=bool(entry.get("paused", False)),
+                harness=entry.get("harness"),
             )
             croniter(task.schedule)
         except (KeyError, ValueError, TypeError):

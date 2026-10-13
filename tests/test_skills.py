@@ -526,3 +526,13 @@ def test_system_prompt_documents_attachment_tag():
 
 def test_system_prompt_omits_conversation_section_when_absent():
     assert "## Your conversation" not in skills.system_prompt(plugin_dirs=[], cwd=None)
+
+
+def test_core_prompt_keeps_the_contract_but_not_the_skill_listing():
+    """Harnesses that list skills natively (pi) get only this part."""
+    core = skills.core_prompt(conversation_key="abc123")
+    assert "<attachment>/absolute/path/to/file</attachment>" in core
+    assert "`abc123`" in core
+    assert "`Skill` tool" not in core
+    assert "## yuki-conductor capabilities" not in core
+    assert "`Skill` tool" in skills.system_prompt(plugin_dirs=[], cwd=None)
