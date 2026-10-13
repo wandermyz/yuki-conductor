@@ -96,7 +96,9 @@ def test_tool_turn_against_strata():
     assert result.text == 'The file `note.txt` contains a single greeting line: "hello from the fixture".'
     # input counts fresh plus cache-read tokens, summed over both model calls
     assert (result.input_tokens, result.output_tokens) == (2443 + 17 + 2495, 50 + 33)
-    assert result.cost_usd == 0.0
+    # No cost: pi's would be $0 from models.json, and the UI shows a cost in
+    # preference to tokens, so reporting it would hide the token count.
+    assert result.cost_usd is None
 
 
 def test_resume_reuses_the_session():

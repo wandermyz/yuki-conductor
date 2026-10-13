@@ -115,7 +115,6 @@ class PiStreamParser:
         self._last_assistant: dict | None = None
         self._input_tokens = 0
         self._output_tokens = 0
-        self._cost = 0.0
         self._saw_usage = False
         # toolCallId -> (last reported line, when)
         self._progress: dict[str, tuple[str, float]] = {}
@@ -180,9 +179,8 @@ class PiStreamParser:
             self._saw_usage = True
             self._input_tokens += int(usage.get("input") or 0) + int(usage.get("cacheRead") or 0)
             self._output_tokens += int(usage.get("output") or 0)
-            cost = usage.get("cost")
-            if isinstance(cost, dict):
-                self._cost += float(cost.get("total") or 0)
+            # usage.cost is ignored: pi prices tokens from models.json, which is
+            # all zeros for a local model, so it would only ever read "$0.00".
         return _assistant_events(message)
 
     def _tool_progress(self, data: dict) -> list[StreamEvent]:
@@ -208,7 +206,6 @@ class PiStreamParser:
         usage = {
             "input_tokens": self._input_tokens if self._saw_usage else None,
             "output_tokens": self._output_tokens if self._saw_usage else None,
-            "cost_usd": self._cost if self._saw_usage else None,
         }
         msg = self._last_assistant
         if msg is None:
