@@ -4,8 +4,23 @@ export interface Conversation {
   title: string | null;
   project: string | null;
   claude_session_id: string | null;
+  /** Agent harness, fixed when the conversation is created. */
+  harness: string;
   created_at: number;
   updated_at: number;
+}
+
+export interface HarnessInfo {
+  name: string;
+  label: string;
+  /** Its CLI is on the daemon's PATH. */
+  available: boolean;
+}
+
+export async function listHarnesses(): Promise<{ default: string; harnesses: HarnessInfo[] }> {
+  const r = await fetch("/api/harnesses");
+  if (!r.ok) throw new Error("Failed to list harnesses");
+  return r.json();
 }
 
 export interface AttachmentRef {
@@ -27,7 +42,7 @@ export interface ChatMessage {
   status?: "sending" | "failed";
 }
 
-/** One intermediate step of a running Claude turn. Memory-only — never persisted. */
+/** One intermediate step of a running agent turn. Memory-only — never persisted. */
 export interface StreamStep {
   kind: "init" | "text" | "thinking" | "tool_use" | "tool_result";
   label: string;
@@ -57,11 +72,15 @@ export async function listConversations(): Promise<Conversation[]> {
   return r.json();
 }
 
-export async function createConversation(title?: string, project?: string): Promise<Conversation> {
+export async function createConversation(
+  title?: string,
+  project?: string,
+  harness?: string,
+): Promise<Conversation> {
   const r = await fetch("/api/conversations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title: title ?? null, project: project ?? null }),
+    body: JSON.stringify({ title: title ?? null, project: project ?? null, harness: harness ?? null }),
   });
   if (!r.ok) throw new Error("Failed to create conversation");
   return r.json();

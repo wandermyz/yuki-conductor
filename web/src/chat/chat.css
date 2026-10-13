@@ -895,6 +895,46 @@
   margin-left: auto;
 }
 
+/* Non-default harness (e.g. pi): marks the agent a conversation runs on. */
+.chat-list-harness {
+  font-size: 10px;
+  border: 1px solid var(--accent-border, var(--border));
+  color: var(--accent, var(--text));
+  border-radius: 4px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ---- Harness choice in the new-chat picker ---- */
+
+.harness-picker {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.harness-option {
+  flex: 1;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.harness-option.active {
+  background: var(--accent-bg);
+  color: var(--text-h);
+  font-weight: 500;
+}
+
 /* ---- Project picker modal ---- */
 
 .project-picker {
