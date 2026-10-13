@@ -1,8 +1,12 @@
 # Multi-Harness Support
 
-> Status: **planned, not started.** Written 2026-10-12 to capture the design
-> conversation before implementation. Updated 2026-10-13: pi is installed
-> and configured for Strata, and GPU sharing with ComfyUI is handled outside
+> Status: **pi implemented (2026-10-13); dsh and OpenCode not started.**
+> Phases 1–3 are done for pi, plus the web half of phase 6 (a harness toggle
+> in the new-chat picker and a badge) and phase 7's docs. Not yet done: a
+> Slack `/yuki-harness`, per-harness models (`/yuki-model` is still
+> Claude-only), harness on the Status and Automations tabs, and the
+> `CLAUDE_TIMEOUT` → `AGENT_TIMEOUT` rename. Written 2026-10-12; updated
+> 2026-10-13 when pi was installed and GPU sharing moved out of
 > yuki-conductor (see "GPU sharing is not yuki-conductor's job").
 
 ## Goal
