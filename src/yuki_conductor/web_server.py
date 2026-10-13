@@ -24,9 +24,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from yuki_conductor import zellij_manager
-from yuki_conductor.config import DEFAULT_HARNESS, WEB_UPLOADS_DIR
+from yuki_conductor.config import WEB_UPLOADS_DIR
 from yuki_conductor.conversation_store import ConversationStore
-from yuki_conductor.harness import HARNESSES
+from yuki_conductor.harness import HARNESSES, default_harness
 from yuki_conductor.harness.process import cancel_process
 from yuki_conductor.messaging import (
     Attachment,
@@ -295,7 +295,7 @@ def create_api() -> FastAPI:
     class ConversationCreate(BaseModel):
         title: str | None = None
         project: str | None = None
-        harness: str | None = None  # None: DEFAULT_HARNESS; fixed for the conversation's life
+        harness: str | None = None  # None: the default harness; fixed for the conversation's life
 
     class ConversationUpdate(BaseModel):
         title: str | None = None
@@ -324,9 +324,13 @@ def create_api() -> FastAPI:
 
     @api.get("/api/harnesses")
     def list_harnesses():
-        """Harnesses a new conversation can use; `default` is preselected."""
+        """Harnesses enabled here (the HARNESSES setting); `default` is preselected.
+
+        `available` additionally says whether the CLI is on PATH, so an enabled
+        harness whose binary is missing isn't offered either.
+        """
         return {
-            "default": DEFAULT_HARNESS,
+            "default": default_harness(),
             "harnesses": [
                 {"name": h.name, "label": h.label, "available": shutil.which(h.bin) is not None}
                 for h in HARNESSES.values()
@@ -335,9 +339,11 @@ def create_api() -> FastAPI:
 
     @api.post("/api/conversations")
     def create_conversation(body: ConversationCreate):
-        harness = body.harness or DEFAULT_HARNESS
+        harness = body.harness or default_harness()
         if harness not in HARNESSES:
-            raise HTTPException(status_code=400, detail=f"Unknown harness {harness!r}")
+            raise HTTPException(
+                status_code=400, detail=f"Harness {harness!r} isn't enabled on this machine"
+            )
         conv = conv_store.create_conversation(
             platform="web", title=body.title, project=body.project, harness=harness
         )

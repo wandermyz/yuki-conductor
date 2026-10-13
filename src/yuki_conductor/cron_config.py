@@ -35,7 +35,7 @@ class CronTask:
     display_name: str | None = None  # user-facing label, renameable from the UI
     origin_conversation: str | None = None  # web conversation that created the task
     paused: bool = False  # when true the scheduler never fires it (manual runs still work)
-    harness: str | None = None  # "claude-code" | "pi" | None (DEFAULT_HARNESS)
+    harness: str | None = None  # "claude-code" | "pi" | None (the default harness)
 
     @property
     def label(self) -> str:

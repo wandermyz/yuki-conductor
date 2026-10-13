@@ -6,9 +6,9 @@ from datetime import datetime
 
 from croniter import croniter
 
-from yuki_conductor.config import DEFAULT_HARNESS, WORKSPACE_DIR, channels
+from yuki_conductor.config import WORKSPACE_DIR, channels
 from yuki_conductor.cron_config import CronTask, load_tasks
-from yuki_conductor.harness import HARNESSES, get_harness
+from yuki_conductor.harness import HARNESSES, default_harness, get_harness
 from yuki_conductor.harness.process import run_agent
 from yuki_conductor.messaging import MessagingPlatform, OutgoingMessage, split_response
 from yuki_conductor.store import CronRunStore
@@ -110,10 +110,13 @@ def _execute(
 ) -> None:
     title = task.label
     platform = _pick_platform(task, platforms_by_name) if platforms_by_name else None
-    harness = task.harness or DEFAULT_HARNESS
+    harness = task.harness or default_harness()
     if harness not in HARNESSES:
-        logger.warning(f"Cron task={task.name} names unknown harness {harness!r}; using {DEFAULT_HARNESS}")
-        harness = DEFAULT_HARNESS
+        # Like a missing chat_app: don't run a prompt written for one agent on another.
+        error = f"harness {harness!r} isn't enabled on this machine (see the HARNESSES setting)"
+        logger.warning(f"Cron task={task.name} skipped: {error}")
+        run_store.finish_run(run_id, status="error", error=error)
+        return
 
     # Reserve the destination conversation up front where the platform supports
     # it, so the run itself can push interim messages into the same thread via

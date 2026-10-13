@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 from yuki_conductor import skills
 from yuki_conductor.config import PI_DEFAULT_MODEL
-from yuki_conductor.harness import HARNESSES
+from yuki_conductor.harness import KNOWN_HARNESSES
 from yuki_conductor.harness.base import RunRequest
 from yuki_conductor.harness.pi import (
     GPU_BUSY_REPLY,
@@ -36,7 +36,7 @@ def _parse(name: str, clock=None):
 
 
 def test_registered():
-    assert isinstance(HARNESSES["pi"], PiHarness)
+    assert isinstance(KNOWN_HARNESSES["pi"], PiHarness)
 
 
 # --------------------------------------------------------------------------
@@ -197,7 +197,7 @@ def _mock_popen(stdout: str, returncode: int = 0):
 def test_run_agent_reports_gpu_busy_despite_exit_code_zero():
     proc = _mock_popen("".join(_lines("gpu_busy")))
     with patch("subprocess.Popen", return_value=proc) as popen:
-        result = run_agent(HARNESSES["pi"], "hi", cwd="/work")
+        result = run_agent(KNOWN_HARNESSES["pi"], "hi", cwd="/work")
     assert result.is_error
     assert result.text == GPU_BUSY_REPLY
     prompt_file = popen.call_args.args[0][popen.call_args.args[0].index("--append-system-prompt") + 1]
@@ -208,6 +208,6 @@ def test_run_agent_streams_events_and_returns_the_session():
     seen = []
     proc = _mock_popen("".join(_lines("tool_turn")))
     with patch("subprocess.Popen", return_value=proc):
-        result = run_agent(HARNESSES["pi"], "hi", cwd="/work", on_event=seen.append)
+        result = run_agent(KNOWN_HARNESSES["pi"], "hi", cwd="/work", on_event=seen.append)
     assert result.session_id == "yuki-fixture-1"
     assert [e.kind for e in seen][:3] == ["init", "thinking", "tool_use"]

@@ -149,18 +149,29 @@ def test_push_conversation_id_only_for_pushable_platforms():
 # --------------------------------------------------------------------------
 
 
-def _run_and_capture_harness(platform, msg, monkeypatch, default="claude-code"):
-    from yuki_conductor.harness import HARNESSES
-    from yuki_conductor.messaging import conversation
+def _run_and_capture_harness(platform, msg, monkeypatch, enabled=("claude-code", "other")):
+    """Run one turn with exactly `enabled` harnesses on, first = default.
+
+    "other" is a stand-in for a second harness such as pi. The enabled
+    registry is a module-level dict read by resolve_harness and
+    default_harness, so it's swapped in place and restored afterwards.
+    """
+    from yuki_conductor import harness as harness_pkg
 
     other = MagicMock(name="other-harness")
     other.name = "other"
-    monkeypatch.setitem(HARNESSES, "other", other)
-    monkeypatch.setattr(conversation, "DEFAULT_HARNESS", default)
+    known = {**harness_pkg.KNOWN_HARNESSES, "other": other}
+    saved = dict(harness_pkg.HARNESSES)
+    harness_pkg.HARNESSES.clear()
+    harness_pkg.HARNESSES.update({n: known[n] for n in enabled})
     fake = RunResult(text="ok", session_id="s-new")
-    with patch("yuki_conductor.messaging.conversation.run_agent", return_value=fake) as run:
-        handle_incoming_message(platform, msg)
-    return run.call_args.args[0], platform
+    try:
+        with patch("yuki_conductor.messaging.conversation.run_agent", return_value=fake) as run:
+            handle_incoming_message(platform, msg)
+    finally:
+        harness_pkg.HARNESSES.clear()
+        harness_pkg.HARNESSES.update(saved)
+    return (run.call_args.args[0] if run.call_args else None), platform
 
 
 def _start(key="conv-h", harness=None):
@@ -176,9 +187,9 @@ def test_new_conversation_uses_the_requested_harness(monkeypatch):
     assert platform.harnesses["conv-h"] == "other"
 
 
-def test_new_conversation_without_a_choice_uses_the_default(monkeypatch):
+def test_new_conversation_without_a_choice_uses_the_first_enabled_harness(monkeypatch):
     harness, platform = _run_and_capture_harness(
-        StubPlatform(), _start(), monkeypatch, default="other"
+        StubPlatform(), _start(), monkeypatch, enabled=("other", "claude-code")
     )
     assert harness.name == "other"
     assert platform.harnesses["conv-h"] == "other"
@@ -213,3 +224,25 @@ def test_existing_conversation_keeps_its_harness(monkeypatch):
 def test_unknown_harness_falls_back_to_the_default(monkeypatch):
     harness, _ = _run_and_capture_harness(StubPlatform(), _start(harness="nope"), monkeypatch)
     assert harness.name == "claude-code"
+
+
+def test_new_conversation_asking_for_a_disabled_harness_gets_the_default(monkeypatch):
+    harness, platform = _run_and_capture_harness(
+        StubPlatform(), _start(harness="other"), monkeypatch, enabled=("claude-code",)
+    )
+    assert harness.name == "claude-code"
+    assert platform.harnesses["conv-h"] == "claude-code"
+
+
+def test_conversation_bound_to_a_disabled_harness_fails_instead_of_switching(monkeypatch):
+    """Running it on another harness couldn't resume its session anyway."""
+    platform = StubPlatform()
+    platform.sessions["conv-h"] = "s-old"
+    platform.harnesses["conv-h"] = "other"
+    reply = IncomingMessage(platform="web", conversation_key="conv-h", message_id="m2", text="hi")
+    harness, _ = _run_and_capture_harness(platform, reply, monkeypatch, enabled=("claude-code",))
+    assert harness is None  # nothing ran
+    [(key, sent)] = platform.sent
+    assert key == "conv-h"
+    assert "isn't enabled" in sent.text and "other" in sent.text
+    assert platform.processing[-1] == ("conv-h", "m2", False)

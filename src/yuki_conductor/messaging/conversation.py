@@ -3,8 +3,8 @@
 import logging
 import re
 
-from yuki_conductor.config import ATTACHMENTS_DIR, DEFAULT_HARNESS
-from yuki_conductor.harness import HARNESSES, get_harness
+from yuki_conductor.config import ATTACHMENTS_DIR
+from yuki_conductor.harness import HARNESSES, default_harness, get_harness
 from yuki_conductor.harness.process import run_agent
 from yuki_conductor.messaging.platform import (
     Attachment,
@@ -73,20 +73,35 @@ def _event_sink(platform: MessagingPlatform, conversation_key: str):
     return sink
 
 
+class HarnessUnavailable(Exception):
+    """The conversation is bound to a harness this machine doesn't enable."""
+
+
 def resolve_harness(platform: MessagingPlatform, msg: IncomingMessage) -> str:
     """Pick the harness for this turn.
 
     Whatever the platform already recorded for the conversation wins, even on
     its first message: a web conversation is created with its harness before
     anything is sent, and session ids only work with the harness that created
-    them. With no record (a brand-new Slack thread), the message's choice
-    applies, else DEFAULT_HARNESS. An unknown name falls back to the default
-    rather than failing the turn.
+    them. If that harness isn't enabled here, the turn fails rather than
+    quietly switching harness. With no record (a brand-new Slack thread), the
+    message's choice applies if enabled, else the default harness.
     """
-    name = platform.get_harness(msg.conversation_key) or msg.harness or DEFAULT_HARNESS
+    bound = platform.get_harness(msg.conversation_key)
+    if bound:
+        if bound not in HARNESSES:
+            raise HarnessUnavailable(
+                f"This conversation runs on {bound}, which isn't enabled on this "
+                "machine (see the HARNESSES setting). Start a new conversation instead."
+            )
+        return bound
+    name = msg.harness or default_harness()
     if name not in HARNESSES:
-        logger.warning("Unknown harness %r for %s; using %s", name, msg.conversation_key, DEFAULT_HARNESS)
-        name = DEFAULT_HARNESS
+        logger.warning(
+            "Harness %r for %s isn't enabled; using %s",
+            name, msg.conversation_key, default_harness(),
+        )
+        name = default_harness()
     return name
 
 
@@ -106,7 +121,12 @@ def handle_incoming_message(
             None if msg.is_thread_start else platform.get_session_id(msg.conversation_key)
         )
 
-        harness = resolve_harness(platform, msg)
+        try:
+            harness = resolve_harness(platform, msg)
+        except HarnessUnavailable as exc:
+            logger.warning("%s: %s", msg.conversation_key, exc)
+            platform.send(msg.conversation_key, OutgoingMessage(text=str(exc)))
+            return
         prompt = _build_prompt(msg.text, msg.attachments)
         logger.info(
             "Running %s for %s (session=%s, model=%s)",

@@ -389,6 +389,21 @@ def test_cron_task_harness_reaches_the_run_and_the_thread(monkeypatch):
     assert platform.reserved_harness == "other"
 
 
+def test_cron_task_naming_a_disabled_harness_is_recorded_and_not_run(isolated_cron_run_store):
+    """A prompt written for one agent mustn't silently run on another."""
+    platform = ReservingPlatform()
+    task = _task()
+    task.harness = "not-enabled-here"
+    with patch("yuki_conductor.cron_scheduler.run_agent") as run:
+        _run_cron_task(task, {"web": platform})
+
+    run.assert_not_called()
+    assert platform.reserved == []
+    [row] = isolated_cron_run_store.list_runs("t1")
+    assert row["status"] == "error"
+    assert "isn't enabled" in row["error"]
+
+
 def test_cron_task_harness_is_read_from_yaml(tmp_path):
     from yuki_conductor.cron_config import load_tasks
 

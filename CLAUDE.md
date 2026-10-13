@@ -370,13 +370,28 @@ Keep the code clean. **No backward compatibility is required.** This project has
 
 ## Harnesses
 
-A turn runs on one **harness**, an agent CLI. `harness/__init__.py` registers
-them by name:
+A turn runs on one **harness**, an agent CLI. `harness/__init__.py` knows these
+(`KNOWN_HARNESSES`):
 
 | Name | CLI | Notes |
 | --- | --- | --- |
-| `claude-code` | `claude -p --output-format stream-json --verbose …` | default; Windows shims; skill listing synthesized (see Skill Discovery) |
+| `claude-code` | `claude -p --output-format stream-json --verbose …` | Windows shims; skill listing synthesized (see Skill Discovery) |
 | `pi` | `pi --mode json --no-approve --model <provider/id> …` | `PI_BIN`, `PI_DEFAULT_MODEL` (`strata/qwen3.8-flash-next-iq2_xs`); providers live in `~/.pi/agent`, not here |
+
+**Which exist on a machine is the `HARNESSES` setting** in
+`~/.yuki-conductor/.env`, e.g. `HARNESSES=claude-code,pi`. It's a
+comma-separated list in preference order; the first entry is the default for a
+new conversation. It defaults to `claude-code` alone, since pi needs its own
+install and config. Only enabled harnesses are registered (`HARNESSES` in
+`harness/__init__.py`), so a disabled one is never offered, scheduled or run:
+
+- the web picker lists only enabled harnesses whose CLI is on PATH;
+- a cron task naming a disabled harness is recorded as an error run and not run,
+  like a missing `chat_app`;
+- an existing conversation bound to a disabled harness gets a "not enabled on
+  this machine" reply rather than switching harness, since another harness
+  couldn't resume its session anyway;
+- a *new* conversation asking for a disabled harness falls back to the default.
 
 - **A conversation keeps its harness for life**, since a session id only works
   with the harness that made it. Web stores it on the conversation row when the
@@ -385,11 +400,11 @@ them by name:
   on the reserved thread up front.
 - **How a turn's harness is chosen:** `conversation.resolve_harness` takes the
   platform's record first, then `IncomingMessage.harness`, then
-  `DEFAULT_HARNESS`.
+  `default_harness()`.
 - **How a new one is chosen:**
   - web: the toggle in the new-chat picker (`GET /api/harnesses`);
   - cron: a task's `harness:`;
-  - otherwise `DEFAULT_HARNESS`.
+  - otherwise the default (first in `HARNESSES`).
 - **Slack's `/yuki-<skill>` catch-all** forwards Claude's `/<skill>` syntax, so it
   always runs on Claude Code.
 - **pi exits 0 even when the model call failed.** `PiStreamParser` reads the
