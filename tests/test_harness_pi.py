@@ -129,6 +129,26 @@ def test_progress_is_throttled_within_the_interval():
     assert [e.label for e in events if e.detail.get("partial")] == ["render 1/3"]
 
 
+def _tool_run(output: str) -> list:
+    parser = PiStreamParser(clock=lambda: 0.0)
+    update = {"type": "tool_execution_update", "toolCallId": "c1",
+              "partialResult": {"content": [{"type": "text", "text": output}]}}
+    end = {"type": "tool_execution_end", "toolCallId": "c1", "isError": False,
+           "result": {"content": [{"type": "text", "text": output}]}}
+    return parser.feed(json.dumps(update)) + parser.feed(json.dumps(end))
+
+
+def test_one_line_output_is_not_shown_twice():
+    """Seen live in a real run: `echo x` produced the same line as progress and result."""
+    events = _tool_run("yuki-e2e-ok\n")
+    assert [e.label for e in events] == ["yuki-e2e-ok"]
+
+
+def test_multi_line_output_still_gets_its_result_step():
+    events = _tool_run("line 1\nline 2\n")
+    assert [e.detail.get("partial", False) for e in events] == [True, False]
+
+
 def test_other_errors_pass_through():
     parser = PiStreamParser()
     parser.feed(json.dumps({"type": "message_end", "message": {

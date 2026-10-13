@@ -144,9 +144,16 @@ class PiStreamParser:
             return self._tool_progress(data)
         if etype == "tool_execution_end":
             call_id = data.get("toolCallId") or ""
-            self._progress.pop(call_id, None)
+            reported, _ = self._progress.pop(call_id, ("", 0.0))
             is_error = bool(data.get("isError"))
-            summary = truncate(_text_of((data.get("result") or {}).get("content")), SUMMARY_LIMIT)
+            output = _text_of((data.get("result") or {}).get("content"))
+            # A short command's whole output is often its one progress line;
+            # don't show the same line twice.
+            if not is_error and reported and reported == _last_line(output) and len(
+                [ln for ln in output.splitlines() if ln.strip()]
+            ) == 1:
+                return []
+            summary = truncate(output, SUMMARY_LIMIT)
             return [StreamEvent(
                 kind="tool_result",
                 label=("error: " + summary) if is_error else summary,
