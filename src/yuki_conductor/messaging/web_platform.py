@@ -233,11 +233,13 @@ class WebPlatform:
     def send_notification(self, text: str) -> None:
         self._manager.broadcast_all({"type": "notification", "text": text})
 
-    def start_thread(self, text: str, title: str | None = None) -> str:
+    def start_thread(
+        self, text: str, title: str | None = None, harness: str = "claude-code"
+    ) -> str:
         """Create a fresh web conversation seeded with `text` as the first
         assistant message, and return its id."""
         conv = self._store.create_conversation(
-            platform="web", title=title or text[:80]
+            platform="web", title=title or text[:80], harness=harness
         )
         stored = self._store.add_message(
             conv.id, role="assistant", text=text, attachments=[]

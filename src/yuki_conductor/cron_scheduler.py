@@ -180,7 +180,7 @@ def _execute(
             platform.send(reserved, OutgoingMessage(text=text, attachments=attachments))
             conversation_key = reserved
         else:
-            conversation_key = platform.start_thread(text, title=title)
+            conversation_key = platform.start_thread(text, title=title, harness=harness)
             if attachments:
                 platform.send(conversation_key, OutgoingMessage(text="", attachments=attachments))
     except Exception:

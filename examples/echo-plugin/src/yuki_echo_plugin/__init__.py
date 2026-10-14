@@ -41,7 +41,7 @@ class EchoPlatform:
     def send_notification(self, text):
         logger.info("[echo] notification: %s", text)
 
-    def start_thread(self, text, title=None):
+    def start_thread(self, text, title=None, harness="claude-code"):
         key = f"echo:{len(self._sessions)}"
         logger.info("[echo] new thread %s: %s", key, text)
         return key
