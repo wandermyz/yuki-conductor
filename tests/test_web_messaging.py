@@ -229,3 +229,18 @@ def test_push_to_new_conversation_broadcasts_status(client, monkeypatch):
     client.post("/api/push", json={"text": "cron fired"})
     assert [p["type"] for p in sent] == ["message", "status"]
     assert sent[0]["pushed"] is True
+
+
+def test_frontend_cache_headers(monkeypatch, tmp_path):
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<html></html>")
+    (dist / "assets" / "index-abc.js").write_text("//")
+    monkeypatch.setattr(web_server, "_WEB_DIST", dist)
+    api = web_server.FastAPI()
+    web_server.mount_static(api)
+    c = TestClient(api)
+
+    for url in ("/", "/index.html"):
+        assert c.get(url).headers["cache-control"] == "no-store"
+    assert "immutable" in c.get("/assets/index-abc.js").headers["cache-control"]

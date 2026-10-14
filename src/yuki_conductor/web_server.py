@@ -847,10 +847,28 @@ def create_api() -> FastAPI:
     return api
 
 
+class _FrontendFiles(StaticFiles):
+    """StaticFiles with cache headers suited to a Vite build.
+
+    Hashed files under `assets/` never change, so they're cached forever.
+    Everything else — above all `index.html`, which names the current hashes —
+    is `no-store`. Without it, an iOS home-screen web app keeps serving a stale
+    `index.html` heuristically and never picks up a rebuild.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if path.startswith("assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+
 def mount_static(api: FastAPI) -> None:
     """Mount the React frontend static files. Call after all API routes are registered."""
     if _WEB_DIST.is_dir():
-        api.mount("/", StaticFiles(directory=str(_WEB_DIST), html=True), name="static")
+        api.mount("/", _FrontendFiles(directory=str(_WEB_DIST), html=True), name="static")
 
 
 # Module-level app for `uvicorn yuki_conductor.web_server:app`
