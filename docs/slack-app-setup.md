@@ -40,6 +40,14 @@ Go to **Features** > **Slash Commands** > **Create New Command**:
 | Short Description | Switch Claude model (sonnet, opus, haiku) |
 | Usage Hint | `[sonnet\|opus\|haiku]` |
 
+If more than one harness is enabled (the `HARNESSES` setting), also add:
+
+| Field | Value |
+|-------|-------|
+| Command | `/yuki-harness` |
+| Short Description | Choose the agent for new threads in this channel |
+| Usage Hint | `[default\|claude-code\|pi]` |
+
 No **Request URL** is needed — Socket Mode handles delivery automatically.
 
 ## 5. Subscribe to Events

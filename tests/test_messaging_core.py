@@ -246,3 +246,27 @@ def test_conversation_bound_to_a_disabled_harness_fails_instead_of_switching(mon
     assert key == "conv-h"
     assert "isn't enabled" in sent.text and "other" in sent.text
     assert platform.processing[-1] == ("conv-h", "m2", False)
+
+
+def test_claude_model_pin_only_reaches_claude_code(monkeypatch):
+    """pi would get `--model opus[1m]`, a model name it doesn't know."""
+    from yuki_conductor import harness as harness_pkg
+
+    other = MagicMock(name="other-harness")
+    other.name = "other"
+    saved = dict(harness_pkg.HARNESSES)
+    harness_pkg.HARNESSES.clear()
+    harness_pkg.HARNESSES.update({"claude-code": harness_pkg.KNOWN_HARNESSES["claude-code"], "other": other})
+    fake = RunResult(text="ok", session_id="s")
+    try:
+        for name, expected in (("claude-code", "opus[1m]"), ("other", None)):
+            msg = IncomingMessage(
+                platform="web", conversation_key=f"c-{name}", message_id="m", text="hi",
+                is_thread_start=True, harness=name, model="opus[1m]",
+            )
+            with patch("yuki_conductor.messaging.conversation.run_agent", return_value=fake) as run:
+                handle_incoming_message(StubPlatform(), msg)
+            assert run.call_args.kwargs["model"] == expected, name
+    finally:
+        harness_pkg.HARNESSES.clear()
+        harness_pkg.HARNESSES.update(saved)

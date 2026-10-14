@@ -128,16 +128,19 @@ def handle_incoming_message(
             platform.send(msg.conversation_key, OutgoingMessage(text=str(exc)))
             return
         prompt = _build_prompt(msg.text, msg.attachments)
+        # msg.model is a Claude Code alias (Slack's /yuki-model). Other
+        # harnesses name models differently, so they use their own default.
+        model = msg.model if harness == "claude-code" else None
         logger.info(
             "Running %s for %s (session=%s, model=%s)",
-            harness, msg.conversation_key, session_id, msg.model,
+            harness, msg.conversation_key, session_id, model,
         )
         try:
             result = run_agent(
                 get_harness(harness),
                 prompt,
                 session_id=session_id,
-                model=msg.model,
+                model=model,
                 conversation_key=msg.conversation_key,
                 cwd=msg.cwd,
                 # Only keys `/api/push` can route are advertised.

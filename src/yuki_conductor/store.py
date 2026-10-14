@@ -479,6 +479,17 @@ class ModelStore(_SqliteKVStore):
                 con.close()
 
 
+class HarnessStore(_SqliteKVStore):
+    """Maps Slack channel_id -> harness for *new* threads in that channel.
+
+    Set by `/yuki-harness`. A thread keeps the harness it started with, so
+    changing this never moves an existing thread.
+    """
+
+    def __init__(self, db_path: Path | None = None):
+        super().__init__("channel_harnesses", db_path)
+
+
 class ProjectStore:
     """Stores project name -> local directory path mappings."""
 
