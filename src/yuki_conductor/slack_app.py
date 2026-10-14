@@ -22,7 +22,7 @@ from yuki_conductor.config import (
     slack_bot_token,
 )
 from yuki_conductor.formatting import markdown_to_mrkdwn
-from yuki_conductor.harness import get_harness
+from yuki_conductor.harness import HARNESSES, default_harness, get_harness
 from yuki_conductor.harness.process import run_agent
 from yuki_conductor.messaging import IncomingMessage, handle_incoming_message
 from yuki_conductor.messaging.slack_platform import (
@@ -30,16 +30,72 @@ from yuki_conductor.messaging.slack_platform import (
     SlackPlatform,
     download_slack_files,
 )
-from yuki_conductor.store import DEFAULT_MODEL_ARG, MODEL_ALIASES, ModelStore, SessionStore
+from yuki_conductor.store import (
+    DEFAULT_MODEL_ARG,
+    MODEL_ALIASES,
+    HarnessStore,
+    ModelStore,
+    SessionStore,
+)
 
 logger = logging.getLogger(__name__)
 
 store = SessionStore()
 model_store = ModelStore()
+harness_store = HarnessStore()
+
+# `/yuki-harness default` clears the channel's pin.
+DEFAULT_HARNESS_ARG = "default"
+
+
+def channel_harness(channel: str) -> str:
+    """The harness a new thread in `channel` starts on.
+
+    The channel's `/yuki-harness` pin if it's still enabled here, else the
+    machine default. Existing threads ignore this; they keep their own.
+    """
+    pinned = harness_store.get(channel)
+    return pinned if pinned in HARNESSES else default_harness()
 
 
 def create_app() -> App:
     app = App(token=slack_bot_token())
+
+    @app.command("/yuki-harness")
+    def handle_harness_command(ack, command, respond):
+        ack()
+        channel = command["channel_id"]
+        arg = command.get("text", "").strip().lower()
+        options = ", ".join([DEFAULT_HARNESS_ARG, *HARNESSES])
+        pinned = harness_store.get(channel)
+
+        if not arg:
+            current = channel_harness(channel)
+            note = ""
+            if pinned and pinned not in HARNESSES:
+                note = f" (pinned to *{pinned}*, which isn't enabled on this machine)"
+            elif not pinned:
+                note = " (the default)"
+            respond(
+                f"New threads here use *{current}*{note}. Existing threads keep "
+                f"the harness they started with.\nUsage: `/yuki-harness [{options}]`"
+            )
+            return
+
+        if arg == DEFAULT_HARNESS_ARG:
+            harness_store.clear(channel)
+            respond(f"New threads here now use the default harness (*{default_harness()}*).")
+            return
+
+        if arg not in HARNESSES:
+            respond(f"Harness `{arg}` isn't enabled on this machine. Options: {options}")
+            return
+
+        harness_store.set(channel, arg)
+        respond(
+            f"New threads here now use *{arg}*. Existing threads keep the harness "
+            "they started with."
+        )
 
     @app.command("/yuki-model")
     def handle_model_command(ack, command, respond):
@@ -92,6 +148,11 @@ def create_app() -> App:
         if model_rows:
             model_parts = [f"<#{k}>: {v}" for k, v in model_rows[:5]]
             lines.append(f"*Model settings:*  {' | '.join(model_parts)}")
+
+        lines.append(
+            f"*Harnesses:*  {', '.join(HARNESSES)} (default {default_harness()})  |  "
+            f"this channel: {channel_harness(command['channel_id'])}"
+        )
 
         try:
             proc = subprocess.run(
@@ -183,14 +244,19 @@ def create_app() -> App:
 
         is_thread_start = thread_ts is None
         conversation_key = thread_ts or ts
+        # A new thread starts on the channel's harness; a reply keeps whatever
+        # its thread was created with (resolve_harness reads the row).
+        harness = channel_harness(channel) if is_thread_start else None
         if is_thread_start:
             # Pre-create the row so SlackPlatform can resolve channel for reactions.
+            # It records the harness now: SessionStore fixes it on the first write.
             store.set(
                 conversation_key,
                 value="",
                 channel_id=channel,
                 title=text or "(attachment)",
                 session_type=SESSION_TYPE,
+                harness=harness,
             )
 
         platform = SlackPlatform(client=client, bot_token=slack_bot_token())
@@ -203,6 +269,7 @@ def create_app() -> App:
             is_thread_start=is_thread_start,
             title_hint=text if is_thread_start else None,
             model=model,
+            harness=harness,
         )
 
         threading.Thread(
