@@ -201,6 +201,14 @@ Routing rule when `chat_app:` is omitted: pick the first enabled platform, with 
 
 Required env var (only when the Slack channel is enabled): `SLACK_CRON_CHANNEL` — the Slack channel ID to post cron results to.
 
+**Slack slash commands are `/<prefix>-…`**, where the prefix is
+`SLACK_COMMAND_PREFIX` (default `yuki`, validated at startup). Each machine
+runs its own Slack app; command names are workspace-wide, so a second machine
+in the same workspace sets its own prefix (e.g. `skirk`). `slack_app.create_app`
+registers `/<prefix>-harness`, `-model`, `-title`, `-usage` and the
+`/<prefix>-<skill>` catch-all, and never claims another prefix's commands.
+Channel settings (model, harness) are keyed by channel, not command name.
+
 ### Automations tab
 
 The web UI surfaces cron tasks as **Automations** (`web/src/AutomationsView.tsx`,
@@ -403,16 +411,16 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
   `default_harness()`.
 - **How a new one is chosen:**
   - web: the toggle in the new-chat picker (`GET /api/harnesses`);
-  - Slack: the channel's `/yuki-harness` pin (`HarnessStore`, per channel),
+  - Slack: the channel's `/<prefix>-harness` pin (`HarnessStore`, per channel),
     else the default. A new thread's `sessions` row is pre-created with that
     harness; since the first write fixes it, writing the default there would
     lock every Slack thread to it;
   - cron: a task's `harness:`;
   - otherwise the default (first in `HARNESSES`).
-- **Model pins are Claude Code only.** `/yuki-model` stores a Claude alias, so
+- **Model pins are Claude Code only.** `/<prefix>-model` stores a Claude alias, so
   the conversation core passes `IncomingMessage.model` only to `claude-code`
   turns; other harnesses use their own default (e.g. `PI_DEFAULT_MODEL`).
-- **Slack's `/yuki-<skill>` catch-all** forwards Claude's `/<skill>` syntax, so it
+- **Slack's `/<prefix>-<skill>` catch-all** forwards Claude's `/<skill>` syntax, so it
   always runs on Claude Code.
 - **pi exits 0 even when the model call failed.** `PiStreamParser` reads the
   outcome from the last assistant message's `stopReason`.

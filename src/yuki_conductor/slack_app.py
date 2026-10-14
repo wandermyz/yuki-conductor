@@ -20,6 +20,7 @@ from yuki_conductor.config import (
     CLAUDE_WORKING_DIR,
     slack_app_token,
     slack_bot_token,
+    slack_command_prefix,
 )
 from yuki_conductor.formatting import markdown_to_mrkdwn
 from yuki_conductor.harness import HARNESSES, default_harness, get_harness
@@ -44,14 +45,14 @@ store = SessionStore()
 model_store = ModelStore()
 harness_store = HarnessStore()
 
-# `/yuki-harness default` clears the channel's pin.
+# `/<prefix>-harness default` clears the channel's pin.
 DEFAULT_HARNESS_ARG = "default"
 
 
 def channel_harness(channel: str) -> str:
     """The harness a new thread in `channel` starts on.
 
-    The channel's `/yuki-harness` pin if it's still enabled here, else the
+    The channel's `/<prefix>-harness` pin if it's still enabled here, else the
     machine default. Existing threads ignore this; they keep their own.
     """
     pinned = harness_store.get(channel)
@@ -60,8 +61,11 @@ def channel_harness(channel: str) -> str:
 
 def create_app() -> App:
     app = App(token=slack_bot_token())
+    # Every slash command is `/<prefix>-…`, so two machines' Slack apps can share
+    # a workspace (e.g. /yuki-model on one, /skirk-model on the other).
+    prefix = slack_command_prefix()
 
-    @app.command("/yuki-harness")
+    @app.command(f"/{prefix}-harness")
     def handle_harness_command(ack, command, respond):
         ack()
         channel = command["channel_id"]
@@ -78,7 +82,7 @@ def create_app() -> App:
                 note = " (the default)"
             respond(
                 f"New threads here use *{current}*{note}. Existing threads keep "
-                f"the harness they started with.\nUsage: `/yuki-harness [{options}]`"
+                f"the harness they started with.\nUsage: `/{prefix}-harness [{options}]`"
             )
             return
 
@@ -97,7 +101,7 @@ def create_app() -> App:
             "they started with."
         )
 
-    @app.command("/yuki-model")
+    @app.command(f"/{prefix}-model")
     def handle_model_command(ack, command, respond):
         ack()
         channel = command["channel_id"]
@@ -106,7 +110,7 @@ def create_app() -> App:
 
         if not arg:
             current = model_store.get(channel) or f"{DEFAULT_MODEL_ARG} ({CLAUDE_DEFAULT_MODEL})"
-            respond(f"Current model: *{current}*\nUsage: `/yuki-model [{options}]`")
+            respond(f"Current model: *{current}*\nUsage: `/{prefix}-model [{options}]`")
             return
 
         if arg == DEFAULT_MODEL_ARG:
@@ -122,12 +126,12 @@ def create_app() -> App:
         model_store.set(channel, resolved)
         respond(f"Model switched to *{resolved}* for this channel.")
 
-    @app.command("/yuki-title")
+    @app.command(f"/{prefix}-title")
     def handle_title_command(ack, command, respond):
         ack()
         respond("Reply with `!title <new title>` in a thread to rename it.")
 
-    @app.command("/yuki-usage")
+    @app.command(f"/{prefix}-usage")
     def handle_usage_command(ack, command, respond, client):
         ack()
 
@@ -172,11 +176,11 @@ def create_app() -> App:
 
         respond("\n".join(lines))
 
-    @app.command(re.compile(r"/yuki-.+"))
+    @app.command(re.compile(rf"/{re.escape(prefix)}-.+"))
     def handle_skill_command(ack, command, respond, client):
-        """Catch-all: map /yuki-<skill> to Claude's /<skill>."""
+        """Catch-all: map /<prefix>-<skill> to Claude's /<skill>."""
         ack()
-        skill_name = command["command"].removeprefix("/yuki-")
+        skill_name = command["command"].removeprefix(f"/{prefix}-")
         channel = command["channel_id"]
         arg = command.get("text", "").strip()
         prompt = f"/{skill_name} {arg}" if arg else f"/{skill_name}"
