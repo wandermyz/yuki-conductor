@@ -92,8 +92,13 @@ class MessagingPlatform(Protocol):
         default notification channel. Best-effort — failures are logged, not raised."""
         ...
 
-    def start_thread(self, text: str, title: str | None = None) -> str:
+    def start_thread(
+        self, text: str, title: str | None = None, harness: str = "claude-code"
+    ) -> str:
         """Open a new conversation thread with an initial message and return its key.
+
+        `harness` is the one that produced `text`; replies in the thread resume
+        on it.
 
         Used by the cron scheduler (and any other producer) to seed a thread
         the platform owns. Slack creates a top-level message and returns its

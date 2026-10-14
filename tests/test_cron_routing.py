@@ -36,7 +36,7 @@ class FakePlatform:
     def set_session_id(self, conversation_key, session_id, title_hint=None, harness="claude-code"):
         self.session_writes.append((conversation_key, session_id, title_hint))
 
-    def start_thread(self, text, title=None):
+    def start_thread(self, text, title=None, harness="claude-code"):
         key = f"{self.name}-thread-{len(self.threads)}"
         self.threads.append((text, title))
         return key

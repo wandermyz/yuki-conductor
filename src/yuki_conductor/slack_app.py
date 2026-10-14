@@ -264,6 +264,8 @@ def create_app() -> App:
             )
 
         platform = SlackPlatform(client=client, bot_token=slack_bot_token())
+        if is_thread_start:
+            platform.mark_harness(conversation_key, harness)
         msg = IncomingMessage(
             platform=SESSION_TYPE,
             conversation_key=conversation_key,

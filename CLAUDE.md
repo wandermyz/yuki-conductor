@@ -420,6 +420,11 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
 - **Model pins are Claude Code only.** `/<prefix>-model` stores a Claude alias, so
   the conversation core passes `IncomingMessage.model` only to `claude-code`
   turns; other harnesses use their own default (e.g. `PI_DEFAULT_MODEL`).
+- **Slack shows the harness** two ways: the shimmering status is tagged
+  `(<label>) is thinking...`, and every thread's root message (user-started
+  or cron's `start_thread`) gets a reaction from `HARNESS_EMOJI` in
+  `slack_platform.py` (`:large_orange_diamond:` Claude Code, `:pie:` pi).
+  Both are best-effort; a new harness without an emoji just gets no reaction.
 - **Slack's `/<prefix>-<skill>` catch-all** forwards Claude's `/<skill>` syntax, so it
   always runs on Claude Code.
 - **pi exits 0 even when the model call failed.** `PiStreamParser` reads the
