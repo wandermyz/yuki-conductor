@@ -482,7 +482,7 @@ class ModelStore(_SqliteKVStore):
 class HarnessStore(_SqliteKVStore):
     """Maps Slack channel_id -> harness for *new* threads in that channel.
 
-    Set by `/yuki-harness`. A thread keeps the harness it started with, so
+    Set by `/<prefix>-harness`. A thread keeps the harness it started with, so
     changing this never moves an existing thread.
     """
 
@@ -591,7 +591,7 @@ class ProjectStore:
                 con.close()
 
 
-# /yuki-model argument -> value passed to `claude --model`.
+# /<prefix>-model argument -> value passed to `claude --model`.
 # The 1M-context variants are spelled without brackets because the command
 # arg is lowercased and "[1m]" is awkward to type in Slack; the resolved
 # value (with brackets) is what gets stored and passed to the CLI.

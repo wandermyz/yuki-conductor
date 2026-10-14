@@ -38,6 +38,8 @@ def app(monkeypatch, tmp_path):
     db = tmp_path / "t.db"
     monkeypatch.setattr(slack_app, "App", FakeApp)
     monkeypatch.setattr(slack_app, "slack_bot_token", lambda: "xoxb-test")
+    # Pin the prefix: the real .env may set SLACK_COMMAND_PREFIX for this machine.
+    monkeypatch.setattr(slack_app, "slack_command_prefix", lambda: "yuki")
     monkeypatch.setattr(slack_app, "store", SessionStore(db_path=db))
     monkeypatch.setattr(slack_app, "harness_store", HarnessStore(db_path=db))
     monkeypatch.setattr(slack_app, "model_store", MagicMock(get=lambda c: None, list_all=lambda: []))
@@ -109,3 +111,67 @@ def test_reply_keeps_its_threads_harness_after_the_channel_changes(app, monkeypa
     msg = _post(app, monkeypatch, ts="2.0", thread_ts="1.0")
     assert msg.harness is None  # the core reads the thread's own record
     assert slack_app.store.get_harness("1.0") == "pi"
+
+
+# --------------------------------------------------------------------------
+# SLACK_COMMAND_PREFIX
+# --------------------------------------------------------------------------
+
+
+def _handler_for(app, command: str):
+    """Resolve a slash command the way Bolt does: exact names, then the regex catch-all."""
+    if command in app.commands:
+        return app.commands[command]
+    for key, fn in app.commands.items():
+        if hasattr(key, "fullmatch") and key.fullmatch(command):
+            return fn
+    return None
+
+
+def test_commands_use_the_configured_prefix(app, monkeypatch):
+    monkeypatch.setattr(slack_app, "slack_command_prefix", lambda: "skirk")
+    skirk = slack_app.create_app()
+    names = {k for k in skirk.commands if isinstance(k, str)}
+    assert names == {"/skirk-harness", "/skirk-model", "/skirk-title", "/skirk-usage"}
+    # Only this machine's commands: another machine's /yuki-* isn't claimed.
+    assert _handler_for(skirk, "/yuki-model") is None
+    assert _handler_for(skirk, "/yuki-review") is None
+    # The catch-all forwards /skirk-<skill> as Claude's /<skill>.
+    assert _handler_for(skirk, "/skirk-review") is _handler_for(skirk, "/skirk-anything")
+
+
+def test_replies_name_the_prefixed_command(app, monkeypatch):
+    monkeypatch.setattr(slack_app, "slack_command_prefix", lambda: "skirk")
+    skirk = slack_app.create_app()
+    respond = MagicMock()
+    skirk.commands["/skirk-harness"](ack=MagicMock(), command={"channel_id": "C1", "text": ""},
+                                     respond=respond)
+    assert "`/skirk-harness [" in respond.call_args.args[0]
+
+
+def test_catch_all_strips_the_prefix(app, monkeypatch):
+    monkeypatch.setattr(slack_app, "slack_command_prefix", lambda: "skirk")
+    skirk = slack_app.create_app()
+    ran = {}
+
+    def fake_run(harness, prompt, **kw):
+        ran["prompt"] = prompt
+        return MagicMock(text="")
+
+    monkeypatch.setattr(slack_app, "run_agent", fake_run)
+    _handler_for(skirk, "/skirk-review")(
+        ack=MagicMock(), respond=MagicMock(), client=MagicMock(),
+        command={"command": "/skirk-review", "channel_id": "C1", "text": "PR 12"},
+    )
+    assert ran["prompt"] == "/review PR 12"
+
+
+def test_prefix_validation():
+    from yuki_conductor.config import parse_slack_command_prefix
+
+    assert parse_slack_command_prefix(None) == "yuki"
+    assert parse_slack_command_prefix(" skirk ") == "skirk"
+    assert parse_slack_command_prefix("box-2") == "box-2"
+    for bad in ("Skirk", "sk irk", "-x", "x-", "x/y", "/yuki"):
+        with pytest.raises(RuntimeError, match="SLACK_COMMAND_PREFIX"):
+            parse_slack_command_prefix(bad)

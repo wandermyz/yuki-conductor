@@ -128,7 +128,7 @@ def handle_incoming_message(
             platform.send(msg.conversation_key, OutgoingMessage(text=str(exc)))
             return
         prompt = _build_prompt(msg.text, msg.attachments)
-        # msg.model is a Claude Code alias (Slack's /yuki-model). Other
+        # msg.model is a Claude Code alias (Slack's /<prefix>-model). Other
         # harnesses name models differently, so they use their own default.
         model = msg.model if harness == "claude-code" else None
         logger.info(
