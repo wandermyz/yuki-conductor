@@ -87,6 +87,11 @@ function isVideo(mime: string | null, filename: string): boolean {
   return /\.(mp4|webm|mov|m4v)$/i.test(filename);
 }
 
+function isAudio(mime: string | null, filename: string): boolean {
+  if (mime?.startsWith("audio/")) return true;
+  return /\.(mp3|wav|ogg|oga|opus|flac|m4a|aac)$/i.test(filename);
+}
+
 /* ---------- Conversation status helpers ---------- */
 
 function formatTokens(n: number): string {
@@ -419,6 +424,13 @@ function MessageBubble({ msg, onRetry }: { msg: ChatMessage; onRetry: (msg: Chat
               </a>
             ) : isVideo(a.mime_type, a.filename) ? (
               <video key={a.id} src={a.url} controls loop playsInline preload="metadata" />
+            ) : isAudio(a.mime_type, a.filename) ? (
+              <div key={a.id} className="audio-attachment">
+                <audio src={a.url} controls preload="metadata" />
+                <a className="file-link" href={a.url} download>
+                  📎 {a.filename}
+                </a>
+              </div>
             ) : (
               <a key={a.id} className="file-link" href={a.url} download>
                 📎 {a.filename}

@@ -600,6 +600,17 @@
   display: block;
 }
 
+.audio-attachment {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.audio-attachment audio {
+  width: 320px;
+  max-width: 100%;
+}
+
 .bubble.user .file-link {
   color: #fff;
   text-decoration: underline;
