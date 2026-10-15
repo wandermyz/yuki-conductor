@@ -117,6 +117,14 @@ relaunch), `daemon_macos` (`setsid` + `launchctl kickstart -k`), or
 `daemon_linux` (delayed `systemctl --user restart --no-block`), returns 202 at
 once, and the frontend polls `/api/status` until the socket comes back.
 
+### Archived conversations
+
+The chat menu's **Archive** sets `conversations.archived_at`. An archived
+conversation keeps its rows but never appears in the web UI again: it's dropped
+from `/api/conversations`, and `GET /api/conversations/{id}` and its
+`/messages` 404. There's no unarchive and no UI to browse them — query the DB
+directly (`SELECT … FROM conversations WHERE archived_at IS NOT NULL`).
+
 ### Web tabs
 
 The tab bar holds four: Chat, Projects, Automations, and a `⋯` overflow.

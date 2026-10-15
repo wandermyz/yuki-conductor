@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import {
   cancelProcessing,
   createConversation,
+  archiveConversation,
   deleteConversation,
   fetchStatuses,
   fetchProcessing,
@@ -236,6 +237,7 @@ function ConvMenu({
   onShowSessionId,
   onRename,
   onSetStatus,
+  onArchive,
   onDelete,
   onClose,
 }: {
@@ -243,6 +245,7 @@ function ConvMenu({
   onShowSessionId: () => void;
   onRename: () => void;
   onSetStatus: (s: ConvStatus) => void;
+  onArchive: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
@@ -270,7 +273,8 @@ function ConvMenu({
         Show Session ID
       </button>
       <div className="conv-menu-divider" />
-      {status !== "read" && (
+      {/* Status moves one step at a time: unread <-> read <-> done. */}
+      {status === "unread" && (
         <button
           className="conv-menu-item"
           onClick={(e) => { e.stopPropagation(); onSetStatus("read"); onClose(); }}
@@ -278,23 +282,37 @@ function ConvMenu({
           Mark as Read
         </button>
       )}
-      {status !== "unread" && (
-        <button
-          className="conv-menu-item"
-          onClick={(e) => { e.stopPropagation(); onSetStatus("unread"); onClose(); }}
-        >
-          Mark as Unread
-        </button>
+      {status === "read" && (
+        <>
+          <button
+            className="conv-menu-item"
+            onClick={(e) => { e.stopPropagation(); onSetStatus("unread"); onClose(); }}
+          >
+            Mark as Unread
+          </button>
+          <button
+            className="conv-menu-item"
+            onClick={(e) => { e.stopPropagation(); onSetStatus("done"); onClose(); }}
+          >
+            Mark as Done
+          </button>
+        </>
       )}
-      {status !== "done" && (
+      {status === "done" && (
         <button
           className="conv-menu-item"
-          onClick={(e) => { e.stopPropagation(); onSetStatus("done"); onClose(); }}
+          onClick={(e) => { e.stopPropagation(); onSetStatus("read"); onClose(); }}
         >
-          Mark as Done
+          Mark as Not Done
         </button>
       )}
       <div className="conv-menu-divider" />
+      <button
+        className="conv-menu-item"
+        onClick={(e) => { e.stopPropagation(); onArchive(); onClose(); }}
+      >
+        Archive
+      </button>
       <button
         className="conv-menu-item conv-menu-item-danger"
         onClick={(e) => { e.stopPropagation(); onDelete(); onClose(); }}
@@ -669,6 +687,7 @@ function ChatThread({
   onShowSessionId,
   onRename,
   onSetStatus,
+  onArchive,
   onDelete,
 }: {
   conv: Conversation;
@@ -683,6 +702,7 @@ function ChatThread({
   onShowSessionId: () => void;
   onRename: () => void;
   onSetStatus: (s: ConvStatus) => void;
+  onArchive: () => void;
   onDelete: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -736,6 +756,7 @@ function ChatThread({
               onShowSessionId={onShowSessionId}
               onRename={onRename}
               onSetStatus={onSetStatus}
+              onArchive={onArchive}
               onDelete={onDelete}
               onClose={() => setHeaderMenuOpen(false)}
             />
@@ -961,17 +982,32 @@ export default function Chat({
     }
   };
 
+  const dropFromView = (id: string) => {
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    setMessagesByConv((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if (selected === id) setSelected(null);
+  };
+
   const remove = async (id: string) => {
     if (!confirm("Delete this conversation?")) return;
     try {
       await deleteConversation(id);
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-      setMessagesByConv((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      if (selected === id) setSelected(null);
+      dropFromView(id);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Archived conversations never come back in the UI; they stay in the DB.
+  const archive = async (id: string) => {
+    if (!confirm("Archive this conversation? It will disappear from the web UI.")) return;
+    try {
+      await archiveConversation(id);
+      dropFromView(id);
     } catch (e) {
       console.error(e);
     }
@@ -1184,6 +1220,7 @@ export default function Chat({
                           onShowSessionId={() => setSessionIdModal(c.claude_session_id || "(no session yet)")}
                           onRename={() => setRenaming(c.id)}
                           onSetStatus={(s) => setStatus(c.id, s)}
+                          onArchive={() => archive(c.id)}
                           onDelete={() => remove(c.id)}
                           onClose={() => setMenuOpen(null)}
                         />
@@ -1212,6 +1249,7 @@ export default function Chat({
             onShowSessionId={() => setSessionIdModal(active.claude_session_id || "(no session yet)")}
             onRename={() => setRenaming(active.id)}
             onSetStatus={(s) => setStatus(active.id, s)}
+            onArchive={() => archive(active.id)}
             onDelete={() => remove(active.id)}
           />
         ) : (

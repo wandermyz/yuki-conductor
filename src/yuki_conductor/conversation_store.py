@@ -44,6 +44,7 @@ class StoredConversation:
     created_at: float
     updated_at: float
     harness: str = "claude-code"  # fixed when the conversation is created
+    archived_at: float | None = None  # set: hidden from the web UI, only reachable via SQL
 
 
 class ConversationStore:
@@ -73,7 +74,8 @@ class ConversationStore:
                         created_at REAL NOT NULL,
                         updated_at REAL NOT NULL,
                         status TEXT NOT NULL DEFAULT 'read',
-                        harness TEXT NOT NULL DEFAULT 'claude-code'
+                        harness TEXT NOT NULL DEFAULT 'claude-code',
+                        archived_at REAL
                     )
                     """
                 )
@@ -123,6 +125,8 @@ class ConversationStore:
                         "ALTER TABLE conversations ADD COLUMN harness TEXT NOT NULL "
                         "DEFAULT 'claude-code'"
                     )
+                if "archived_at" not in cols:
+                    con.execute("ALTER TABLE conversations ADD COLUMN archived_at REAL")
                 con.commit()
             finally:
                 con.close()
@@ -174,7 +178,7 @@ class ConversationStore:
             try:
                 row = con.execute(
                     "SELECT id, platform, title, project, claude_session_id, "
-                    "created_at, updated_at, harness FROM conversations WHERE id = ?",
+                    "created_at, updated_at, harness, archived_at FROM conversations WHERE id = ?",
                     (conv_id,),
                 ).fetchone()
                 if not row:
@@ -184,21 +188,22 @@ class ConversationStore:
                 con.close()
 
     def list_conversations(self, platform: str | None = None) -> list[StoredConversation]:
+        """Unarchived conversations, most recently updated first."""
         with self._lock:
             con = self._connect()
             try:
                 if platform is not None:
                     rows = con.execute(
                         "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at, harness FROM conversations WHERE platform = ? "
-                        "ORDER BY updated_at DESC",
+                        "created_at, updated_at, harness, archived_at FROM conversations "
+                        "WHERE platform = ? AND archived_at IS NULL ORDER BY updated_at DESC",
                         (platform,),
                     ).fetchall()
                 else:
                     rows = con.execute(
                         "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at, harness FROM conversations "
-                        "ORDER BY updated_at DESC"
+                        "created_at, updated_at, harness, archived_at FROM conversations "
+                        "WHERE archived_at IS NULL ORDER BY updated_at DESC"
                     ).fetchall()
                 return [StoredConversation(*r) for r in rows]
             finally:
@@ -234,6 +239,25 @@ class ConversationStore:
                 cur = con.execute(
                     f"UPDATE conversations SET {', '.join(sets)} WHERE id = ?",
                     tuple(args),
+                )
+                con.commit()
+                return cur.rowcount > 0
+            finally:
+                con.close()
+
+    def archive_conversation(self, conv_id: str) -> bool:
+        """Hide a conversation from the web UI for good, keeping its rows.
+
+        There's no unarchive: an archived conversation is only reachable by
+        querying the DB directly.
+        """
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    "UPDATE conversations SET archived_at = ? "
+                    "WHERE id = ? AND archived_at IS NULL",
+                    (time.time(), conv_id),
                 )
                 con.commit()
                 return cur.rowcount > 0

@@ -244,3 +244,13 @@ def test_frontend_cache_headers(monkeypatch, tmp_path):
     for url in ("/", "/index.html"):
         assert c.get(url).headers["cache-control"] == "no-store"
     assert "immutable" in c.get("/assets/index-abc.js").headers["cache-control"]
+
+
+def test_archive_conversation_hides_it_everywhere(client):
+    conv = client.post("/api/conversations", json={"title": "shelve"}).json()
+    r = client.post(f"/api/conversations/{conv['id']}/archive")
+    assert r.status_code == 200
+    assert all(c["id"] != conv["id"] for c in client.get("/api/conversations").json())
+    assert client.get(f"/api/conversations/{conv['id']}").status_code == 404
+    assert client.get(f"/api/conversations/{conv['id']}/messages").status_code == 404
+    assert client.post(f"/api/conversations/{conv['id']}/archive").status_code == 404
