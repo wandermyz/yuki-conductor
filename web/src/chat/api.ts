@@ -93,6 +93,13 @@ export async function deleteConversation(id: string): Promise<void> {
   if (!r.ok) throw new Error("Failed to delete conversation");
 }
 
+export async function archiveConversation(id: string): Promise<void> {
+  const r = await fetch(`/api/conversations/${encodeURIComponent(id)}/archive`, {
+    method: "POST",
+  });
+  if (!r.ok) throw new Error("Failed to archive conversation");
+}
+
 export async function updateConversation(
   id: string,
   patch: { title?: string; project?: string },

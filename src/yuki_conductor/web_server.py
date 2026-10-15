@@ -352,7 +352,7 @@ def create_api() -> FastAPI:
     @api.get("/api/conversations/{conv_id}")
     def get_conversation(conv_id: str):
         conv = conv_store.get_conversation(conv_id)
-        if not conv:
+        if not conv or conv.archived_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return _conv_to_dict(conv)
 
@@ -366,6 +366,13 @@ def create_api() -> FastAPI:
         if body.title and store.get(conv_id) is not None:
             store.set_title(conv_id, body.title)
         return _conv_to_dict(conv_store.get_conversation(conv_id))
+
+    @api.post("/api/conversations/{conv_id}/archive")
+    def archive_conversation(conv_id: str):
+        """Hide a conversation from every web view; its rows stay in the DB."""
+        if not conv_store.archive_conversation(conv_id):
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return {"ok": True}
 
     @api.delete("/api/conversations/{conv_id}")
     def delete_conversation(conv_id: str):
@@ -395,7 +402,8 @@ def create_api() -> FastAPI:
         before: float | None = Query(default=None),
         limit: int = Query(default=100, ge=1, le=500),
     ):
-        if not conv_store.get_conversation(conv_id):
+        conv = conv_store.get_conversation(conv_id)
+        if not conv or conv.archived_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         msgs = conv_store.list_messages(conv_id, before=before, limit=limit)
         return [serialize_message(m) for m in msgs]
