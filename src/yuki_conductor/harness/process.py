@@ -156,6 +156,11 @@ def run_agent(
             errors="replace",
             env=env,
             cwd=effective_cwd,
+            # Own process group, so `_kill_tree`'s killpg hits the agent and its
+            # children only. Inherited, the group is the daemon's: a cancel or
+            # idle timeout would SIGTERM the daemon itself. POSIX only; ignored
+            # on Windows, which kills the tree with taskkill.
+            start_new_session=True,
         )
     except OSError as exc:
         _cleanup_temp_files(launch.temp_files)
