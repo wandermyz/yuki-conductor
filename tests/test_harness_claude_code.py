@@ -1,10 +1,15 @@
 """Tests for running Claude Code through run_agent."""
 
 import json
+import os
+import signal
 import subprocess
+import sys
 import threading
 import time
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from yuki_conductor.config import CLAUDE_DEFAULT_MODEL
 from yuki_conductor.harness.claude_code import ClaudeCodeHarness
@@ -284,3 +289,31 @@ def test_cancel_returns_stopped_message():
 
     assert not result.is_error
     assert "stopped" in result.text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="process groups are POSIX")
+def test_cancel_kills_only_the_agent_process_group():
+    """Cancelling a real agent must not signal the daemon's own process group.
+
+    `_kill_tree` uses killpg; if the agent inherited our group, the SIGTERM
+    would land on this test process (in production: the daemon) as well.
+    """
+    from yuki_conductor.harness.base import Launch
+    from yuki_conductor.harness.process import cancel_process
+
+    sleeper = MagicMock(wraps=CLAUDE)
+    sleeper.launch.return_value = Launch(argv=["sleep", "30"], env=dict(os.environ))
+    sleeper.new_parser.return_value = CLAUDE.new_parser()
+    sleeper.label, sleeper.bin = CLAUDE.label, "sleep"
+
+    got_sigterm = threading.Event()
+    previous = signal.signal(signal.SIGTERM, lambda *_: got_sigterm.set())
+    try:
+        threading.Timer(0.5, cancel_process, args=("conv_pgid_test",)).start()
+        result = run_agent(sleeper, "test", conversation_key="conv_pgid_test")
+        time.sleep(0.2)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+    assert result.text == "(stopped by user)"
+    assert not got_sigterm.is_set()
