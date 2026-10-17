@@ -19,6 +19,7 @@ from yuki_conductor.harness.pi import (
     PROGRESS_INTERVAL_S,
     PiHarness,
     PiStreamParser,
+    model_context_window,
 )
 from yuki_conductor.harness.process import run_agent
 
@@ -269,10 +270,25 @@ def test_user_models_json_overrides_the_cached_catalog(tmp_path, monkeypatch):
     assert result.context_window == 131072
 
 
-def test_context_survives_a_failed_run(tmp_path, monkeypatch):
-    """A failed turn still reports what it carried, so the meter is not blank."""
+def test_window_falls_back_to_the_requested_model(tmp_path, monkeypatch):
+    """A routed `responseModel` missing from the catalog must not hide the window."""
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", _agent_dir(tmp_path, user=_strata_catalog(131072)))
+    parser = PiStreamParser()
+    for line in (FIXTURES / "tool_turn.jsonl").read_text(encoding="utf-8").splitlines():
+        record = json.loads(line)
+        message = record.get("message")
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            message["responseModel"] = "some-physical-model"
+        parser.feed(json.dumps(record))
+    result = parser.finish("", None)
+    assert result.context_window == 131072
+    assert model_context_window("strata", "some-physical-model") is None
+
+
+def test_failed_run_reports_no_context(tmp_path, monkeypatch):
+    """A refused request reports 0 tokens; recording that would reset the meter."""
     monkeypatch.setenv("PI_CODING_AGENT_DIR", _agent_dir(tmp_path))
     _, result = _parse("gpu_busy")
     assert result.is_error
-    assert result.context_tokens == 0
+    assert result.context_tokens is None
     assert result.context_window is None

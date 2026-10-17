@@ -259,23 +259,27 @@ class PiStreamParser:
             return RunResult(
                 text=text or "pi produced no response", session_id=session_id, is_error=True
             )
+        stop = msg.get("stopReason")
+        if stop in ("error", "aborted"):
+            # A failed request's usage says nothing about the session's context
+            # (a refused call reports 0), so leave the meter where it was.
+            return RunResult(
+                text=friendly_error(msg.get("errorMessage") or ""),
+                session_id=session_id, is_error=True, **usage,
+            )
         msg_usage = msg.get("usage")
+        provider = msg.get("provider")
         context = {
             # How full the window was on the last request of this run, against
             # the window pi would have compacted at.
             "context_tokens": prompt_tokens(
                 msg_usage if isinstance(msg_usage, dict) else {}, _PI_PROMPT_KEYS
             ),
-            "context_window": model_context_window(
-                msg.get("provider"), msg.get("responseModel") or msg.get("model")
-            ),
+            # A virtual model routes to a physical `responseModel`, which the
+            # catalog may not list; the requested `model` is the fallback.
+            "context_window": model_context_window(provider, msg.get("responseModel"))
+            or model_context_window(provider, msg.get("model")),
         }
-        stop = msg.get("stopReason")
-        if stop in ("error", "aborted"):
-            return RunResult(
-                text=friendly_error(msg.get("errorMessage") or ""),
-                session_id=session_id, is_error=True, **usage, **context,
-            )
         text = "\n\n".join(
             b.get("text", "").strip()
             for b in msg.get("content") or []
