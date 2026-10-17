@@ -33,7 +33,7 @@ tiers, and a skill declares its tier by *where it lives*:
     Everything else in ``~/.claude/skills`` — listed so the session knows the
     same skills an interactive one would, without special emphasis.
 
-The last three tiers are only reachable because ``run_claude`` passes
+The last three tiers are only reachable because ``ClaudeCodeHarness`` passes
 ``--setting-sources user,project,local``; a headless run loads no settings, and
 therefore no skills, by default.
 
@@ -259,15 +259,27 @@ def resolve_skills(cwd: Path | str | None = None, plugin_dirs: list[str] | None 
 # --------------------------------------------------------------------------
 
 
-_PROMPT_HEADER = (
+_INTRO = (
     "You are running as an agent spawned by yuki-conductor, a personal daemon "
-    "that bridges the user's chat apps to Claude Code and runs scheduled tasks. "
-    "You are not being run interactively by the user.\n\n"
+    "that bridges the user's chat apps to coding agents and runs scheduled tasks. "
+    "You are not being run interactively by the user."
+)
+
+# Claude Code only: a headless run gets no skill listing, so we synthesize one.
+_SKILLS_INTRO = (
     "The skills below are available to you, but this session receives no "
     "automatic skill listing, so they will not appear anywhere else in your "
     "context. Invoke one by name with the `Skill` tool. When a request matches a "
     "skill's description, prefer that skill over improvising with generic tools "
     "— especially over OS-level schedulers or unrelated CLIs."
+)
+
+_ATTACHMENTS = (
+    "To send the user a file (an image, a report) with your final response, put "
+    "`<attachment>/absolute/path/to/file</attachment>` anywhere in it. The tag is "
+    "removed from the text and the file is delivered as a native attachment on "
+    "whatever chat surface the user is on. Files the user sends you arrive the "
+    "same way, as `<attachment>` tags at the start of their message."
 )
 
 _TIER_HEADINGS = {
@@ -315,8 +327,8 @@ def _conversation_section(conversation_key: str | None) -> list[str]:
 
     Without this the `yuki-conductor-send` skill has no way to address the
     thread it was spawned from — a cron run or background agent could only
-    open a brand-new conversation. Only web conversations are addressable by
-    the `send` CLI, so a non-web key is deliberately not advertised.
+    open a brand-new conversation. Callers pass a key only when `/api/push`
+    can route back to it.
     """
     if not conversation_key:
         return []
@@ -324,10 +336,10 @@ def _conversation_section(conversation_key: str | None) -> list[str]:
         "",
         "## Your conversation",
         "",
-        f"You are running inside web conversation `{conversation_key}`. To send "
-        "the user a message outside your normal reply (progress on a long task, "
-        "a follow-up after this turn ends), use the `yuki-conductor-send` skill "
-        "with this id.",
+        f"You are running inside conversation `{conversation_key}`. To send the "
+        "user a message or file outside your normal reply (progress on a long "
+        "task, a follow-up after this turn ends), use the `yuki-conductor-send` "
+        "skill with this id.",
     ]
 
 
@@ -345,11 +357,27 @@ def system_prompt(
     resolved = resolve_skills(cwd=cwd, plugin_dirs=plugin_dirs)
 
     lines = [
-        _PROMPT_HEADER,
+        f"{_INTRO}\n\n{_SKILLS_INTRO}\n\n{_ATTACHMENTS}",
         *_render_skills(resolved, cwd),
         *_conversation_section(conversation_key),
     ]
-    prompt = "\n".join(lines)
+    return _with_workspace_prompt("\n".join(lines))
 
+
+def core_prompt(conversation_key: str | None = None) -> str:
+    """The part of the system prompt every harness needs, without skills.
+
+    Harnesses that list skills natively (pi) get only this: the attachment tag
+    contract, the conversation id for `yuki-conductor send`, and the workspace
+    prompt. Without it, file replies and pushes break.
+    """
+    lines = [
+        f"{_INTRO}\n\n{_ATTACHMENTS}",
+        *_conversation_section(conversation_key),
+    ]
+    return _with_workspace_prompt("\n".join(lines))
+
+
+def _with_workspace_prompt(prompt: str) -> str:
     workspace = _workspace_prompt()
     return f"{prompt}\n\n{workspace}" if workspace else prompt

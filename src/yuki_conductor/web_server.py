@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import shutil
 import sys
 import threading
 import time
@@ -23,10 +24,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from yuki_conductor import zellij_manager
-from yuki_conductor.claude_runner import cancel_process
 from yuki_conductor.config import WEB_UPLOADS_DIR
 from yuki_conductor.conversation_store import ConversationStore
-from yuki_conductor.messaging import Attachment, IncomingMessage, handle_incoming_message
+from yuki_conductor.harness import HARNESSES, default_harness
+from yuki_conductor.harness.process import cancel_process
+from yuki_conductor.messaging import (
+    Attachment,
+    IncomingMessage,
+    OutgoingMessage,
+    handle_incoming_message,
+)
 from yuki_conductor.messaging.web_platform import (
     ConnectionManager,
     WebPlatform,
@@ -54,6 +61,7 @@ WEB_FAVICON = os.environ.get("WEB_FAVICON", "")
 
 # Appended to every `/api/push` message so a proactive note from a cron task or
 # background run reads differently from a reply to something the user asked.
+# It's markdown, so every platform renders it.
 PUSH_MARKER = "_📨 Pushed message_"
 
 # Resolve path to the built frontend assets
@@ -288,6 +296,7 @@ def create_api() -> FastAPI:
     class ConversationCreate(BaseModel):
         title: str | None = None
         project: str | None = None
+        harness: str | None = None  # None: the default harness; fixed for the conversation's life
 
     class ConversationUpdate(BaseModel):
         title: str | None = None
@@ -305,6 +314,7 @@ def create_api() -> FastAPI:
             "title": c.title,
             "project": c.project,
             "claude_session_id": c.claude_session_id,
+            "harness": c.harness,
             "created_at": c.created_at,
             "updated_at": c.updated_at,
         }
@@ -313,17 +323,37 @@ def create_api() -> FastAPI:
     def list_conversations(platform: str | None = Query(default="web")):
         return [_conv_to_dict(c) for c in conv_store.list_conversations(platform=platform)]
 
+    @api.get("/api/harnesses")
+    def list_harnesses():
+        """Harnesses enabled here (the HARNESSES setting); `default` is preselected.
+
+        `available` additionally says whether the CLI is on PATH, so an enabled
+        harness whose binary is missing isn't offered either.
+        """
+        return {
+            "default": default_harness(),
+            "harnesses": [
+                {"name": h.name, "label": h.label, "available": shutil.which(h.bin) is not None}
+                for h in HARNESSES.values()
+            ],
+        }
+
     @api.post("/api/conversations")
     def create_conversation(body: ConversationCreate):
+        harness = body.harness or default_harness()
+        if harness not in HARNESSES:
+            raise HTTPException(
+                status_code=400, detail=f"Harness {harness!r} isn't enabled on this machine"
+            )
         conv = conv_store.create_conversation(
-            platform="web", title=body.title, project=body.project
+            platform="web", title=body.title, project=body.project, harness=harness
         )
         return _conv_to_dict(conv)
 
     @api.get("/api/conversations/{conv_id}")
     def get_conversation(conv_id: str):
         conv = conv_store.get_conversation(conv_id)
-        if not conv:
+        if not conv or conv.archived_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return _conv_to_dict(conv)
 
@@ -337,6 +367,13 @@ def create_api() -> FastAPI:
         if body.title and store.get(conv_id) is not None:
             store.set_title(conv_id, body.title)
         return _conv_to_dict(conv_store.get_conversation(conv_id))
+
+    @api.post("/api/conversations/{conv_id}/archive")
+    def archive_conversation(conv_id: str):
+        """Hide a conversation from every web view; its rows stay in the DB."""
+        if not conv_store.archive_conversation(conv_id):
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return {"ok": True}
 
     @api.delete("/api/conversations/{conv_id}")
     def delete_conversation(conv_id: str):
@@ -366,7 +403,8 @@ def create_api() -> FastAPI:
         before: float | None = Query(default=None),
         limit: int = Query(default=100, ge=1, le=500),
     ):
-        if not conv_store.get_conversation(conv_id):
+        conv = conv_store.get_conversation(conv_id)
+        if not conv or conv.archived_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         msgs = conv_store.list_messages(conv_id, before=before, limit=limit)
         return [serialize_message(m) for m in msgs]
@@ -439,58 +477,65 @@ def create_api() -> FastAPI:
 
     class PushMessage(BaseModel):
         conversation_id: str | None = None
-        text: str
+        text: str = ""
         title: str | None = None
+        # Absolute paths on this machine; the daemon and the run share a disk.
+        attachments: list[str] = []
+
+    def _push_platform(conv_id: str):
+        """Return the platform that owns `conv_id`, or None if nothing does."""
+        if conv_store.get_conversation(conv_id):
+            return WebPlatform(conv_store, ws_manager)
+        session_type = store.get_session_type(conv_id)
+        for rec in _receivers:
+            if rec.platform.name == session_type:
+                return rec.platform
+        return None
 
     @api.post("/api/push")
     def push_message(body: PushMessage):
-        """Deliver an out-of-band assistant message to a web conversation.
+        """Deliver an out-of-band assistant message to a conversation.
 
         Backs the `yuki-conductor send` CLI, which is how a spawned Claude run
         (a cron task, a long-running agent) talks back to the user without
-        being the reply to an in-flight turn. The message is persisted like any
-        assistant message and broadcast, so connected browsers see it live and
-        a reconnecting one still finds it in scrollback.
+        being the reply to an in-flight turn. The message goes through the
+        owning platform's `send`, the same path a normal reply takes, so web
+        and Slack threads both work and attachments are delivered natively.
         """
-        if not body.text.strip():
+        if not body.text.strip() and not body.attachments:
             raise HTTPException(status_code=400, detail="Empty message")
 
+        attachments: list[Attachment] = []
+        for raw in body.attachments:
+            path = Path(raw)
+            if not path.is_absolute() or not path.is_file():
+                raise HTTPException(status_code=400, detail=f"Not a file: {raw}")
+            attachments.append(Attachment(filename=path.name, local_path=path))
+
         if body.conversation_id is None:
-            conv = conv_store.create_conversation(
-                platform="web", title=body.title or body.text[:80]
-            )
-            conv_id = conv.id
+            conv_id = conv_store.create_conversation(
+                platform="web", title=body.title or body.text[:80] or attachments[0].filename
+            ).id
+            platform = WebPlatform(conv_store, ws_manager)
             created = True
         else:
-            if not conv_store.get_conversation(body.conversation_id):
-                raise HTTPException(status_code=404, detail="Conversation not found")
             conv_id = body.conversation_id
+            platform = _push_platform(conv_id)
+            if platform is None:
+                raise HTTPException(status_code=404, detail="Conversation not found")
             created = False
 
         # Mark the text itself, not just the WS payload: `pushed` is not
         # persisted, so on reload a push would be indistinguishable from a
         # reply Claude actually made to something the user said.
-        stored = conv_store.add_message(
-            conv_id,
-            role="assistant",
-            text=f"{body.text.rstrip()}\n\n{PUSH_MARKER}",
-            attachments=[],
-        )
-        ws_manager.broadcast(
-            conv_id,
-            {
-                "type": "message",
-                "message": serialize_message(stored),
-                # Out-of-band: no `processing` event bookends this message, so
-                # the client can't rely on the end-of-turn hook to alert on it.
-                "pushed": True,
-            },
-        )
-        conv_store.set_status(conv_id, "unread")
-        # The status change has to reach browsers too, or the conversation only
-        # looks unread after a reload.
-        ws_manager.broadcast(conv_id, {"type": "status", "status": "unread"})
-        return {"ok": True, "conversation_id": conv_id, "created": created}
+        text = f"{body.text.rstrip()}\n\n{PUSH_MARKER}" if body.text.strip() else PUSH_MARKER
+        platform.send(conv_id, OutgoingMessage(text=text, attachments=attachments, pushed=True))
+        return {
+            "ok": True,
+            "conversation_id": conv_id,
+            "platform": platform.name,
+            "created": created,
+        }
 
     # ── Automations (cron) endpoints ──────────────────────────────────────
 
@@ -825,10 +870,28 @@ def create_api() -> FastAPI:
     return api
 
 
+class _FrontendFiles(StaticFiles):
+    """StaticFiles with cache headers suited to a Vite build.
+
+    Hashed files under `assets/` never change, so they're cached forever.
+    Everything else — above all `index.html`, which names the current hashes —
+    is `no-store`. Without it, an iOS home-screen web app keeps serving a stale
+    `index.html` heuristically and never picks up a rebuild.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if path.startswith("assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+
 def mount_static(api: FastAPI) -> None:
     """Mount the React frontend static files. Call after all API routes are registered."""
     if _WEB_DIST.is_dir():
-        api.mount("/", StaticFiles(directory=str(_WEB_DIST), html=True), name="static")
+        api.mount("/", _FrontendFiles(directory=str(_WEB_DIST), html=True), name="static")
 
 
 # Module-level app for `uvicorn yuki_conductor.web_server:app`

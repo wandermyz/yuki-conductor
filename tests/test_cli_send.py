@@ -13,7 +13,8 @@ from yuki_conductor.cli import main
 def _mock_response(payload=None):
     resp = MagicMock()
     resp.read.return_value = json.dumps(
-        payload or {"ok": True, "conversation_id": "conv-1", "created": False}
+        payload
+        or {"ok": True, "conversation_id": "conv-1", "platform": "web", "created": False}
     ).encode()
     resp.__enter__ = lambda s: s
     resp.__exit__ = MagicMock(return_value=False)
@@ -29,7 +30,9 @@ def test_send_posts_to_named_conversation(capsys):
         main(["send", "-c", "conv-1", "hello there"])
 
     body = json.loads(_captured_request(m).data)
-    assert body == {"text": "hello there", "conversation_id": "conv-1", "title": None}
+    assert body == {
+        "text": "hello there", "conversation_id": "conv-1", "title": None, "attachments": [],
+    }
     assert "conv-1" in capsys.readouterr().out
 
 
@@ -48,6 +51,25 @@ def test_send_reads_stdin_for_dash(monkeypatch):
         main(["send", "-"])
 
     assert json.loads(_captured_request(m).data)["text"] == "line one\nline two\n"
+
+
+def test_send_attach_resolves_absolute_paths(tmp_path, monkeypatch):
+    (tmp_path / "pic.png").write_bytes(b"png")
+    monkeypatch.chdir(tmp_path)
+    with patch("urllib.request.urlopen", return_value=_mock_response()) as m:
+        main(["send", "-c", "conv-1", "--attach", "pic.png"])
+
+    body = json.loads(_captured_request(m).data)
+    assert body["text"] == ""
+    assert body["attachments"] == [str(tmp_path / "pic.png")]
+
+
+def test_send_attach_rejects_missing_file(tmp_path, capsys):
+    with patch("urllib.request.urlopen") as m, pytest.raises(SystemExit) as exc:
+        main(["send", "-a", str(tmp_path / "nope.png"), "hi"])
+    assert exc.value.code == 1
+    m.assert_not_called()
+    assert "not a file" in capsys.readouterr().err.lower()
 
 
 def test_send_rejects_empty_text(capsys):

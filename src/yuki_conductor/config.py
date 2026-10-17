@@ -1,6 +1,7 @@
 """Configuration and path constants."""
 
 import os
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -86,6 +87,22 @@ CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 # omitting the flag means only the first message of a conversation ever gets the
 # 1M window.
 CLAUDE_DEFAULT_MODEL = os.environ.get("CLAUDE_DEFAULT_MODEL", "opus[1m]")
+
+# Agent harnesses enabled on this machine, comma-separated, in preference
+# order: the first one is the default for a new conversation that names none
+# (web picker, cron `harness:`). A conversation keeps the harness it started
+# with. pi needs its own install and ~/.pi/agent config, so it's opt-in.
+def parse_harnesses(raw: str | None) -> list[str]:
+    return [h.strip() for h in (raw or "claude-code").split(",") if h.strip()]
+
+
+ENABLED_HARNESSES = parse_harnesses(os.environ.get("HARNESSES"))
+
+# pi (https://github.com/earendil-works/pi). Its providers live in
+# ~/.pi/agent/models.json, which is personal machine config: yuki-conductor
+# only names the model, as `provider/id`.
+PI_BIN = os.environ.get("PI_BIN", "pi")
+PI_DEFAULT_MODEL = os.environ.get("PI_DEFAULT_MODEL", "strata/qwen3.8-flash-next-iq2_xs")
 
 def channels_override() -> list[str] | None:
     """Return the `CHANNELS` env override, or None when it isn't set.
@@ -181,3 +198,24 @@ def slack_app_token() -> str:
     if not token:
         raise RuntimeError("SLACK_APP_TOKEN not set")
     return token
+
+
+def parse_slack_command_prefix(raw: str | None) -> str:
+    """Validate a slash-command prefix: lowercase letters, digits and '-'."""
+    prefix = (raw or "yuki").strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", prefix) or prefix.endswith("-"):
+        raise RuntimeError(
+            f"SLACK_COMMAND_PREFIX={raw!r} isn't usable: use lowercase letters, digits "
+            "and '-', e.g. 'yuki'"
+        )
+    return prefix
+
+
+def slack_command_prefix() -> str:
+    """The `/<prefix>-…` namespace for this machine's Slack commands.
+
+    Each machine runs its own Slack app; two apps in one workspace can't both
+    own `/yuki-model`, so a second machine sets e.g. SLACK_COMMAND_PREFIX=skirk
+    and registers `/skirk-model` and friends instead.
+    """
+    return parse_slack_command_prefix(os.environ.get("SLACK_COMMAND_PREFIX"))

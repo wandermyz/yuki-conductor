@@ -1,13 +1,21 @@
-"""Tests for claude_runner module."""
+"""Tests for running Claude Code through run_agent."""
 
 import json
+import os
+import signal
 import subprocess
+import sys
 import threading
 import time
 from unittest.mock import MagicMock, patch
 
-from yuki_conductor.claude_runner import run_claude
+import pytest
+
 from yuki_conductor.config import CLAUDE_DEFAULT_MODEL
+from yuki_conductor.harness.claude_code import ClaudeCodeHarness
+from yuki_conductor.harness.process import run_agent
+
+CLAUDE = ClaudeCodeHarness()
 
 
 def _stream(*records: dict) -> str:
@@ -36,7 +44,7 @@ def test_basic_call():
     output = _stream(_result_record("Hello!", "sess_123"))
     mock_proc = _mock_popen(stdout=output)
     with patch("subprocess.Popen", return_value=mock_proc) as mock_cls:
-        result = run_claude("hi")
+        result = run_agent(CLAUDE, "hi")
 
     assert result.text == "Hello!"
     assert result.session_id == "sess_123"
@@ -70,7 +78,7 @@ def test_intermediate_steps_are_streamed_to_callback():
     seen = []
     mock_proc = _mock_popen(stdout=output)
     with patch("subprocess.Popen", return_value=mock_proc):
-        result = run_claude("go", on_event=seen.append)
+        result = run_agent(CLAUDE, "go", on_event=seen.append)
 
     assert result.text == "done"
     assert [e.kind for e in seen] == ["init", "text", "tool_use", "tool_result"]
@@ -91,7 +99,7 @@ def test_callback_exception_does_not_abort_run():
 
     mock_proc = _mock_popen(stdout=output)
     with patch("subprocess.Popen", return_value=mock_proc):
-        result = run_claude("go", on_event=boom)
+        result = run_agent(CLAUDE, "go", on_event=boom)
 
     assert result.text == "finished"
     assert not result.is_error
@@ -107,7 +115,7 @@ def test_usage_and_cost_from_result_record():
     )
     mock_proc = _mock_popen(stdout=output)
     with patch("subprocess.Popen", return_value=mock_proc):
-        result = run_claude("hi")
+        result = run_agent(CLAUDE, "hi")
 
     assert result.input_tokens == 120
     assert result.output_tokens == 35
@@ -123,7 +131,7 @@ def test_default_model_flag_when_unset():
     """
     mock_proc = _mock_popen(stdout=_stream(_result_record()))
     with patch("subprocess.Popen", return_value=mock_proc) as mock_cls:
-        run_claude("hi", model=None)
+        run_agent(CLAUDE, "hi", model=None)
 
     cmd = mock_cls.call_args[0][0]
     assert cmd[cmd.index("--model") + 1] == CLAUDE_DEFAULT_MODEL
@@ -138,7 +146,7 @@ def test_model_flag_when_pinned():
     """Bracketed values must reach the CLI intact — they select the 1M variants."""
     mock_proc = _mock_popen(stdout=_stream(_result_record()))
     with patch("subprocess.Popen", return_value=mock_proc) as mock_cls:
-        run_claude("hi", model="opus[1m]")
+        run_agent(CLAUDE, "hi", model="opus[1m]")
 
     cmd = mock_cls.call_args[0][0]
     assert cmd[cmd.index("--model") + 1] == "opus[1m]"
@@ -148,7 +156,7 @@ def test_resume_session():
     output = _stream(_result_record("Resumed!", "sess_456"))
     mock_proc = _mock_popen(stdout=output)
     with patch("subprocess.Popen", return_value=mock_proc) as mock_cls:
-        result = run_claude("continue", session_id="sess_456")
+        result = run_agent(CLAUDE, "continue", session_id="sess_456")
 
     cmd = mock_cls.call_args[0][0]
     cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
@@ -171,8 +179,8 @@ def test_timeout():
     mock_proc.stdout = hanging_stdout()
 
     with patch("subprocess.Popen", return_value=mock_proc), \
-         patch("yuki_conductor.claude_runner._kill_tree", side_effect=lambda p: killed.set()) as kill:
-        result = run_claude("slow prompt", timeout=0.05)
+         patch("yuki_conductor.harness.process._kill_tree", side_effect=lambda p: killed.set()) as kill:
+        result = run_agent(CLAUDE, "slow prompt", timeout=0.05)
 
     assert result.is_error
     assert "no output" in result.text
@@ -196,9 +204,9 @@ def test_slow_but_chatty_run_is_not_killed():
     mock_proc.stdout = trickling_stdout()
 
     with patch("subprocess.Popen", return_value=mock_proc), \
-         patch("yuki_conductor.claude_runner._kill_tree") as kill:
+         patch("yuki_conductor.harness.process._kill_tree") as kill:
         # Total runtime (~0.35s) far exceeds the timeout; no single gap does.
-        result = run_claude("slow prompt", timeout=0.2)
+        result = run_agent(CLAUDE, "slow prompt", timeout=0.2)
 
     assert not result.is_error
     assert result.text == "Done!"
@@ -207,7 +215,7 @@ def test_slow_but_chatty_run_is_not_killed():
 
 def test_cli_not_found():
     with patch("subprocess.Popen", side_effect=FileNotFoundError):
-        result = run_claude("hello")
+        result = run_agent(CLAUDE, "hello")
 
     assert result.is_error
     assert "not found" in result.text
@@ -216,7 +224,7 @@ def test_cli_not_found():
 def test_nonzero_exit():
     mock_proc = _mock_popen(returncode=1, stderr="Some error")
     with patch("subprocess.Popen", return_value=mock_proc):
-        result = run_claude("bad prompt")
+        result = run_agent(CLAUDE, "bad prompt")
 
     assert result.is_error
     assert "Some error" in result.text
@@ -227,7 +235,7 @@ def test_no_truncation():
     long_text = "x" * 5000
     mock_proc = _mock_popen(stdout=_stream(_result_record(long_text, "s1")))
     with patch("subprocess.Popen", return_value=mock_proc):
-        result = run_claude("big")
+        result = run_agent(CLAUDE, "big")
 
     assert result.text == long_text
 
@@ -241,7 +249,7 @@ def test_unset_claudecode_env():
     try:
         mock_proc = _mock_popen(stdout=_stream(_result_record()))
         with patch("subprocess.Popen", return_value=mock_proc) as mock_cls:
-            run_claude("test")
+            run_agent(CLAUDE, "test")
 
         env = mock_cls.call_args[1]["env"]
         assert "CLAUDECODE" not in env
@@ -256,7 +264,7 @@ def test_non_json_output():
     """Garbage on stdout with no result record still surfaces as the reply."""
     mock_proc = _mock_popen(stdout="plain text response\n")
     with patch("subprocess.Popen", return_value=mock_proc):
-        result = run_claude("test")
+        result = run_agent(CLAUDE, "test")
 
     assert result.text == "plain text response"
     assert not result.is_error
@@ -264,11 +272,11 @@ def test_non_json_output():
 
 def test_cancel_returns_stopped_message():
     """A cancelled process returns a non-error stopped message."""
-    from yuki_conductor.claude_runner import cancel_process
+    from yuki_conductor.harness.process import cancel_process
 
     mock_proc = _mock_popen(returncode=1)
     with patch("subprocess.Popen", return_value=mock_proc), \
-         patch("yuki_conductor.claude_runner._kill_tree"):
+         patch("yuki_conductor.harness.process._kill_tree"):
         original_wait = mock_proc.wait
 
         def wait_with_cancel(*a, **kw):
@@ -277,7 +285,35 @@ def test_cancel_returns_stopped_message():
             return original_wait(*a, **kw)
 
         mock_proc.wait = wait_with_cancel
-        result = run_claude("test", conversation_key="conv_cancel_test")
+        result = run_agent(CLAUDE, "test", conversation_key="conv_cancel_test")
 
     assert not result.is_error
     assert "stopped" in result.text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="process groups are POSIX")
+def test_cancel_kills_only_the_agent_process_group():
+    """Cancelling a real agent must not signal the daemon's own process group.
+
+    `_kill_tree` uses killpg; if the agent inherited our group, the SIGTERM
+    would land on this test process (in production: the daemon) as well.
+    """
+    from yuki_conductor.harness.base import Launch
+    from yuki_conductor.harness.process import cancel_process
+
+    sleeper = MagicMock(wraps=CLAUDE)
+    sleeper.launch.return_value = Launch(argv=["sleep", "30"], env=dict(os.environ))
+    sleeper.new_parser.return_value = CLAUDE.new_parser()
+    sleeper.label, sleeper.bin = CLAUDE.label, "sleep"
+
+    got_sigterm = threading.Event()
+    previous = signal.signal(signal.SIGTERM, lambda *_: got_sigterm.set())
+    try:
+        threading.Timer(0.5, cancel_process, args=("conv_pgid_test",)).start()
+        result = run_agent(sleeper, "test", conversation_key="conv_pgid_test")
+        time.sleep(0.2)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+    assert result.text == "(stopped by user)"
+    assert not got_sigterm.is_set()

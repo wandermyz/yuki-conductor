@@ -26,6 +26,13 @@ STATUS_POLL_SECONDS = 2
 # Slack renders the status inline, so keep step labels short.
 STATUS_LABEL_LIMIT = 80
 
+# Reaction on a thread's root message naming the harness it runs on, so threads
+# on different agents are told apart at a glance in the channel.
+HARNESS_EMOJI = {
+    "claude-code": "large_orange_diamond",
+    "pi": "pie",
+}
+
 # Slack visibly truncates messages past ~4000 characters, so long replies are
 # split across several messages in the same thread rather than cut off. Only
 # Slack has this limit — web chat posts the full text in one piece.
@@ -72,6 +79,21 @@ def _for_slack(text: str) -> list[str]:
     return _balance_fences(_split_text(markdown_to_mrkdwn(text), MESSAGE_LIMIT - _FENCE_RESERVE))
 
 
+def _with_harness(status: str, harness_label: str | None) -> str:
+    """Tag a status line with the harness, e.g. "(pi) is thinking...".
+
+    Slack prefixes the app name, so it reads "Yuki (pi) is thinking...". The
+    step text is trimmed rather than the tag, so the harness always shows.
+    """
+    if not harness_label:
+        return status
+    tag = f"({harness_label}) "
+    room = STATUS_LABEL_LIMIT - len(tag)
+    if len(status) > room:
+        status = status[: room - 1] + "…"
+    return tag + status
+
+
 def _status_for(event) -> str | None:
     """Render a stream event as a Slack status line, or None to keep the last one.
 
@@ -104,6 +126,8 @@ class SlackPlatform:
         self._refreshers_lock = threading.Lock()
         # Latest status label per thread, published by the updater thread.
         self._pending_status: dict[str, str] = {}
+        # Harness label per running thread, tagged onto every status line.
+        self._harness_labels: dict[str, str | None] = {}
 
     def send(self, conversation_key: str, msg: OutgoingMessage) -> None:
         """Post a reply to a thread, uploading any attachments first."""
@@ -142,8 +166,11 @@ class SlackPlatform:
             return
 
         if on:
-            if self._set_status(channel, conversation_key, STATUS_TEXT):
-                self._start_status_refresh(channel, conversation_key)
+            label = self._harness_label(conversation_key)
+            initial = _with_harness(STATUS_TEXT, label)
+            if self._set_status(channel, conversation_key, initial):
+                self._harness_labels[conversation_key] = label
+                self._start_status_refresh(channel, conversation_key, initial)
             else:
                 self._toggle_reaction(channel, message_id, on=True)
             return
@@ -166,7 +193,32 @@ class SlackPlatform:
             return
         with self._refreshers_lock:
             if conversation_key in self._refreshers:
-                self._pending_status[conversation_key] = status
+                self._pending_status[conversation_key] = _with_harness(
+                    status, self._harness_labels.get(conversation_key)
+                )
+
+    def mark_harness(self, thread_ts: str, harness: str) -> None:
+        """React to a thread's root message with its harness's emoji.
+
+        Best-effort: a missing `reactions:write` scope or an already-present
+        reaction is logged, never raised.
+        """
+        emoji = HARNESS_EMOJI.get(harness)
+        channel = self._lookup_channel(thread_ts)
+        if emoji is None or channel is None:
+            return
+        try:
+            self._client.reactions_add(channel=channel, name=emoji, timestamp=thread_ts)
+        except Exception:
+            logger.debug("Harness reaction failed", exc_info=True)
+
+    def _harness_label(self, thread_ts: str) -> str | None:
+        """Display name of the harness a thread is bound to, if it has one yet."""
+        from yuki_conductor.harness import KNOWN_HARNESSES
+        from yuki_conductor.store import SessionStore
+
+        harness = KNOWN_HARNESSES.get(SessionStore().get_harness(thread_ts) or "")
+        return harness.label if harness else None
 
     def _set_status(self, channel: str, thread_ts: str, status: str) -> bool:
         try:
@@ -178,11 +230,11 @@ class SlackPlatform:
             logger.debug("Assistant status update failed", exc_info=True)
             return False
 
-    def _start_status_refresh(self, channel: str, thread_ts: str) -> None:
+    def _start_status_refresh(self, channel: str, thread_ts: str, initial: str) -> None:
         stop = threading.Event()
 
         def refresh() -> None:
-            last_pushed = STATUS_TEXT
+            last_pushed = initial
             last_push_at = time.monotonic()
             while not stop.wait(STATUS_POLL_SECONDS):
                 with self._refreshers_lock:
@@ -207,6 +259,7 @@ class SlackPlatform:
         with self._refreshers_lock:
             entry = self._refreshers.pop(thread_ts, None)
             self._pending_status.pop(thread_ts, None)
+            self._harness_labels.pop(thread_ts, None)
         if entry is None:
             return False
         stop, thread = entry
@@ -233,8 +286,17 @@ class SlackPlatform:
         value = SessionStore().get(conversation_key)
         return value or None
 
+    def get_harness(self, conversation_key: str) -> str | None:
+        from yuki_conductor.store import SessionStore
+
+        return SessionStore().get_harness(conversation_key)
+
     def set_session_id(
-        self, conversation_key: str, session_id: str, title_hint: str | None = None
+        self,
+        conversation_key: str,
+        session_id: str,
+        title_hint: str | None = None,
+        harness: str = "claude-code",
     ) -> None:
         from yuki_conductor.store import SessionStore
 
@@ -242,6 +304,7 @@ class SlackPlatform:
         kwargs = {
             "channel_id": self._lookup_channel(conversation_key),
             "session_type": "slack",
+            "harness": harness,
         }
         if title_hint is not None:
             kwargs["title"] = title_hint
@@ -263,11 +326,14 @@ class SlackPlatform:
         except Exception:
             logger.warning("Failed to send Slack notification", exc_info=True)
 
-    def start_thread(self, text: str, title: str | None = None) -> str:
+    def start_thread(
+        self, text: str, title: str | None = None, harness: str = "claude-code"
+    ) -> str:
         """Post a top-level message to the cron channel and return its `ts`.
 
         A long body opens the thread with its first chunk and hangs the rest
-        underneath, so the channel shows one entry rather than several.
+        underneath, so the channel shows one entry rather than several. The
+        root message gets the harness reaction, like a user-started thread.
         """
         channel = slack_cron_channel()
         chunks = _for_slack(text)
@@ -283,7 +349,9 @@ class SlackPlatform:
             channel_id=channel,
             title=title or text[:100],
             session_type=SESSION_TYPE,
+            harness=harness,
         )
+        self.mark_harness(thread_ts, harness)
         return thread_ts
 
 

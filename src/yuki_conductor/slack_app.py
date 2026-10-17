@@ -14,33 +14,94 @@ import time
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
-from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import (
     CLAUDE_BIN,
     CLAUDE_DEFAULT_MODEL,
     CLAUDE_WORKING_DIR,
     slack_app_token,
     slack_bot_token,
+    slack_command_prefix,
 )
 from yuki_conductor.formatting import markdown_to_mrkdwn
+from yuki_conductor.harness import HARNESSES, default_harness, get_harness
+from yuki_conductor.harness.process import run_agent
 from yuki_conductor.messaging import IncomingMessage, handle_incoming_message
 from yuki_conductor.messaging.slack_platform import (
     SESSION_TYPE,
     SlackPlatform,
     download_slack_files,
 )
-from yuki_conductor.store import DEFAULT_MODEL_ARG, MODEL_ALIASES, ModelStore, SessionStore
+from yuki_conductor.store import (
+    DEFAULT_MODEL_ARG,
+    MODEL_ALIASES,
+    HarnessStore,
+    ModelStore,
+    SessionStore,
+)
 
 logger = logging.getLogger(__name__)
 
 store = SessionStore()
 model_store = ModelStore()
+harness_store = HarnessStore()
+
+# `/<prefix>-harness default` clears the channel's pin.
+DEFAULT_HARNESS_ARG = "default"
+
+
+def channel_harness(channel: str) -> str:
+    """The harness a new thread in `channel` starts on.
+
+    The channel's `/<prefix>-harness` pin if it's still enabled here, else the
+    machine default. Existing threads ignore this; they keep their own.
+    """
+    pinned = harness_store.get(channel)
+    return pinned if pinned in HARNESSES else default_harness()
 
 
 def create_app() -> App:
     app = App(token=slack_bot_token())
+    # Every slash command is `/<prefix>-…`, so two machines' Slack apps can share
+    # a workspace (e.g. /yuki-model on one, /skirk-model on the other).
+    prefix = slack_command_prefix()
 
-    @app.command("/yuki-model")
+    @app.command(f"/{prefix}-harness")
+    def handle_harness_command(ack, command, respond):
+        ack()
+        channel = command["channel_id"]
+        arg = command.get("text", "").strip().lower()
+        options = ", ".join([DEFAULT_HARNESS_ARG, *HARNESSES])
+        pinned = harness_store.get(channel)
+
+        if not arg:
+            current = channel_harness(channel)
+            note = ""
+            if pinned and pinned not in HARNESSES:
+                note = f" (pinned to *{pinned}*, which isn't enabled on this machine)"
+            elif not pinned:
+                note = " (the default)"
+            respond(
+                f"New threads here use *{current}*{note}. Existing threads keep "
+                f"the harness they started with.\nUsage: `/{prefix}-harness [{options}]`"
+            )
+            return
+
+        if arg == DEFAULT_HARNESS_ARG:
+            harness_store.clear(channel)
+            respond(f"New threads here now use the default harness (*{default_harness()}*).")
+            return
+
+        if arg not in HARNESSES:
+            respond(f"Harness `{arg}` isn't enabled on this machine. Options: {options}")
+            return
+
+        harness_store.set(channel, arg)
+        respond(
+            f"New threads here now use *{arg}*. Existing threads keep the harness "
+            "they started with."
+        )
+
+    @app.command(f"/{prefix}-model")
     def handle_model_command(ack, command, respond):
         ack()
         channel = command["channel_id"]
@@ -49,7 +110,7 @@ def create_app() -> App:
 
         if not arg:
             current = model_store.get(channel) or f"{DEFAULT_MODEL_ARG} ({CLAUDE_DEFAULT_MODEL})"
-            respond(f"Current model: *{current}*\nUsage: `/yuki-model [{options}]`")
+            respond(f"Current model: *{current}*\nUsage: `/{prefix}-model [{options}]`")
             return
 
         if arg == DEFAULT_MODEL_ARG:
@@ -65,12 +126,12 @@ def create_app() -> App:
         model_store.set(channel, resolved)
         respond(f"Model switched to *{resolved}* for this channel.")
 
-    @app.command("/yuki-title")
+    @app.command(f"/{prefix}-title")
     def handle_title_command(ack, command, respond):
         ack()
         respond("Reply with `!title <new title>` in a thread to rename it.")
 
-    @app.command("/yuki-usage")
+    @app.command(f"/{prefix}-usage")
     def handle_usage_command(ack, command, respond, client):
         ack()
 
@@ -92,6 +153,11 @@ def create_app() -> App:
             model_parts = [f"<#{k}>: {v}" for k, v in model_rows[:5]]
             lines.append(f"*Model settings:*  {' | '.join(model_parts)}")
 
+        lines.append(
+            f"*Harnesses:*  {', '.join(HARNESSES)} (default {default_harness()})  |  "
+            f"this channel: {channel_harness(command['channel_id'])}"
+        )
+
         try:
             proc = subprocess.run(
                 [CLAUDE_BIN, "--version"],
@@ -110,18 +176,19 @@ def create_app() -> App:
 
         respond("\n".join(lines))
 
-    @app.command(re.compile(r"/yuki-.+"))
+    @app.command(re.compile(rf"/{re.escape(prefix)}-.+"))
     def handle_skill_command(ack, command, respond, client):
-        """Catch-all: map /yuki-<skill> to Claude's /<skill>."""
+        """Catch-all: map /<prefix>-<skill> to Claude's /<skill>."""
         ack()
-        skill_name = command["command"].removeprefix("/yuki-")
+        skill_name = command["command"].removeprefix(f"/{prefix}-")
         channel = command["channel_id"]
         arg = command.get("text", "").strip()
         prompt = f"/{skill_name} {arg}" if arg else f"/{skill_name}"
         model = model_store.get(channel)
 
         respond(f"Running `/{skill_name}`...")
-        result = run_claude(prompt, model=model)
+        # Forwards Claude's `/<skill>` slash syntax, so it stays on Claude Code.
+        result = run_agent(get_harness("claude-code"), prompt, model=model)
         if result.text:
             respond(markdown_to_mrkdwn(result.text))
 
@@ -181,17 +248,24 @@ def create_app() -> App:
 
         is_thread_start = thread_ts is None
         conversation_key = thread_ts or ts
+        # A new thread starts on the channel's harness; a reply keeps whatever
+        # its thread was created with (resolve_harness reads the row).
+        harness = channel_harness(channel) if is_thread_start else None
         if is_thread_start:
             # Pre-create the row so SlackPlatform can resolve channel for reactions.
+            # It records the harness now: SessionStore fixes it on the first write.
             store.set(
                 conversation_key,
                 value="",
                 channel_id=channel,
                 title=text or "(attachment)",
                 session_type=SESSION_TYPE,
+                harness=harness,
             )
 
         platform = SlackPlatform(client=client, bot_token=slack_bot_token())
+        if is_thread_start:
+            platform.mark_harness(conversation_key, harness)
         msg = IncomingMessage(
             platform=SESSION_TYPE,
             conversation_key=conversation_key,
@@ -201,6 +275,7 @@ def create_app() -> App:
             is_thread_start=is_thread_start,
             title_hint=text if is_thread_start else None,
             model=model,
+            harness=harness,
         )
 
         threading.Thread(

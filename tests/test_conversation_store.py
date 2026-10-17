@@ -55,3 +55,29 @@ def test_update_title_bumps_updated_at(tmp_path: Path):
     refreshed = s.get_conversation(c.id)
     assert refreshed.title == "new"
     assert refreshed.updated_at >= original_updated_at
+
+
+def test_harness_defaults_to_claude_code_and_round_trips(tmp_path: Path):
+    s = ConversationStore(db_path=tmp_path / "t.db")
+    default = s.create_conversation(platform="web")
+    pi = s.create_conversation(platform="web", harness="pi")
+    assert s.get_conversation(default.id).harness == "claude-code"
+    assert s.get_conversation(pi.id).harness == "pi"
+    assert {c.id: c.harness for c in s.list_conversations()} == {
+        default.id: "claude-code", pi.id: "pi",
+    }
+
+
+def test_archive_hides_from_list_but_keeps_rows(tmp_path: Path):
+    s = ConversationStore(db_path=tmp_path / "t.db")
+    keep = s.create_conversation(title="keep")
+    gone = s.create_conversation(title="gone")
+    s.add_message(gone.id, role="user", text="still here")
+    assert s.archive_conversation(gone.id)
+    assert [c.id for c in s.list_conversations(platform="web")] == [keep.id]
+    assert [c.id for c in s.list_conversations()] == [keep.id]
+    archived = s.get_conversation(gone.id)
+    assert archived is not None and archived.archived_at is not None
+    assert [m.text for m in s.list_messages(gone.id)] == ["still here"]
+    assert not s.archive_conversation(gone.id)  # already archived
+    assert not s.archive_conversation("missing")

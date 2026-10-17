@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+from pathlib import Path
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -16,7 +17,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # daemon
     daemon_parser = sub.add_parser(
-        "daemon", help="Manage the LaunchAgent daemon (macOS only)"
+        "daemon", help="Manage the auto-start daemon (macOS LaunchAgent / Linux systemd user service)"
     )
     daemon_parser.add_argument(
         "action",
@@ -44,14 +45,24 @@ def main(argv: list[str] | None = None) -> None:
 
     # send
     send_parser = sub.add_parser(
-        "send", help="Push a message into a web chat conversation"
+        "send", help="Push a message into a web chat or Slack conversation"
     )
-    send_parser.add_argument("text", help="Message text (use - to read stdin)")
+    send_parser.add_argument(
+        "text", nargs="?", default="", help="Message text (use - to read stdin)"
+    )
     send_parser.add_argument(
         "--conversation",
         "-c",
         default=None,
-        help="Web conversation id to post into. Omit to open a new conversation.",
+        help="Conversation id to post into. Omit to open a new web conversation.",
+    )
+    send_parser.add_argument(
+        "--attach",
+        "-a",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="File to attach (repeatable)",
     )
     send_parser.add_argument(
         "--title",
@@ -93,12 +104,13 @@ def main(argv: list[str] | None = None) -> None:
         if args.sim_command is None:
             sim_parser.print_help()
             sys.exit(1)
-        from yuki_conductor.claude_runner import run_claude
+        from yuki_conductor.harness import get_harness
+        from yuki_conductor.harness.process import run_agent
         from yuki_conductor.store import SessionStore
 
         store = SessionStore()
         if args.sim_command == "message":
-            result = run_claude(args.text)
+            result = run_agent(get_harness("claude-code"), args.text)
             fake_ts = f"sim_{id(result)}"
             if result.session_id:
                 store.set(fake_ts, result.session_id)
@@ -110,7 +122,7 @@ def main(argv: list[str] | None = None) -> None:
             if session_id is None:
                 print(f"No session found for thread_ts={args.thread_ts}", file=sys.stderr)
                 sys.exit(1)
-            result = run_claude(args.text, session_id=session_id)
+            result = run_agent(get_harness("claude-code"), args.text, session_id=session_id)
             if result.session_id:
                 store.set(args.thread_ts, result.session_id)
             print(f"session_id: {result.session_id}")
@@ -123,14 +135,20 @@ def main(argv: list[str] | None = None) -> None:
         from yuki_conductor.web_server import WEB_PORT
 
         text = sys.stdin.read() if args.text == "-" else args.text
-        if not text.strip():
+        if not text.strip() and not args.attach:
             print("Refusing to send an empty message", file=sys.stderr)
+            sys.exit(1)
+        attachments = [str(Path(a).resolve()) for a in args.attach]
+        missing = [a for a in attachments if not Path(a).is_file()]
+        if missing:
+            print(f"Not a file: {', '.join(missing)}", file=sys.stderr)
             sys.exit(1)
 
         payload = {
             "text": text,
             "conversation_id": args.conversation,
             "title": args.title,
+            "attachments": attachments,
         }
         req = urllib.request.Request(
             f"http://127.0.0.1:{WEB_PORT}/api/push",
@@ -147,7 +165,7 @@ def main(argv: list[str] | None = None) -> None:
         except urllib.error.URLError as exc:
             print(f"Daemon not reachable on port {WEB_PORT}: {exc.reason}", file=sys.stderr)
             sys.exit(1)
-        print(f"Sent to conversation {body['conversation_id']}")
+        print(f"Sent to {body['platform']} conversation {body['conversation_id']}")
     elif args.command == "web":
         if args.web_command is None:
             web_parser.print_help()

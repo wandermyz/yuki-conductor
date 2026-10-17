@@ -5,7 +5,11 @@ Slack and the web chat both feed `IncomingMessage` objects into
 the response back through the originating `MessagingPlatform`.
 """
 
-from yuki_conductor.messaging.conversation import handle_incoming_message
+from yuki_conductor.messaging.conversation import (
+    PUSHABLE_PLATFORMS,
+    handle_incoming_message,
+    split_response,
+)
 from yuki_conductor.messaging.platform import (
     Attachment,
     ChatAppReceiver,
@@ -16,6 +20,7 @@ from yuki_conductor.messaging.platform import (
 from yuki_conductor.store import ModelStore, SessionStore
 
 __all__ = [
+    "PUSHABLE_PLATFORMS",
     "Attachment",
     "ChatAppReceiver",
     "IncomingMessage",
@@ -24,4 +29,5 @@ __all__ = [
     "OutgoingMessage",
     "SessionStore",
     "handle_incoming_message",
+    "split_response",
 ]

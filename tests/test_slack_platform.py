@@ -2,6 +2,7 @@
 
 import time
 
+from yuki_conductor.harness.base import StreamEvent
 from yuki_conductor.messaging import slack_platform
 from yuki_conductor.messaging.platform import OutgoingMessage
 from yuki_conductor.messaging.slack_platform import SlackPlatform
@@ -28,9 +29,10 @@ class FakeClient:
         self.reaction_calls.append(("remove", kwargs))
 
 
-def _platform(client) -> SlackPlatform:
+def _platform(client, harness_label: str | None = None) -> SlackPlatform:
     platform = SlackPlatform(client=client, bot_token="xoxb-test")
     platform._lookup_channel = lambda _thread_ts: "C123"
+    platform._harness_label = lambda _thread_ts: harness_label
     return platform
 
 
@@ -135,6 +137,9 @@ def test_start_thread_hangs_overflow_under_the_root_message(monkeypatch):
         def set(self, *a, **kw):
             platform_store_calls.append((a, kw))
 
+        def get_channel(self, _key):
+            return "C999"
+
     original = store_mod.SessionStore
     store_mod.SessionStore = FakeStore
     try:
@@ -146,3 +151,68 @@ def test_start_thread_hangs_overflow_under_the_root_message(monkeypatch):
     assert len(client.posted) > 1
     assert "thread_ts" not in client.posted[0]
     assert all(kw["thread_ts"] == ts for kw in client.posted[1:])
+
+
+def test_status_names_the_harness():
+    client = FakeClient()
+    platform = _platform(client, harness_label="pi")
+
+    platform.set_processing("111.222", "111.222", on=True)
+    platform.on_stream_event(
+        "111.222", StreamEvent(kind="tool_use", label="", detail={"name": "bash"})
+    )
+    pending = platform._pending_status["111.222"]
+    platform.set_processing("111.222", "111.222", on=False)
+
+    assert client.status_calls[0]["status"] == "(pi) " + slack_platform.STATUS_TEXT
+    assert pending == "(pi) is running bash"
+    assert not platform._harness_labels
+
+
+def test_long_status_keeps_the_harness_tag():
+    status = slack_platform._with_harness("is writing: " + "x" * 200, "Claude Code")
+
+    assert status.startswith("(Claude Code) is writing: ")
+    assert len(status) == slack_platform.STATUS_LABEL_LIMIT
+
+
+def test_mark_harness_reacts_on_the_root_message():
+    client = FakeClient()
+    platform = _platform(client)
+
+    platform.mark_harness("111.222", "pi")
+    platform.mark_harness("111.222", "unknown-harness")
+
+    assert client.reaction_calls == [
+        ("add", {"channel": "C123", "name": "pie", "timestamp": "111.222"})
+    ]
+
+
+def test_mark_harness_swallows_slack_errors():
+    client = FakeClient()
+
+    def boom(**_kw):
+        raise RuntimeError("already_reacted")
+
+    client.reactions_add = boom
+    _platform(client).mark_harness("111.222", "claude-code")
+
+
+def test_start_thread_records_and_marks_the_harness(monkeypatch):
+    monkeypatch.setenv("SLACK_CRON_CHANNEL", "C999")
+    client, platform = _recording_platform()
+    writes = []
+    import yuki_conductor.store as store_mod
+
+    class FakeStore:
+        def set(self, *a, **kw):
+            writes.append(kw)
+
+    monkeypatch.setattr(store_mod, "SessionStore", FakeStore)
+
+    ts = platform.start_thread("hello", harness="pi")
+
+    assert writes[0]["harness"] == "pi"
+    assert client.reaction_calls == [
+        ("add", {"channel": "C123", "name": "pie", "timestamp": ts})
+    ]

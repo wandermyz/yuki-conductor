@@ -1,13 +1,39 @@
 ---
 name: yuki-conductor-restart
 description: >
-  Use when the user asks to restart, reload, or bounce the yuki-conductor daemon
-  on Windows, or after backend Python changes need to take effect (e.g. "restart
-  the daemon", "restart yuki-conductor", "pick up the new code"). Do NOT run
-  `yuki-conductor daemon restart` — that subcommand is unsupported on Windows.
+  Use when the user asks to restart, reload, or bounce the yuki-conductor daemon,
+  or after backend Python changes need to take effect (e.g. "restart the
+  daemon", "restart yuki-conductor", "pick up the new code"). Covers Windows and
+  Linux. Do NOT run `yuki-conductor daemon restart` on Windows — that subcommand
+  is unsupported there.
 ---
 
-# Restarting the yuki-conductor daemon (Windows)
+# Restarting the yuki-conductor daemon
+
+## Linux
+
+The daemon is a systemd user service (`yuki-conductor.service`). This session is
+almost certainly running *inside* it — same cgroup — so a restart kills this
+session too. Use the HTTP endpoint, which waits a few seconds so your reply lands
+first, then queues `systemctl --user restart --no-block`:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:2333/api/daemon/restart
+```
+
+Fallback if the HTTP server is wedged (tell the user first; this session dies):
+
+```bash
+systemctl --user restart --no-block yuki-conductor.service
+```
+
+Verify in a later turn with `uv run yuki-conductor daemon status` — a MainPID
+whose start time is after the restart means it worked.
+
+`yuki-conductor daemon restart` also works from a terminal; it rebuilds the
+frontend first.
+
+# Windows
 
 ## How the daemon is kept alive
 

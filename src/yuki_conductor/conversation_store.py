@@ -40,9 +40,11 @@ class StoredConversation:
     platform: str
     title: str | None
     project: str | None
-    claude_session_id: str | None
+    claude_session_id: str | None  # the harness's session id, whatever the harness
     created_at: float
     updated_at: float
+    harness: str = "claude-code"  # fixed when the conversation is created
+    archived_at: float | None = None  # set: hidden from the web UI, only reachable via SQL
 
 
 class ConversationStore:
@@ -71,7 +73,9 @@ class ConversationStore:
                         claude_session_id TEXT,
                         created_at REAL NOT NULL,
                         updated_at REAL NOT NULL,
-                        status TEXT NOT NULL DEFAULT 'read'
+                        status TEXT NOT NULL DEFAULT 'read',
+                        harness TEXT NOT NULL DEFAULT 'claude-code',
+                        archived_at REAL
                     )
                     """
                 )
@@ -116,6 +120,13 @@ class ConversationStore:
                     con.execute(
                         "ALTER TABLE conversations ADD COLUMN status TEXT NOT NULL DEFAULT 'read'"
                     )
+                if "harness" not in cols:
+                    con.execute(
+                        "ALTER TABLE conversations ADD COLUMN harness TEXT NOT NULL "
+                        "DEFAULT 'claude-code'"
+                    )
+                if "archived_at" not in cols:
+                    con.execute("ALTER TABLE conversations ADD COLUMN archived_at REAL")
                 con.commit()
             finally:
                 con.close()
@@ -125,6 +136,7 @@ class ConversationStore:
         platform: str = "web",
         title: str | None = None,
         project: str | None = None,
+        harness: str = "claude-code",
     ) -> StoredConversation:
         now = time.time()
         conv = StoredConversation(
@@ -135,14 +147,15 @@ class ConversationStore:
             claude_session_id=None,
             created_at=now,
             updated_at=now,
+            harness=harness,
         )
         with self._lock:
             con = self._connect()
             try:
                 con.execute(
                     "INSERT INTO conversations "
-                    "(id, platform, title, project, claude_session_id, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "(id, platform, title, project, claude_session_id, created_at, "
+                    "updated_at, harness) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         conv.id,
                         conv.platform,
@@ -151,6 +164,7 @@ class ConversationStore:
                         conv.claude_session_id,
                         conv.created_at,
                         conv.updated_at,
+                        conv.harness,
                     ),
                 )
                 con.commit()
@@ -164,7 +178,7 @@ class ConversationStore:
             try:
                 row = con.execute(
                     "SELECT id, platform, title, project, claude_session_id, "
-                    "created_at, updated_at FROM conversations WHERE id = ?",
+                    "created_at, updated_at, harness, archived_at FROM conversations WHERE id = ?",
                     (conv_id,),
                 ).fetchone()
                 if not row:
@@ -174,20 +188,22 @@ class ConversationStore:
                 con.close()
 
     def list_conversations(self, platform: str | None = None) -> list[StoredConversation]:
+        """Unarchived conversations, most recently updated first."""
         with self._lock:
             con = self._connect()
             try:
                 if platform is not None:
                     rows = con.execute(
                         "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at FROM conversations WHERE platform = ? "
-                        "ORDER BY updated_at DESC",
+                        "created_at, updated_at, harness, archived_at FROM conversations "
+                        "WHERE platform = ? AND archived_at IS NULL ORDER BY updated_at DESC",
                         (platform,),
                     ).fetchall()
                 else:
                     rows = con.execute(
                         "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at FROM conversations ORDER BY updated_at DESC"
+                        "created_at, updated_at, harness, archived_at FROM conversations "
+                        "WHERE archived_at IS NULL ORDER BY updated_at DESC"
                     ).fetchall()
                 return [StoredConversation(*r) for r in rows]
             finally:
@@ -223,6 +239,25 @@ class ConversationStore:
                 cur = con.execute(
                     f"UPDATE conversations SET {', '.join(sets)} WHERE id = ?",
                     tuple(args),
+                )
+                con.commit()
+                return cur.rowcount > 0
+            finally:
+                con.close()
+
+    def archive_conversation(self, conv_id: str) -> bool:
+        """Hide a conversation from the web UI for good, keeping its rows.
+
+        There's no unarchive: an archived conversation is only reachable by
+        querying the DB directly.
+        """
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    "UPDATE conversations SET archived_at = ? "
+                    "WHERE id = ? AND archived_at IS NULL",
+                    (time.time(), conv_id),
                 )
                 con.commit()
                 return cur.rowcount > 0

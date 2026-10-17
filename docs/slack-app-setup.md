@@ -32,6 +32,20 @@ an ⏳ reaction on the source message. If the status never renders, enable
 
 ## 4. Add Slash Commands
 
+Every command is `/<prefix>-…`. The prefix is `SLACK_COMMAND_PREFIX` in
+`~/.yuki-conductor/.env` and defaults to `yuki`.
+
+**Running yuki-conductor on more than one machine, each with its own Slack app
+in the same workspace?** Slash command names are workspace-wide, so give each
+machine its own prefix, e.g. `SLACK_COMMAND_PREFIX=skirk`. That machine then
+answers only `/skirk-model`, `/skirk-harness`, … and never claims another
+machine's `/yuki-*`. Register the commands below under that prefix. The prefix
+must be lowercase letters, digits and `-`; a bad value stops the daemon at
+startup with a message. Settings such as a channel's model are stored per
+channel, so they're shared whatever the prefix.
+
+The examples below use the default `yuki`.
+
 Go to **Features** > **Slash Commands** > **Create New Command**:
 
 | Field | Value |
@@ -39,6 +53,14 @@ Go to **Features** > **Slash Commands** > **Create New Command**:
 | Command | `/yuki-model` |
 | Short Description | Switch Claude model (sonnet, opus, haiku) |
 | Usage Hint | `[sonnet\|opus\|haiku]` |
+
+If more than one harness is enabled (the `HARNESSES` setting), also add:
+
+| Field | Value |
+|-------|-------|
+| Command | `/yuki-harness` |
+| Short Description | Choose the agent for new threads in this channel |
+| Usage Hint | `[default\|claude-code\|pi]` |
 
 No **Request URL** is needed — Socket Mode handles delivery automatically.
 

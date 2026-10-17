@@ -1,11 +1,11 @@
-"""Platform-agnostic core: turn an IncomingMessage into a Claude run + reply."""
+"""Platform-agnostic core: turn an IncomingMessage into an agent run + reply."""
 
 import logging
 import re
-from pathlib import Path
 
-from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import ATTACHMENTS_DIR
+from yuki_conductor.harness import HARNESSES, default_harness, get_harness
+from yuki_conductor.harness.process import run_agent
 from yuki_conductor.messaging.platform import (
     Attachment,
     IncomingMessage,
@@ -26,30 +26,36 @@ def _build_prompt(text: str, attachments: list[Attachment]) -> str:
     return prefix + text
 
 
-def _split_response(text: str) -> tuple[str, list[Attachment]]:
-    """Pull <attachment>filename</attachment> tags out of Claude's reply.
+# Platforms whose conversation keys `/api/push` can route back to.
+PUSHABLE_PLATFORMS = ("web", "slack")
 
-    Filenames are looked up under ATTACHMENTS_DIR. Missing files are dropped
-    with a warning rather than failing the whole reply.
+
+def split_response(text: str) -> tuple[str, list[Attachment]]:
+    """Pull <attachment>path</attachment> tags out of Claude's reply.
+
+    Absolute paths are used as-is; bare filenames are looked up under
+    ATTACHMENTS_DIR. Missing files are dropped with a warning rather than
+    failing the whole reply.
     """
     matches = _ATTACHMENT_RE.findall(text)
     if not matches:
         return text, []
 
     attachments: list[Attachment] = []
-    for filename in matches:
-        path = ATTACHMENTS_DIR / filename
-        if not path.exists():
+    for ref in matches:
+        # Joining an absolute path onto a directory yields the absolute path.
+        path = ATTACHMENTS_DIR / ref.strip()
+        if not path.is_file():
             logger.warning(f"Claude referenced missing attachment: {path}")
             continue
-        attachments.append(Attachment(filename=Path(filename).name, local_path=path))
+        attachments.append(Attachment(filename=path.name, local_path=path))
 
     cleaned = _ATTACHMENT_RE.sub("", text).strip()
     return cleaned, attachments
 
 
 def _event_sink(platform: MessagingPlatform, conversation_key: str):
-    """Adapt a platform's optional `on_stream_event` into a run_claude callback.
+    """Adapt a platform's optional `on_stream_event` into a run_agent callback.
 
     Platforms predating streaming (and test stubs) may not implement the hook;
     those runs simply produce no intermediate updates.
@@ -67,14 +73,46 @@ def _event_sink(platform: MessagingPlatform, conversation_key: str):
     return sink
 
 
+class HarnessUnavailable(Exception):
+    """The conversation is bound to a harness this machine doesn't enable."""
+
+
+def resolve_harness(platform: MessagingPlatform, msg: IncomingMessage) -> str:
+    """Pick the harness for this turn.
+
+    Whatever the platform already recorded for the conversation wins, even on
+    its first message: a web conversation is created with its harness before
+    anything is sent, and session ids only work with the harness that created
+    them. If that harness isn't enabled here, the turn fails rather than
+    quietly switching harness. With no record (a brand-new Slack thread), the
+    message's choice applies if enabled, else the default harness.
+    """
+    bound = platform.get_harness(msg.conversation_key)
+    if bound:
+        if bound not in HARNESSES:
+            raise HarnessUnavailable(
+                f"This conversation runs on {bound}, which isn't enabled on this "
+                "machine (see the HARNESSES setting). Start a new conversation instead."
+            )
+        return bound
+    name = msg.harness or default_harness()
+    if name not in HARNESSES:
+        logger.warning(
+            "Harness %r for %s isn't enabled; using %s",
+            name, msg.conversation_key, default_harness(),
+        )
+        name = default_harness()
+    return name
+
+
 def handle_incoming_message(
     platform: MessagingPlatform,
     msg: IncomingMessage,
 ) -> None:
-    """Run Claude for an incoming message and send the reply through the platform.
+    """Run the conversation's agent for an incoming message and send the reply.
 
     This is the only place that knows about session resolution, attachment
-    plumbing, and the run_claude contract. Platforms own their own session-id
+    plumbing, and the run_agent contract. Platforms own their own session-id
     persistence (Slack via SessionStore, web via ConversationStore).
     """
     platform.set_processing(msg.conversation_key, msg.message_id, on=True)
@@ -83,33 +121,42 @@ def handle_incoming_message(
             None if msg.is_thread_start else platform.get_session_id(msg.conversation_key)
         )
 
+        try:
+            harness = resolve_harness(platform, msg)
+        except HarnessUnavailable as exc:
+            logger.warning("%s: %s", msg.conversation_key, exc)
+            platform.send(msg.conversation_key, OutgoingMessage(text=str(exc)))
+            return
         prompt = _build_prompt(msg.text, msg.attachments)
+        # msg.model is a Claude Code alias (Slack's /<prefix>-model). Other
+        # harnesses name models differently, so they use their own default.
+        model = msg.model if harness == "claude-code" else None
         logger.info(
-            "Running Claude for %s (session=%s, model=%s)",
-            msg.conversation_key, session_id, msg.model,
+            "Running %s for %s (session=%s, model=%s)",
+            harness, msg.conversation_key, session_id, model,
         )
         try:
-            result = run_claude(
+            result = run_agent(
+                get_harness(harness),
                 prompt,
                 session_id=session_id,
-                model=msg.model,
+                model=model,
                 conversation_key=msg.conversation_key,
                 cwd=msg.cwd,
-                # Only the web platform's keys are addressable by
-                # `yuki-conductor send`, so only those are advertised.
-                web_conversation_id=(
-                    msg.conversation_key if msg.platform == "web" else None
+                # Only keys `/api/push` can route are advertised.
+                push_conversation_id=(
+                    msg.conversation_key if msg.platform in PUSHABLE_PLATFORMS else None
                 ),
                 on_event=_event_sink(platform, msg.conversation_key),
             )
         except Exception:
             logger.error(
-                "Claude invocation failed for %s", msg.conversation_key, exc_info=True,
+                "%s invocation failed for %s", harness, msg.conversation_key, exc_info=True,
             )
             raise
         logger.info(
-            "Claude finished for %s (tokens: %s in / %s out, cost: $%s)",
-            msg.conversation_key,
+            "%s finished for %s (tokens: %s in / %s out, cost: $%s)",
+            harness, msg.conversation_key,
             result.input_tokens, result.output_tokens, result.cost_usd,
         )
 
@@ -118,9 +165,10 @@ def handle_incoming_message(
                 msg.conversation_key,
                 result.session_id,
                 title_hint=msg.title_hint if msg.is_thread_start else None,
+                harness=harness,
             )
 
-        reply_text, reply_attachments = _split_response(result.text)
+        reply_text, reply_attachments = split_response(result.text)
         outgoing = OutgoingMessage(
             text=reply_text,
             attachments=reply_attachments,

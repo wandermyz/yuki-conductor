@@ -2,11 +2,10 @@
 
 from unittest.mock import MagicMock, patch
 
-from yuki_conductor.claude_runner import ClaudeResult
+from yuki_conductor.harness.base import RunResult, StreamEvent
 from yuki_conductor.messaging import IncomingMessage, handle_incoming_message
 from yuki_conductor.messaging.slack_platform import SlackPlatform, _status_for
 from yuki_conductor.messaging.web_platform import ConnectionManager, WebPlatform
-from yuki_conductor.stream_events import StreamEvent
 
 
 class StubPlatform:
@@ -20,7 +19,8 @@ class StubPlatform:
     def send(self, conversation_key, msg): ...
     def set_processing(self, conversation_key, message_id, on): ...
     def get_session_id(self, conversation_key): return None
-    def set_session_id(self, conversation_key, session_id, title_hint=None): ...
+    def get_harness(self, conversation_key): return None
+    def set_session_id(self, conversation_key, session_id, title_hint=None, harness="claude-code"): ...
 
     def on_stream_event(self, conversation_key: str, event: StreamEvent) -> None:
         self.events.append(event)
@@ -35,11 +35,11 @@ def _msg() -> IncomingMessage:
 def test_conversation_core_forwards_events_to_platform():
     platform = StubPlatform()
 
-    def fake_run(prompt, **kwargs):
+    def fake_run(harness, prompt, **kwargs):
         kwargs["on_event"](StreamEvent(kind="tool_use", label="Read(a.py)"))
-        return ClaudeResult(text="done", session_id="s1")
+        return RunResult(text="done", session_id="s1")
 
-    with patch("yuki_conductor.messaging.conversation.run_claude", side_effect=fake_run):
+    with patch("yuki_conductor.messaging.conversation.run_agent", side_effect=fake_run):
         handle_incoming_message(platform, _msg())
 
     assert [e.label for e in platform.events] == ["Read(a.py)"]
@@ -55,16 +55,17 @@ def test_platform_without_hook_gets_no_callback():
         def send(self, conversation_key, msg): self.sent = msg
         def set_processing(self, conversation_key, message_id, on): ...
         def get_session_id(self, conversation_key): return None
-        def set_session_id(self, conversation_key, session_id, title_hint=None): ...
+        def get_harness(self, conversation_key): return None
+        def set_session_id(self, conversation_key, session_id, title_hint=None, harness="claude-code"): ...
 
     platform = NoHook()
     captured = {}
 
-    def fake_run(prompt, **kwargs):
+    def fake_run(harness, prompt, **kwargs):
         captured.update(kwargs)
-        return ClaudeResult(text="final answer", session_id="s1")
+        return RunResult(text="final answer", session_id="s1")
 
-    with patch("yuki_conductor.messaging.conversation.run_claude", side_effect=fake_run):
+    with patch("yuki_conductor.messaging.conversation.run_agent", side_effect=fake_run):
         handle_incoming_message(platform, _msg())
 
     assert captured["on_event"] is None
@@ -78,11 +79,11 @@ def test_failing_platform_hook_does_not_break_the_run():
 
     platform = Exploding()
 
-    def fake_run(prompt, **kwargs):
+    def fake_run(harness, prompt, **kwargs):
         kwargs["on_event"](StreamEvent(kind="text", label="x"))
-        return ClaudeResult(text="done", session_id="s1")
+        return RunResult(text="done", session_id="s1")
 
-    with patch("yuki_conductor.messaging.conversation.run_claude", side_effect=fake_run):
+    with patch("yuki_conductor.messaging.conversation.run_agent", side_effect=fake_run):
         handle_incoming_message(platform, _msg())
 
 

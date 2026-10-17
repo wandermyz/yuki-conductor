@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from yuki_conductor.stream_events import StreamEvent
+from yuki_conductor.harness.base import StreamEvent
 
 
 @dataclass
@@ -29,6 +29,8 @@ class IncomingMessage:
     title_hint: str | None = None
     model: str | None = None
     cwd: str | None = None
+    # Harness for a *new* conversation; an existing one keeps its own.
+    harness: str | None = None
 
 
 @dataclass
@@ -40,6 +42,8 @@ class OutgoingMessage:
     input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None
+    # Sent out-of-band via `/api/push` rather than as the reply to a turn.
+    pushed: bool = False
 
 
 class MessagingPlatform(Protocol):
@@ -61,13 +65,26 @@ class MessagingPlatform(Protocol):
         ...
 
     def get_session_id(self, conversation_key: str) -> str | None:
-        """Return the Claude session id to resume, or None to start fresh."""
+        """Return the harness session id to resume, or None to start fresh."""
+        ...
+
+    def get_harness(self, conversation_key: str) -> str | None:
+        """Return the harness a conversation is bound to, or None if it has none yet."""
         ...
 
     def set_session_id(
-        self, conversation_key: str, session_id: str, title_hint: str | None = None
+        self,
+        conversation_key: str,
+        session_id: str,
+        title_hint: str | None = None,
+        harness: str = "claude-code",
     ) -> None:
-        """Persist the Claude session id (and optional initial title) for resume."""
+        """Persist the session id (and optional initial title) for resume.
+
+        `harness` is recorded the first time only; a conversation never
+        changes harness, since session ids only work with the harness that
+        created them.
+        """
         ...
 
     def send_notification(self, text: str) -> None:
@@ -75,8 +92,13 @@ class MessagingPlatform(Protocol):
         default notification channel. Best-effort — failures are logged, not raised."""
         ...
 
-    def start_thread(self, text: str, title: str | None = None) -> str:
+    def start_thread(
+        self, text: str, title: str | None = None, harness: str = "claude-code"
+    ) -> str:
         """Open a new conversation thread with an initial message and return its key.
+
+        `harness` is the one that produced `text`; replies in the thread resume
+        on it.
 
         Used by the cron scheduler (and any other producer) to seed a thread
         the platform owns. Slack creates a top-level message and returns its

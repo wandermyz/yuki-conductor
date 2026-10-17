@@ -6,10 +6,11 @@ from datetime import datetime
 
 from croniter import croniter
 
-from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import WORKSPACE_DIR, channels
 from yuki_conductor.cron_config import CronTask, load_tasks
-from yuki_conductor.messaging import MessagingPlatform, OutgoingMessage
+from yuki_conductor.harness import HARNESSES, default_harness, get_harness
+from yuki_conductor.harness.process import run_agent
+from yuki_conductor.messaging import MessagingPlatform, OutgoingMessage, split_response
 from yuki_conductor.store import CronRunStore
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,13 @@ def _execute(
 ) -> None:
     title = task.label
     platform = _pick_platform(task, platforms_by_name) if platforms_by_name else None
+    harness = task.harness or default_harness()
+    if harness not in HARNESSES:
+        # Like a missing chat_app: don't run a prompt written for one agent on another.
+        error = f"harness {harness!r} isn't enabled on this machine (see the HARNESSES setting)"
+        logger.warning(f"Cron task={task.name} skipped: {error}")
+        run_store.finish_run(run_id, status="error", error=error)
+        return
 
     # Reserve the destination conversation up front where the platform supports
     # it, so the run itself can push interim messages into the same thread via
@@ -116,7 +124,7 @@ def _execute(
     reserved: str | None = None
     if platform is not None and hasattr(platform, "reserve_thread"):
         try:
-            reserved = platform.reserve_thread(title=title)
+            reserved = platform.reserve_thread(title=title, harness=harness)
         except Exception:
             logger.error(
                 f"Failed to reserve thread on platform={platform.name} for task={task.name}",
@@ -124,7 +132,9 @@ def _execute(
             )
 
     prefixed_prompt = _CRON_PROMPT_PREFIX + task.prompt
-    result = run_claude(prefixed_prompt, web_conversation_id=reserved)
+    result = run_agent(
+        get_harness(harness), prefixed_prompt, push_conversation_id=reserved
+    )
 
     response_text = result.text or ""
     should_notify = "<notify>" in response_text
@@ -134,7 +144,7 @@ def _execute(
         run_store.finish_run(
             run_id,
             status="error",
-            error=display_text or "Claude run failed with no output",
+            error=display_text or f"{get_harness(harness).label} run failed with no output",
             session_id=result.session_id,
             conversation_id=reserved,
         )
@@ -164,12 +174,15 @@ def _execute(
     if platform is None:
         return
 
+    text, attachments = split_response(display_text)
     try:
         if reserved is not None:
-            platform.send(reserved, OutgoingMessage(text=display_text))
+            platform.send(reserved, OutgoingMessage(text=text, attachments=attachments))
             conversation_key = reserved
         else:
-            conversation_key = platform.start_thread(display_text, title=title)
+            conversation_key = platform.start_thread(text, title=title, harness=harness)
+            if attachments:
+                platform.send(conversation_key, OutgoingMessage(text="", attachments=attachments))
     except Exception:
         logger.error(
             f"Failed to start cron thread on platform={platform.name} for task={task.name}",
@@ -178,7 +191,9 @@ def _execute(
         return
 
     if result.session_id:
-        platform.set_session_id(conversation_key, result.session_id, title_hint=title)
+        platform.set_session_id(
+            conversation_key, result.session_id, title_hint=title, harness=harness
+        )
 
 
 def _build_task_state(tasks: list[CronTask]) -> tuple[list[tuple[CronTask, croniter]], dict[str, datetime]]:
@@ -198,7 +213,7 @@ def _build_task_state(tasks: list[CronTask]) -> tuple[list[tuple[CronTask, croni
 def _tasks_changed(old: list[CronTask], new: list[CronTask]) -> bool:
     """Check if the task list has changed (by comparing as tuples)."""
     def to_tuple(t: CronTask) -> tuple:
-        return (t.name, t.schedule, t.description, t.prompt, t.chat_app, t.paused)
+        return (t.name, t.schedule, t.description, t.prompt, t.chat_app, t.paused, t.harness)
     return [to_tuple(t) for t in old] != [to_tuple(t) for t in new]
 
 

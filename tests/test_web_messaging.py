@@ -43,12 +43,10 @@ def test_create_and_list_conversation(client):
 
 
 def test_post_message_invokes_claude_and_persists_reply(client, monkeypatch):
-    from yuki_conductor.claude_runner import ClaudeResult
+    from yuki_conductor.harness.base import RunResult
 
-    fake = ClaudeResult(text="hello from claude", session_id="claude-1")
-    monkeypatch.setattr(
-        "yuki_conductor.messaging.conversation.run_claude", lambda *a, **k: fake
-    )
+    fake = RunResult(text="hello from claude", session_id="claude-1")
+    monkeypatch.setattr("yuki_conductor.messaging.conversation.run_agent", lambda *a, **k: fake)
 
     conv = client.post("/api/conversations", json={"title": None}).json()
     r = client.post(f"/api/conversations/{conv['id']}/messages", json={"text": "hi"})
@@ -103,11 +101,14 @@ def test_delete_conversation(client):
 
 def test_push_into_existing_conversation(client):
     conv = client.post("/api/conversations", json={"title": "watched"}).json()
-    r = client.post(
-        "/api/push", json={"conversation_id": conv["id"], "text": "progress update"}
-    )
+    r = client.post("/api/push", json={"conversation_id": conv["id"], "text": "progress update"})
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "conversation_id": conv["id"], "created": False}
+    assert r.json() == {
+        "ok": True,
+        "conversation_id": conv["id"],
+        "platform": "web",
+        "created": False,
+    }
 
     msgs = client.get(f"/api/conversations/{conv['id']}/messages").json()
     assert [m["role"] for m in msgs] == ["assistant"]
@@ -131,6 +132,54 @@ def test_push_without_conversation_creates_one(client):
 def test_push_rejects_unknown_conversation(client):
     r = client.post("/api/push", json={"conversation_id": "nope", "text": "hi"})
     assert r.status_code == 404
+
+
+def test_push_with_attachment_stores_it(client, tmp_path):
+    img = tmp_path / "pic.png"
+    img.write_bytes(b"\x89PNG")
+    conv = client.post("/api/conversations", json={"title": "watched"}).json()
+    r = client.post("/api/push", json={"conversation_id": conv["id"], "attachments": [str(img)]})
+    assert r.status_code == 200
+
+    [msg] = client.get(f"/api/conversations/{conv['id']}/messages").json()
+    assert msg["text"] == web_server.PUSH_MARKER
+    [att] = msg["attachments"]
+    assert att["filename"] == "pic.png"
+    assert client.get(att["url"]).content == b"\x89PNG"
+
+
+def test_push_rejects_missing_attachment(client, tmp_path):
+    conv = client.post("/api/conversations", json={"title": None}).json()
+    for bad in [str(tmp_path / "nope.png"), "relative.png"]:
+        r = client.post(
+            "/api/push",
+            json={"conversation_id": conv["id"], "text": "hi", "attachments": [bad]},
+        )
+        assert r.status_code == 400
+    assert client.get(f"/api/conversations/{conv['id']}/messages").json() == []
+
+
+def test_push_routes_slack_thread_to_slack_platform(client, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    sent = []
+    slack = SimpleNamespace(name="slack", send=lambda key, msg: sent.append((key, msg)))
+    monkeypatch.setattr(web_server, "_receivers", [SimpleNamespace(platform=slack)])
+    web_server.store.set("1700000000.0001", value="", channel_id="C1", session_type="slack")
+    img = tmp_path / "pic.png"
+    img.write_bytes(b"png")
+
+    r = client.post(
+        "/api/push",
+        json={"conversation_id": "1700000000.0001", "text": "hi", "attachments": [str(img)]},
+    )
+    assert r.status_code == 200
+    assert r.json()["platform"] == "slack"
+    [(key, msg)] = sent
+    assert key == "1700000000.0001"
+    assert msg.text == f"hi\n\n{web_server.PUSH_MARKER}"
+    assert msg.pushed is True
+    assert [a.local_path for a in msg.attachments] == [img]
 
 
 def test_push_rejects_empty_text(client):
@@ -179,7 +228,6 @@ def test_push_to_new_conversation_broadcasts_status(client, monkeypatch):
     assert sent[0]["pushed"] is True
 
 
-
 def test_reader_page_renders_reply_as_article(client):
     conv = client.post("/api/conversations", json={"title": "Voices"}).json()
     first = web_server.conv_store.add_message(
@@ -201,3 +249,28 @@ def test_reader_page_renders_reply_as_article(client):
 
     assert client.get(f"/read/{conv['id']}/nope").status_code == 404
     assert client.get("/read/nope/last").status_code == 404
+
+
+def test_frontend_cache_headers(monkeypatch, tmp_path):
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<html></html>")
+    (dist / "assets" / "index-abc.js").write_text("//")
+    monkeypatch.setattr(web_server, "_WEB_DIST", dist)
+    api = web_server.FastAPI()
+    web_server.mount_static(api)
+    c = TestClient(api)
+
+    for url in ("/", "/index.html"):
+        assert c.get(url).headers["cache-control"] == "no-store"
+    assert "immutable" in c.get("/assets/index-abc.js").headers["cache-control"]
+
+
+def test_archive_conversation_hides_it_everywhere(client):
+    conv = client.post("/api/conversations", json={"title": "shelve"}).json()
+    r = client.post(f"/api/conversations/{conv['id']}/archive")
+    assert r.status_code == 200
+    assert all(c["id"] != conv["id"] for c in client.get("/api/conversations").json())
+    assert client.get(f"/api/conversations/{conv['id']}").status_code == 404
+    assert client.get(f"/api/conversations/{conv['id']}/messages").status_code == 404
+    assert client.post(f"/api/conversations/{conv['id']}/archive").status_code == 404

@@ -4,12 +4,14 @@ import remarkGfm from "remark-gfm";
 import {
   cancelProcessing,
   createConversation,
+  archiveConversation,
   deleteConversation,
   fetchStatuses,
   fetchProcessing,
   fetchSteps,
   fetchAllUsage,
   listConversations,
+  listHarnesses,
   listMessages,
   listProjects,
   subscribeChatSocket,
@@ -24,11 +26,35 @@ import type {
   Conversation,
   ConversationUsage,
   ConvStatus,
+  HarnessInfo,
   Project,
   StreamStep,
   WSEvent,
 } from "./api";
 import "./chat.css";
+import claudeCodeIcon from "../assets/harness/claude-code.svg";
+import piIcon from "../assets/harness/pi.svg";
+
+// Official marks: Claude's spark (claude.ai) and pi's logo (pi.dev).
+const HARNESS_ICONS: Record<string, string> = {
+  "claude-code": claudeCodeIcon,
+  pi: piIcon,
+};
+
+function HarnessIcon({ name }: { name: string | null }) {
+  const src = name ? HARNESS_ICONS[name] : undefined;
+  return src ? <img className="harness-icon" src={src} alt="" aria-hidden="true" /> : null;
+}
+
+/** Marks the agent a conversation runs on: its icon, or its name if it has none. */
+function HarnessMarker({ name }: { name: string }) {
+  if (!HARNESS_ICONS[name]) return <span className="chat-list-harness">{name}</span>;
+  return (
+    <span className="chat-harness-marker" title={name} aria-label={name}>
+      <HarnessIcon name={name} />
+    </span>
+  );
+}
 
 /* ---------- Notification sound (iOS-safe) ---------- */
 
@@ -78,6 +104,16 @@ function formatTime(ts: number): string {
 function isImage(mime: string | null, filename: string): boolean {
   if (mime?.startsWith("image/")) return true;
   return /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(filename);
+}
+
+function isVideo(mime: string | null, filename: string): boolean {
+  if (mime?.startsWith("video/")) return true;
+  return /\.(mp4|webm|mov|m4v)$/i.test(filename);
+}
+
+function isAudio(mime: string | null, filename: string): boolean {
+  if (mime?.startsWith("audio/")) return true;
+  return /\.(mp3|wav|ogg|oga|opus|flac|m4a|aac)$/i.test(filename);
 }
 
 /* ---------- Conversation status helpers ---------- */
@@ -224,6 +260,7 @@ function ConvMenu({
   onShowSessionId,
   onRename,
   onSetStatus,
+  onArchive,
   onDelete,
   onClose,
 }: {
@@ -231,6 +268,7 @@ function ConvMenu({
   onShowSessionId: () => void;
   onRename: () => void;
   onSetStatus: (s: ConvStatus) => void;
+  onArchive: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
@@ -258,7 +296,8 @@ function ConvMenu({
         Show Session ID
       </button>
       <div className="conv-menu-divider" />
-      {status !== "read" && (
+      {/* Status moves one step at a time: unread <-> read <-> done. */}
+      {status === "unread" && (
         <button
           className="conv-menu-item"
           onClick={(e) => { e.stopPropagation(); onSetStatus("read"); onClose(); }}
@@ -266,23 +305,37 @@ function ConvMenu({
           Mark as Read
         </button>
       )}
-      {status !== "unread" && (
-        <button
-          className="conv-menu-item"
-          onClick={(e) => { e.stopPropagation(); onSetStatus("unread"); onClose(); }}
-        >
-          Mark as Unread
-        </button>
+      {status === "read" && (
+        <>
+          <button
+            className="conv-menu-item"
+            onClick={(e) => { e.stopPropagation(); onSetStatus("unread"); onClose(); }}
+          >
+            Mark as Unread
+          </button>
+          <button
+            className="conv-menu-item"
+            onClick={(e) => { e.stopPropagation(); onSetStatus("done"); onClose(); }}
+          >
+            Mark as Done
+          </button>
+        </>
       )}
-      {status !== "done" && (
+      {status === "done" && (
         <button
           className="conv-menu-item"
-          onClick={(e) => { e.stopPropagation(); onSetStatus("done"); onClose(); }}
+          onClick={(e) => { e.stopPropagation(); onSetStatus("read"); onClose(); }}
         >
-          Mark as Done
+          Mark as Not Done
         </button>
       )}
       <div className="conv-menu-divider" />
+      <button
+        className="conv-menu-item"
+        onClick={(e) => { e.stopPropagation(); onArchive(); onClose(); }}
+      >
+        Archive
+      </button>
       <button
         className="conv-menu-item conv-menu-item-danger"
         onClick={(e) => { e.stopPropagation(); onDelete(); onClose(); }}
@@ -430,6 +483,15 @@ function MessageBubble({ msg, onRetry }: { msg: ChatMessage; onRetry: (msg: Chat
               <a key={a.id} href={a.url} target="_blank" rel="noreferrer">
                 <img src={a.url} alt={a.filename} />
               </a>
+            ) : isVideo(a.mime_type, a.filename) ? (
+              <video key={a.id} src={a.url} controls loop playsInline preload="metadata" />
+            ) : isAudio(a.mime_type, a.filename) ? (
+              <div key={a.id} className="audio-attachment">
+                <audio src={a.url} controls preload="metadata" />
+                <a className="file-link" href={a.url} download>
+                  📎 {a.filename}
+                </a>
+              </div>
             ) : (
               <a key={a.id} className="file-link" href={a.url} download>
                 📎 {a.filename}
@@ -471,6 +533,11 @@ function MessageBubble({ msg, onRetry }: { msg: ChatMessage; onRetry: (msg: Chat
 
 /* ---------- Live step stream ---------- */
 
+/** What the UI calls the agent behind a conversation. */
+function agentName(conv: Conversation): string {
+  return conv.harness === "claude-code" ? "Claude" : conv.harness;
+}
+
 const STEP_ICONS: Record<StreamStep["kind"], string> = {
   init: "●",
   text: "✎",
@@ -482,7 +549,15 @@ const STEP_ICONS: Record<StreamStep["kind"], string> = {
 /** How many trailing steps stay visible; older ones collapse away. */
 const VISIBLE_STEPS = 8;
 
-function StepList({ steps, running }: { steps: StreamStep[]; running: boolean }) {
+function StepList({
+  steps,
+  running,
+  agent,
+}: {
+  steps: StreamStep[];
+  running: boolean;
+  agent: string;
+}) {
   const visible = steps.slice(-VISIBLE_STEPS);
   const hidden = steps.length - visible.length;
   return (
@@ -496,18 +571,20 @@ function StepList({ steps, running }: { steps: StreamStep[]; running: boolean })
           <span className="step-label">{s.label}</span>
         </div>
       ))}
-      {running && <div className="responding-shimmer">Claude is responding…</div>}
+      {running && <div className="responding-shimmer">{agent} is responding…</div>}
     </div>
   );
 }
 
 function Composer({
   conversationId,
+  agent,
   onSend,
   onStop,
   disabled,
 }: {
   conversationId: string;
+  agent: string;
   onSend: (text: string, files: AttachmentRef[]) => void;
   onStop: () => void;
   disabled: boolean;
@@ -623,7 +700,7 @@ function Composer({
               submit();
             }
           }}
-          placeholder="Message Claude…"
+          placeholder={`Message ${agent}…`}
           disabled={disabled}
         />
         {disabled ? (
@@ -663,6 +740,7 @@ function ChatThread({
   onShowSessionId,
   onRename,
   onSetStatus,
+  onArchive,
   onDelete,
 }: {
   conv: Conversation;
@@ -677,6 +755,7 @@ function ChatThread({
   onShowSessionId: () => void;
   onRename: () => void;
   onSetStatus: (s: ConvStatus) => void;
+  onArchive: () => void;
   onDelete: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -714,6 +793,7 @@ function ChatThread({
           ←
         </button>
         <h2 className="chat-thread-title">{conv.title || "New chat"}</h2>
+        <HarnessMarker name={conv.harness} />
         <div className="menu-anchor">
           <button
             className="chat-list-menu-btn"
@@ -729,6 +809,7 @@ function ChatThread({
               onShowSessionId={onShowSessionId}
               onRename={onRename}
               onSetStatus={onSetStatus}
+              onArchive={onArchive}
               onDelete={onDelete}
               onClose={() => setHeaderMenuOpen(false)}
             />
@@ -742,10 +823,18 @@ function ChatThread({
         {headMessages.map((m) => (
           <MessageBubble key={m.id} msg={m} onRetry={onRetry} />
         ))}
-        {(processing || steps.length > 0) && <StepList steps={steps} running={processing} />}
+        {(processing || steps.length > 0) && (
+          <StepList steps={steps} running={processing} agent={agentName(conv)} />
+        )}
         {finalMessage && <MessageBubble key={finalMessage.id} msg={finalMessage} onRetry={onRetry} />}
       </div>
-      <Composer conversationId={conv.id} onSend={onSend} onStop={onStop} disabled={processing} />
+      <Composer
+        conversationId={conv.id}
+        agent={agentName(conv)}
+        onSend={onSend}
+        onStop={onStop}
+        disabled={processing}
+      />
     </div>
   );
 }
@@ -771,7 +860,11 @@ export default function Chat({
   const [showDone, setShowDone] = useState(false);
   const [usage, setUsage] = useState<Record<string, ConversationUsage>>({});
   const [projects, setProjects] = useState<Project[]>([]);
-  const [showProjectPicker, setShowProjectPicker] = useState(false);
+  // New-conversation picker: the user always picks a harness, then a project.
+  const [pickerStep, setPickerStep] = useState<"harness" | "project" | null>(null);
+  // Harnesses a new conversation can use, and the one picked in the first step.
+  const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
+  const [newHarness, setNewHarness] = useState<string | null>(null);
 
   // Keep a ref to `selected` so the WS handler can read the latest value
   const selectedRef = useRef(selected);
@@ -902,6 +995,9 @@ export default function Chat({
     fetchStatuses().then((s) => setStatuses(s as Record<string, ConvStatus>)).catch(console.error);
     fetchAllUsage().then(setUsage).catch(console.error);
     listProjects().then(setProjects).catch(console.error);
+    listHarnesses()
+      .then((h) => setHarnesses(h.harnesses.filter((x) => x.available)))
+      .catch(console.error);
     // A run may already be in flight from before this page loaded.
     fetchProcessing().then((p) => setProcessingConvs(new Set(Object.keys(p)))).catch(console.error);
     fetchSteps().then(setStepsByConv).catch(console.error);
@@ -918,35 +1014,52 @@ export default function Chat({
 
   const newChat = async (projectName?: string) => {
     try {
-      const c = await createConversation(undefined, projectName);
+      const c = await createConversation(undefined, projectName, newHarness ?? undefined);
       setConversations((prev) => [c, ...prev]);
       setMessagesByConv((prev) => ({ ...prev, [c.id]: [] }));
       setSelected(c.id);
-      setShowProjectPicker(false);
+      setPickerStep(null);
     } catch (e) {
       console.error(e);
     }
   };
 
   const handleNewChat = () => {
-    if (projects.length === 0) {
-      newChat();
-    } else {
-      setShowProjectPicker(true);
-    }
+    setNewHarness(null);
+    setPickerStep("harness");
+  };
+
+  const pickHarness = (name: string) => {
+    setNewHarness(name);
+    setPickerStep("project");
+  };
+
+  const dropFromView = (id: string) => {
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    setMessagesByConv((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if (selected === id) setSelected(null);
   };
 
   const remove = async (id: string) => {
     if (!confirm("Delete this conversation?")) return;
     try {
       await deleteConversation(id);
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-      setMessagesByConv((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      if (selected === id) setSelected(null);
+      dropFromView(id);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Archived conversations never come back in the UI; they stay in the DB.
+  const archive = async (id: string) => {
+    if (!confirm("Archive this conversation? It will disappear from the web UI.")) return;
+    try {
+      await archiveConversation(id);
+      dropFromView(id);
     } catch (e) {
       console.error(e);
     }
@@ -1049,27 +1162,60 @@ export default function Chat({
           onClose={() => setRenaming(null)}
         />
       )}
-      {showProjectPicker && (
-        <div className="modal-overlay" onClick={() => setShowProjectPicker(false)}>
+      {pickerStep && (
+        <div className="modal-overlay" onClick={() => setPickerStep(null)}>
           <div className="modal-content project-picker" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Select Project</h3>
-            <ul className="project-picker-list">
-              <li>
-                <button className="project-picker-item" onClick={() => newChat()}>
-                  <span className="project-picker-name">No project</span>
-                  <span className="project-picker-path">Default working directory</span>
-                </button>
-              </li>
-              {projects.map((p) => (
-                <li key={p.name}>
-                  <button className="project-picker-item" onClick={() => newChat(p.name)}>
-                    <span className="project-picker-name">{p.name}</span>
-                    <span className="project-picker-path">{p.path}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <button className="modal-close-btn" onClick={() => setShowProjectPicker(false)}>Cancel</button>
+            {pickerStep === "harness" ? (
+              <>
+                <h3 className="modal-title">Select Agent</h3>
+                <ul className="project-picker-list">
+                  {harnesses.map((h) => (
+                    <li key={h.name}>
+                      <button className="project-picker-item harness-picker-item" onClick={() => pickHarness(h.name)}>
+                        <HarnessIcon name={h.name} />
+                        <span className="harness-picker-text">
+                          <span className="project-picker-name">{h.label}</span>
+                          <span className="project-picker-path">{h.name}</span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="modal-actions">
+                  <button className="modal-close-btn" onClick={() => setPickerStep(null)}>Cancel</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="modal-title">
+                  Select Project
+                  <span className="picker-step-context">
+                    <HarnessIcon name={newHarness} />
+                    {harnesses.find((h) => h.name === newHarness)?.label ?? newHarness}
+                  </span>
+                </h3>
+                <ul className="project-picker-list">
+                  <li>
+                    <button className="project-picker-item" onClick={() => newChat()}>
+                      <span className="project-picker-name">No project</span>
+                      <span className="project-picker-path">Default working directory</span>
+                    </button>
+                  </li>
+                  {projects.map((p) => (
+                    <li key={p.name}>
+                      <button className="project-picker-item" onClick={() => newChat(p.name)}>
+                        <span className="project-picker-name">{p.name}</span>
+                        <span className="project-picker-path">{p.path}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="modal-actions">
+                  <button className="modal-close-btn" onClick={() => setPickerStep("harness")}>Back</button>
+                  <button className="modal-close-btn" onClick={() => setPickerStep(null)}>Cancel</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1112,18 +1258,19 @@ export default function Chat({
                 onClick={() => selectConv(c.id)}
               >
                 <div className="chat-list-title-row">
+                  <HarnessMarker name={c.harness} />
                   {st === "unread" && <span className="status-dot" title="Unread" />}
                   {st === "done" && <span className="status-check" title="Done">&#10003;</span>}
                   <span className="chat-list-title">{c.title || "New chat"}</span>
-                  {c.project && <span className="chat-list-project">{c.project}</span>}
                 </div>
                 <div className="chat-list-meta">
-                  <span>{formatTime(c.updated_at)}</span>
+                  <span className="chat-list-time">{formatTime(c.updated_at)}</span>
                   {formatUsage(usage[c.id]) && (
                     <span className="chat-list-usage" title="Token usage / cost">
                       {formatUsage(usage[c.id])}
                     </span>
                   )}
+                  {c.project && <span className="chat-list-project">{c.project}</span>}
                   <div className="chat-list-actions">
                     <div className="menu-anchor">
                       <button
@@ -1143,6 +1290,7 @@ export default function Chat({
                           onShowSessionId={() => setSessionIdModal(c.claude_session_id || "(no session yet)")}
                           onRename={() => setRenaming(c.id)}
                           onSetStatus={(s) => setStatus(c.id, s)}
+                          onArchive={() => archive(c.id)}
                           onDelete={() => remove(c.id)}
                           onClose={() => setMenuOpen(null)}
                         />
@@ -1171,6 +1319,7 @@ export default function Chat({
             onShowSessionId={() => setSessionIdModal(active.claude_session_id || "(no session yet)")}
             onRename={() => setRenaming(active.id)}
             onSetStatus={(s) => setStatus(active.id, s)}
+            onArchive={() => archive(active.id)}
             onDelete={() => remove(active.id)}
           />
         ) : (

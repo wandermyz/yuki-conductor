@@ -6,8 +6,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from yuki_conductor import skills
-from yuki_conductor.claude_runner import run_claude
 from yuki_conductor.config import project_dir
+from yuki_conductor.harness.claude_code import ClaudeCodeHarness
+from yuki_conductor.harness.process import run_agent
 from yuki_conductor.skills import Tier
 
 
@@ -404,18 +405,18 @@ def test_falls_back_to_dir_name(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# run_claude wiring
+# Claude Code launch wiring
 # --------------------------------------------------------------------------
 
 
-def test_run_claude_injects_plugin_dirs_and_system_prompt():
+def test_claude_launch_injects_plugin_dirs_and_system_prompt():
     output = json.dumps({"type": "result", "result": "ok", "session_id": "s1"}) + "\n"
     mock_proc = _mock_popen(stdout=output)
     fake_dirs = ["C:/plug/a", "C:/plug/b"]
     written: list[str] = []
 
     def capture_popen(*args, **kwargs):
-        # The temp file is deleted once run_claude returns, so read it here.
+        # The temp file is deleted once run_agent returns, so read it here.
         cmd = args[0]
         path = cmd[cmd.index("--append-system-prompt-file") + 1]
         written.append(Path(path).read_text(encoding="utf-8"))
@@ -423,9 +424,9 @@ def test_run_claude_injects_plugin_dirs_and_system_prompt():
 
     with (
         patch("subprocess.Popen", side_effect=capture_popen) as mock_cls,
-        patch("yuki_conductor.claude_runner.skill_plugin_dirs", return_value=fake_dirs),
+        patch("yuki_conductor.harness.claude_code.skill_plugin_dirs", return_value=fake_dirs),
     ):
-        run_claude("hi", cwd="C:/work")
+        run_agent(ClaudeCodeHarness(), "hi", cwd="C:/work")
 
     cmd = mock_cls.call_args[0][0]
     # The prompt goes through a file, not inline: inline blows the Windows
@@ -438,72 +439,72 @@ def test_run_claude_injects_plugin_dirs_and_system_prompt():
     assert cmd.count("--plugin-dir") == len(fake_dirs)
 
 
-def test_run_claude_removes_temp_system_prompt_file():
+def test_claude_launch_removes_temp_system_prompt_file():
     output = json.dumps({"type": "result", "result": "ok", "session_id": "s1"}) + "\n"
     mock_proc = _mock_popen(stdout=output)
 
     with (
         patch("subprocess.Popen", return_value=mock_proc) as mock_cls,
-        patch("yuki_conductor.claude_runner.skill_plugin_dirs", return_value=[]),
+        patch("yuki_conductor.harness.claude_code.skill_plugin_dirs", return_value=[]),
     ):
-        run_claude("hi")
+        run_agent(ClaudeCodeHarness(), "hi")
 
     cmd = mock_cls.call_args[0][0]
     path = cmd[cmd.index("--append-system-prompt-file") + 1]
     assert not Path(path).exists()
 
 
-def test_run_claude_reports_command_line_too_long_distinctly():
+def test_claude_launch_reports_command_line_too_long_distinctly():
     """WinError 206 arrives as FileNotFoundError but isn't a missing CLI."""
     err = FileNotFoundError("The filename or extension is too long")
     err.winerror = 206
 
     with (
         patch("subprocess.Popen", side_effect=err),
-        patch("yuki_conductor.claude_runner.skill_plugin_dirs", return_value=[]),
+        patch("yuki_conductor.harness.claude_code.skill_plugin_dirs", return_value=[]),
     ):
-        result = run_claude("hi")
+        result = run_agent(ClaudeCodeHarness(), "hi")
 
     assert result.is_error
     assert "32767" in result.text
     assert "not found" not in result.text
 
 
-def test_run_claude_still_reports_missing_cli():
+def test_claude_launch_still_reports_missing_cli():
     with (
         patch("subprocess.Popen", side_effect=FileNotFoundError("nope")),
-        patch("yuki_conductor.claude_runner.skill_plugin_dirs", return_value=[]),
+        patch("yuki_conductor.harness.claude_code.skill_plugin_dirs", return_value=[]),
     ):
-        result = run_claude("hi")
+        result = run_agent(ClaudeCodeHarness(), "hi")
 
     assert result.is_error
     assert "CLI not found" in result.text
 
 
-def test_run_claude_passes_session_cwd_to_system_prompt():
+def test_claude_launch_passes_session_cwd_to_system_prompt():
     """Project-scope skills depend on the prompt being built for the real cwd."""
     output = json.dumps({"type": "result", "result": "ok", "session_id": "s1"}) + "\n"
     mock_proc = _mock_popen(stdout=output)
 
     with (
         patch("subprocess.Popen", return_value=mock_proc),
-        patch("yuki_conductor.claude_runner.skill_plugin_dirs", return_value=[]),
-        patch("yuki_conductor.claude_runner.system_prompt", return_value="p") as mock_prompt,
+        patch("yuki_conductor.harness.claude_code.skill_plugin_dirs", return_value=[]),
+        patch("yuki_conductor.harness.claude_code.system_prompt", return_value="p") as mock_prompt,
     ):
-        run_claude("hi", cwd="C:/some/project")
+        run_agent(ClaudeCodeHarness(), "hi", cwd="C:/some/project")
 
     assert mock_prompt.call_args.kwargs["cwd"] == "C:/some/project"
 
 
-def test_run_claude_enables_all_setting_sources():
+def test_claude_launch_enables_all_setting_sources():
     output = json.dumps({"type": "result", "result": "ok", "session_id": "s1"}) + "\n"
     mock_proc = _mock_popen(stdout=output)
 
     with (
         patch("subprocess.Popen", return_value=mock_proc) as mock_cls,
-        patch("yuki_conductor.claude_runner.skill_plugin_dirs", return_value=[]),
+        patch("yuki_conductor.harness.claude_code.skill_plugin_dirs", return_value=[]),
     ):
-        run_claude("hi")
+        run_agent(ClaudeCodeHarness(), "hi")
 
     cmd = mock_cls.call_args[0][0]
     assert "--setting-sources" in cmd
@@ -517,5 +518,21 @@ def test_system_prompt_names_the_web_conversation():
     assert "yuki-conductor-send" in prompt
 
 
+def test_system_prompt_documents_attachment_tag():
+    assert "<attachment>/absolute/path/to/file</attachment>" in skills.system_prompt(
+        plugin_dirs=[], cwd=None
+    )
+
+
 def test_system_prompt_omits_conversation_section_when_absent():
     assert "## Your conversation" not in skills.system_prompt(plugin_dirs=[], cwd=None)
+
+
+def test_core_prompt_keeps_the_contract_but_not_the_skill_listing():
+    """Harnesses that list skills natively (pi) get only this part."""
+    core = skills.core_prompt(conversation_key="abc123")
+    assert "<attachment>/absolute/path/to/file</attachment>" in core
+    assert "`abc123`" in core
+    assert "`Skill` tool" not in core
+    assert "## yuki-conductor capabilities" not in core
+    assert "`Skill` tool" in skills.system_prompt(plugin_dirs=[], cwd=None)
