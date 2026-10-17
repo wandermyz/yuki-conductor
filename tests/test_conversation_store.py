@@ -81,3 +81,18 @@ def test_archive_hides_from_list_but_keeps_rows(tmp_path: Path):
     assert [m.text for m in s.list_messages(gone.id)] == ["still here"]
     assert not s.archive_conversation(gone.id)  # already archived
     assert not s.archive_conversation("missing")
+
+
+def test_context_usage_travels_with_the_messages(tmp_path: Path):
+    """The chat reads context straight off the message list, so the join matters."""
+    s = ConversationStore(db_path=tmp_path / "t.db")
+    c = s.create_conversation()
+    s.add_message(c.id, role="user", text="hi")
+    reply = s.add_message(c.id, role="assistant", text="hello")
+    s.record_usage(
+        reply.id, c.id,
+        input_tokens=120, output_tokens=20, cost_usd=0.01,
+        context_tokens=40000, context_window=200000,
+    )
+    msgs = s.list_messages(c.id)
+    assert [(m.context_tokens, m.context_window) for m in msgs] == [(None, None), (40000, 200000)]

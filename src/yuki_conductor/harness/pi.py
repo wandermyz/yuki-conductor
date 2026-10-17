@@ -24,6 +24,7 @@ turned into a readable reply here. yuki-conductor never touches the GPU itself.
 import json
 import os
 import time
+from pathlib import Path
 
 from yuki_conductor.config import PI_BIN, PI_DEFAULT_MODEL
 from yuki_conductor.harness.base import (
@@ -33,6 +34,7 @@ from yuki_conductor.harness.base import (
     RunRequest,
     RunResult,
     StreamEvent,
+    prompt_tokens,
     tool_summary,
     truncate,
 )
@@ -50,6 +52,50 @@ GPU_BUSY_REPLY = (
     "Strata is unavailable right now: the GPU is busy with ComfyUI jobs. "
     "Try again in a few minutes."
 )
+
+# The prompt-side counts pi reports for one model call.
+_PI_PROMPT_KEYS = ("input", "cacheRead", "cacheWrite")
+
+
+def _agent_dir() -> Path:
+    """pi's config directory, which is also where its model catalogs live."""
+    return Path(os.environ.get("PI_CODING_AGENT_DIR", "~/.pi/agent")).expanduser()
+
+
+def _catalog_models(catalog, provider: str) -> list:
+    """The model list of `provider` in one of pi's catalog files.
+
+    `models.json` nests its providers under a `providers` key; the cached
+    catalog `models-store.json` keys them at the top level.
+    """
+    if not isinstance(catalog, dict):
+        return []
+    entry = (catalog.get("providers") or {}).get(provider) or catalog.get(provider)
+    models = entry.get("models") if isinstance(entry, dict) else entry
+    return models if isinstance(models, list) else []
+
+
+def model_context_window(provider: str | None, model: str | None) -> int | None:
+    """The context window pi itself compacts against for this model.
+
+    pi's JSON stream reports usage but never the window, so the limit is read
+    from the same files pi reads: the cached provider catalog, with the user's
+    `models.json` overrides on top of it.
+    """
+    if not provider or not model:
+        return None
+    window = None
+    for name in ("models-store.json", "models.json"):
+        try:
+            catalog = json.loads((_agent_dir() / name).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for entry in _catalog_models(catalog, provider):
+            if isinstance(entry, dict) and entry.get("id") == model:
+                size = entry.get("contextWindow")
+                if isinstance(size, int):
+                    window = size
+    return window
 
 
 def _text_of(content) -> str:
@@ -215,10 +261,25 @@ class PiStreamParser:
             )
         stop = msg.get("stopReason")
         if stop in ("error", "aborted"):
+            # A failed request's usage says nothing about the session's context
+            # (a refused call reports 0), so leave the meter where it was.
             return RunResult(
                 text=friendly_error(msg.get("errorMessage") or ""),
                 session_id=session_id, is_error=True, **usage,
             )
+        msg_usage = msg.get("usage")
+        provider = msg.get("provider")
+        context = {
+            # How full the window was on the last request of this run, against
+            # the window pi would have compacted at.
+            "context_tokens": prompt_tokens(
+                msg_usage if isinstance(msg_usage, dict) else {}, _PI_PROMPT_KEYS
+            ),
+            # A virtual model routes to a physical `responseModel`, which the
+            # catalog may not list; the requested `model` is the fallback.
+            "context_window": model_context_window(provider, msg.get("responseModel"))
+            or model_context_window(provider, msg.get("model")),
+        }
         text = "\n\n".join(
             b.get("text", "").strip()
             for b in msg.get("content") or []
@@ -226,7 +287,9 @@ class PiStreamParser:
         )
         if stop == "length":
             text = (text + "\n\n" if text else "") + "(reply cut off: the model hit its output limit)"
-        return RunResult(text=text or "(empty response)", session_id=session_id, **usage)
+        return RunResult(
+            text=text or "(empty response)", session_id=session_id, **usage, **context
+        )
 
 
 class PiHarness:

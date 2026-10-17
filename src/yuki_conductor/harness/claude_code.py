@@ -19,6 +19,7 @@ from yuki_conductor.harness.base import (
     RunRequest,
     RunResult,
     StreamEvent,
+    prompt_tokens,
     tool_summary,
     truncate,
 )
@@ -27,6 +28,9 @@ from yuki_conductor.skills import skill_plugin_dirs, system_prompt
 # ---------------------------------------------------------------------------
 # stream-json parsing
 # ---------------------------------------------------------------------------
+
+# The prompt-side counts Claude Code reports for one model call.
+_CLAUDE_PROMPT_KEYS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 
 
 def _result_summary(content) -> str:
@@ -108,27 +112,31 @@ def _user_events(message: dict) -> list[StreamEvent]:
     return events
 
 
-def parse_stream_line(line: str) -> tuple[list[StreamEvent], dict | None]:
+def parse_stream_line(line: str) -> tuple[list[StreamEvent], dict | None, dict | None]:
     """Parse one NDJSON line.
 
-    Returns `(events, final)` where `final` is the raw `result` payload when
-    this line is the terminal result record, else None. Unparseable or
-    uninteresting lines yield `([], None)` rather than raising — a stray
-    non-JSON line on stdout must not abort a run.
+    Returns `(events, final, assistant)`:
+      * `final` is the raw `result` payload when this line is the terminal
+        result record, else None;
+      * `assistant` is a top-level assistant message — its `usage` says how
+        much context that call carried, its `model` which model carried it.
+
+    Unparseable or uninteresting lines yield `([], None, None)` rather than
+    raising — a stray non-JSON line on stdout must not abort a run.
     """
     line = line.strip()
     if not line:
-        return [], None
+        return [], None, None
     try:
         data = json.loads(line)
     except json.JSONDecodeError:
-        return [], None
+        return [], None, None
     if not isinstance(data, dict):
-        return [], None
+        return [], None, None
 
     msg_type = data.get("type")
     if msg_type == "result":
-        return [], data
+        return [], data, None
     if msg_type == "system" and data.get("subtype") == "init":
         model = data.get("model") or ""
         return [
@@ -137,16 +145,42 @@ def parse_stream_line(line: str) -> tuple[list[StreamEvent], dict | None]:
                 label=f"Starting{f' ({model})' if model else ''}…",
                 detail={"model": model, "session_id": data.get("session_id") or ""},
             )
-        ], None
+        ], None, None
     if msg_type == "assistant":
-        return _assistant_events(data.get("message") or {}), None
+        message = data.get("message") or {}
+        # A subagent's calls have their own, much smaller context; only the
+        # main conversation's last call says how full this conversation is.
+        return _assistant_events(message), None, None if data.get("parent_tool_use_id") else message
     if msg_type == "user":
-        return _user_events(data.get("message") or {}), None
-    return [], None
+        return _user_events(data.get("message") or {}), None, None
+    return [], None, None
+
+
+def _model_context_window(model_usage, model: str | None) -> int | None:
+    """Read the window from the result record's per-model usage.
+
+    `modelUsage` is keyed by the model that answered; match the last
+    assistant message's model, and fall back to the widest window reported.
+    """
+    if not isinstance(model_usage, dict):
+        return None
+    windows = {
+        name: entry["contextWindow"]
+        for name, entry in model_usage.items()
+        if isinstance(entry, dict) and isinstance(entry.get("contextWindow"), int)
+    }
+    if not windows:
+        return None
+    if model and model in windows:
+        return windows[model]
+    return max(windows.values())
 
 
 def build_result(
-    final: dict | None, raw_stdout: str, fallback_session_id: str | None
+    final: dict | None,
+    raw_stdout: str,
+    fallback_session_id: str | None,
+    last_assistant: dict | None = None,
 ) -> RunResult:
     """Turn the terminal `result` record into a RunResult."""
     if final is None:
@@ -163,6 +197,16 @@ def build_result(
     output_tokens = final.get("output_tokens") or usage.get("output_tokens")
     cost_usd = final.get("total_cost_usd") or final.get("cost_usd") or usage.get("cost_usd")
 
+    # The result record adds up every model call of the turn, so for the size
+    # of the conversation itself use the last call's usage. Only a single-turn
+    # run can fall back to the aggregate.
+    last_usage = (last_assistant or {}).get("usage")
+    context_tokens = prompt_tokens(
+        last_usage if isinstance(last_usage, dict) else {}, _CLAUDE_PROMPT_KEYS
+    )
+    if context_tokens is None and final.get("num_turns") == 1:
+        context_tokens = prompt_tokens(usage, _CLAUDE_PROMPT_KEYS)
+
     return RunResult(
         text=result_text or "(empty response)",
         session_id=new_session_id,
@@ -170,21 +214,30 @@ def build_result(
         input_tokens=int(input_tokens) if input_tokens is not None else None,
         output_tokens=int(output_tokens) if output_tokens is not None else None,
         cost_usd=float(cost_usd) if cost_usd is not None else None,
+        context_tokens=context_tokens,
+        context_window=_model_context_window(
+            final.get("modelUsage"), (last_assistant or {}).get("model")
+        ),
     )
 
 
 class ClaudeStreamParser:
     def __init__(self) -> None:
         self._final: dict | None = None
+        self._last_assistant: dict | None = None
 
     def feed(self, line: str) -> list[StreamEvent]:
-        events, final = parse_stream_line(line)
+        events, final, assistant = parse_stream_line(line)
         if final is not None:
             self._final = final
+        if assistant is not None:
+            self._last_assistant = assistant
         return events
 
     def finish(self, raw_stdout: str, fallback_session_id: str | None) -> RunResult:
-        return build_result(self._final, raw_stdout, fallback_session_id)
+        return build_result(
+            self._final, raw_stdout, fallback_session_id, self._last_assistant
+        )
 
 
 # ---------------------------------------------------------------------------

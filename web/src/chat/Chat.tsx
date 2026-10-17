@@ -132,6 +132,65 @@ function formatUsage(u: ConversationUsage | undefined): string | null {
   return null;
 }
 
+/* ---------- Context window occupation ---------- */
+
+/** One turn's context: prompt tokens carried, out of the model's window. */
+interface ContextUse {
+  tokens: number;
+  window: number;
+}
+
+function contextOf(msg: ChatMessage): ContextUse | null {
+  if (msg.role !== "assistant") return null;
+  const tokens = msg.context_tokens;
+  const window = msg.context_window;
+  if (tokens == null || !window) return null;
+  return { tokens, window };
+}
+
+/** The newest turn that reported one: what the conversation is carrying now. */
+function latestContext(messages: ChatMessage[]): ContextUse | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const use = contextOf(messages[i]);
+    if (use) return use;
+  }
+  return null;
+}
+
+function contextPct(use: ContextUse): number {
+  return Math.min(100, Math.round((use.tokens / use.window) * 100));
+}
+
+function contextTitle(use: ContextUse): string {
+  return (
+    `Context window: ${use.tokens.toLocaleString()} of ${use.window.toLocaleString()} ` +
+    `tokens used (${contextPct(use)}%)`
+  );
+}
+
+/** Colour says what the number is for: room left, nearly full, or full. */
+function contextLevel(pct: number): string {
+  return pct >= 85 ? "high" : pct >= 60 ? "mid" : "low";
+}
+
+function ContextMeter({ use }: { use: ContextUse }) {
+  const pct = contextPct(use);
+  return (
+    <span
+      className={`ctx-meter ctx-${contextLevel(pct)}`}
+      title={contextTitle(use)}
+    >
+      <span className="ctx-bar" aria-hidden="true">
+        <span className="ctx-fill" style={{ width: `${Math.max(3, pct)}%` }} />
+      </span>
+      <span className="ctx-text">
+        {formatTokens(use.tokens)} / {formatTokens(use.window)}
+        <span className="ctx-pct">{pct}%</span>
+      </span>
+    </span>
+  );
+}
+
 function getStatus(statuses: Record<string, ConvStatus>, id: string): ConvStatus {
   return statuses[id] ?? "read";
 }
@@ -460,6 +519,7 @@ function MessageActions({
 }
 
 function MessageBubble({ msg, onRetry }: { msg: ChatMessage; onRetry: (msg: ChatMessage) => void }) {
+  const use = contextOf(msg);
   return (
     <div className={`bubble ${msg.role} ${msg.status ? `msg-${msg.status}` : ""}`}>
       {msg.text && (
@@ -502,6 +562,14 @@ function MessageBubble({ msg, onRetry }: { msg: ChatMessage; onRetry: (msg: Chat
       )}
       <div className="bubble-time">
         {formatTime(msg.created_at)}
+        {use && (
+          <span
+            className={`bubble-ctx ctx-${contextLevel(contextPct(use))}`}
+            title={contextTitle(use)}
+          >
+            {formatTokens(use.tokens)}/{formatTokens(use.window)} ({contextPct(use)}%)
+          </span>
+        )}
         {msg.text && (
           <MessageActions
             text={msg.text}
@@ -760,6 +828,7 @@ function ChatThread({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const contextUse = latestContext(messages);
 
   // Steps belong to the turn that produced the last assistant message, so once
   // the run finishes that message renders below the trace rather than above it.
@@ -794,6 +863,7 @@ function ChatThread({
         </button>
         <h2 className="chat-thread-title">{conv.title || "New chat"}</h2>
         <HarnessMarker name={conv.harness} />
+        {contextUse && <ContextMeter use={contextUse} />}
         <div className="menu-anchor">
           <button
             className="chat-list-menu-btn"

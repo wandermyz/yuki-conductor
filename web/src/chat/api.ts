@@ -37,6 +37,12 @@ export interface ChatMessage {
   text: string;
   attachments: AttachmentRef[];
   created_at: number;
+  /** How full the model's context was at the end of the turn that produced
+   *  this message, and the window it was measured against. Only assistant
+   *  messages carry them; absent on the optimistic ones the client draws
+   *  before the server confirms. */
+  context_tokens?: number | null;
+  context_window?: number | null;
   /** Client-only delivery state for optimistic user messages. Absent on
    *  server-confirmed messages (treated as delivered). */
   status?: "sending" | "failed";

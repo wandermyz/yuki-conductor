@@ -175,6 +175,8 @@ def handle_incoming_message(
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
             cost_usd=result.cost_usd,
+            context_tokens=result.context_tokens,
+            context_window=result.context_window,
         )
         logger.info(
             "Sending reply for %s (%d chars, %d attachments)",

@@ -19,6 +19,7 @@ from yuki_conductor.harness.pi import (
     PROGRESS_INTERVAL_S,
     PiHarness,
     PiStreamParser,
+    model_context_window,
 )
 from yuki_conductor.harness.process import run_agent
 
@@ -211,3 +212,83 @@ def test_run_agent_streams_events_and_returns_the_session():
         result = run_agent(KNOWN_HARNESSES["pi"], "hi", cwd="/work", on_event=seen.append)
     assert result.session_id == "yuki-fixture-1"
     assert [e.kind for e in seen][:3] == ["init", "thinking", "tool_use"]
+
+
+# --------------------------------------------------------------------------
+# context window occupation
+# --------------------------------------------------------------------------
+
+
+def _agent_dir(tmp_path, *, cached=None, user=None) -> str:
+    """A fake pi agent dir; returns its path so tests can point the env at it."""
+    d = tmp_path / "agent"
+    d.mkdir()
+    if cached is not None:
+        (d / "models-store.json").write_text(json.dumps(cached), encoding="utf-8")
+    if user is not None:
+        (d / "models.json").write_text(json.dumps(user), encoding="utf-8")
+    return str(d)
+
+
+def _strata_catalog(context_window):
+    return {
+        "providers": {
+            "strata": {"models": [{"id": "qwen3.8-flash-next-iq2_xs", "contextWindow": context_window}]}
+        }
+    }
+
+
+def test_context_is_the_last_request_not_the_run_total(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "PI_CODING_AGENT_DIR",
+        _agent_dir(tmp_path, user=_strata_catalog(131072)),
+    )
+    _, result = _parse("tool_turn")
+    # The second model call: 17 fresh tokens plus 2495 read from the prompt
+    # cache — not the 4955 both calls together carried.
+    assert result.context_tokens == 17 + 2495
+    assert result.context_window == 131072
+
+
+def test_context_window_is_unknown_without_a_catalog(tmp_path, monkeypatch):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", _agent_dir(tmp_path))
+    _, result = _parse("tool_turn")
+    assert result.context_tokens == 17 + 2495
+    assert result.context_window is None
+
+
+def test_user_models_json_overrides_the_cached_catalog(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "PI_CODING_AGENT_DIR",
+        _agent_dir(
+            tmp_path,
+            cached={"strata": {"models": [{"id": "qwen3.8-flash-next-iq2_xs", "contextWindow": 32768}]}},
+            user=_strata_catalog(131072),
+        ),
+    )
+    _, result = _parse("tool_turn")
+    assert result.context_window == 131072
+
+
+def test_window_falls_back_to_the_requested_model(tmp_path, monkeypatch):
+    """A routed `responseModel` missing from the catalog must not hide the window."""
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", _agent_dir(tmp_path, user=_strata_catalog(131072)))
+    parser = PiStreamParser()
+    for line in (FIXTURES / "tool_turn.jsonl").read_text(encoding="utf-8").splitlines():
+        record = json.loads(line)
+        message = record.get("message")
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            message["responseModel"] = "some-physical-model"
+        parser.feed(json.dumps(record))
+    result = parser.finish("", None)
+    assert result.context_window == 131072
+    assert model_context_window("strata", "some-physical-model") is None
+
+
+def test_failed_run_reports_no_context(tmp_path, monkeypatch):
+    """A refused request reports 0 tokens; recording that would reset the meter."""
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", _agent_dir(tmp_path))
+    _, result = _parse("gpu_busy")
+    assert result.is_error
+    assert result.context_tokens is None
+    assert result.context_window is None

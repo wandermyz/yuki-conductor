@@ -317,3 +317,34 @@ def test_cancel_kills_only_the_agent_process_group():
 
     assert result.text == "(stopped by user)"
     assert not got_sigterm.is_set()
+
+
+def test_context_is_the_last_call_of_the_turn():
+    """Two model calls: the window is what the second one carried."""
+    output = _stream(
+        {"type": "system", "subtype": "init", "model": "claude-opus-5", "session_id": "s1"},
+        {"type": "assistant", "parent_tool_use_id": None, "message": {
+            "model": "claude-opus-5",
+            "usage": {"input_tokens": 4, "cache_creation_input_tokens": 30000,
+                      "cache_read_input_tokens": 0, "output_tokens": 120},
+            "content": [{"type": "tool_use", "id": "t1", "name": "Read",
+                         "input": {"file_path": "a.py"}}]}},
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "body"}]}},
+        {"type": "assistant", "parent_tool_use_id": None, "message": {
+            "model": "claude-opus-5",
+            "usage": {"input_tokens": 6, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 30100, "output_tokens": 20},
+            "content": [{"type": "text", "text": "done"}]}},
+        _result_record(
+            "done", "s1", num_turns=2,
+            usage={"input_tokens": 10, "cache_creation_input_tokens": 30000,
+                   "cache_read_input_tokens": 30100, "output_tokens": 140},
+            modelUsage={"claude-opus-5": {"contextWindow": 200000, "maxOutputTokens": 128000}},
+        ),
+    )
+    with patch("subprocess.Popen", return_value=_mock_popen(stdout=output)):
+        result = run_agent(CLAUDE, "go")
+
+    assert result.context_tokens == 6 + 30100
+    assert result.context_window == 200000

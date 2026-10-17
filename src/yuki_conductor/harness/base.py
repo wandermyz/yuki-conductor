@@ -34,6 +34,10 @@ class RunResult:
     input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None
+    # How full the model's context was on the last call of the turn, and how
+    # big that window is. Both None when the harness reported neither.
+    context_tokens: int | None = None
+    context_window: int | None = None
 
 
 @dataclass
@@ -77,6 +81,23 @@ class Harness(Protocol):
 def truncate(text: str, limit: int) -> str:
     text = " ".join(text.split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def prompt_tokens(usage: dict, keys: tuple[str, ...]) -> int | None:
+    """Sum the prompt-side token counts of one model call.
+
+    That sum is what the call spent of its context window: fresh input plus
+    everything read from or written to the prompt cache. Output tokens are not
+    part of it. Returns None when `usage` reports none of `keys`.
+    """
+    total = 0
+    seen = False
+    for key in keys:
+        value = usage.get(key)
+        if isinstance(value, int):
+            total += value
+            seen = True
+    return total if seen else None
 
 
 def tool_summary(tool_input: dict) -> str:

@@ -69,6 +69,35 @@ def test_post_message_invokes_claude_and_persists_reply(client, monkeypatch):
     assert assistant[0]["text"] == "hello from claude"
 
 
+def test_reply_reports_context_occupation(client, monkeypatch):
+    """The chat's context meter reads it straight off the message list."""
+    from yuki_conductor.harness.base import RunResult
+
+    fake = RunResult(
+        text="done", session_id="claude-1",
+        input_tokens=50000, output_tokens=300,
+        context_tokens=40000, context_window=200000,
+    )
+    monkeypatch.setattr(
+        "yuki_conductor.messaging.conversation.run_agent", lambda *a, **k: fake
+    )
+
+    conv = client.post("/api/conversations", json={"title": None}).json()
+    client.post(f"/api/conversations/{conv['id']}/messages", json={"text": "hi"})
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        msgs = client.get(f"/api/conversations/{conv['id']}/messages").json()
+        if any(m["role"] == "assistant" for m in msgs):
+            break
+        time.sleep(0.05)
+
+    msgs = client.get(f"/api/conversations/{conv['id']}/messages").json()
+    user, assistant = msgs[0], msgs[1]
+    assert (assistant["context_tokens"], assistant["context_window"]) == (40000, 200000)
+    assert (user["context_tokens"], user["context_window"]) == (None, None)
+
+
 def test_upload_and_download_roundtrip(client):
     files = {"file": ("hello.txt", b"hi there", "text/plain")}
     r = client.post("/api/uploads", files=files)
