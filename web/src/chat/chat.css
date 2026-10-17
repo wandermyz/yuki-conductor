@@ -453,7 +453,7 @@
 }
 
 .bubble {
-  max-width: min(680px, 80%);
+  max-width: min(1100px, 85%);
   padding: 8px 12px;
   border-radius: 16px;
   font-size: 15px;
