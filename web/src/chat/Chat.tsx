@@ -32,6 +32,29 @@ import type {
   WSEvent,
 } from "./api";
 import "./chat.css";
+import claudeCodeIcon from "../assets/harness/claude-code.svg";
+import piIcon from "../assets/harness/pi.svg";
+
+// Official marks: Claude's spark (claude.ai) and pi's logo (pi.dev).
+const HARNESS_ICONS: Record<string, string> = {
+  "claude-code": claudeCodeIcon,
+  pi: piIcon,
+};
+
+function HarnessIcon({ name }: { name: string | null }) {
+  const src = name ? HARNESS_ICONS[name] : undefined;
+  return src ? <img className="harness-icon" src={src} alt="" aria-hidden="true" /> : null;
+}
+
+/** Marks the agent a conversation runs on: its icon, or its name if it has none. */
+function HarnessMarker({ name }: { name: string }) {
+  if (!HARNESS_ICONS[name]) return <span className="chat-list-harness">{name}</span>;
+  return (
+    <span className="chat-harness-marker" title={name} aria-label={name}>
+      <HarnessIcon name={name} />
+    </span>
+  );
+}
 
 /* ---------- Notification sound (iOS-safe) ---------- */
 
@@ -740,7 +763,7 @@ function ChatThread({
           ←
         </button>
         <h2 className="chat-thread-title">{conv.title || "New chat"}</h2>
-        {conv.harness !== "claude-code" && <span className="chat-list-harness">{conv.harness}</span>}
+        <HarnessMarker name={conv.harness} />
         <div className="menu-anchor">
           <button
             className="chat-list-menu-btn"
@@ -807,8 +830,9 @@ export default function Chat({
   const [showDone, setShowDone] = useState(false);
   const [usage, setUsage] = useState<Record<string, ConversationUsage>>({});
   const [projects, setProjects] = useState<Project[]>([]);
-  const [showProjectPicker, setShowProjectPicker] = useState(false);
-  // Harnesses a new conversation can use, and the one the picker has selected.
+  // New-conversation picker: the user always picks a harness, then a project.
+  const [pickerStep, setPickerStep] = useState<"harness" | "project" | null>(null);
+  // Harnesses a new conversation can use, and the one picked in the first step.
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
   const [newHarness, setNewHarness] = useState<string | null>(null);
 
@@ -942,10 +966,7 @@ export default function Chat({
     fetchAllUsage().then(setUsage).catch(console.error);
     listProjects().then(setProjects).catch(console.error);
     listHarnesses()
-      .then((h) => {
-        setHarnesses(h.harnesses.filter((x) => x.available));
-        setNewHarness(h.default);
-      })
+      .then((h) => setHarnesses(h.harnesses.filter((x) => x.available)))
       .catch(console.error);
     // A run may already be in flight from before this page loaded.
     fetchProcessing().then((p) => setProcessingConvs(new Set(Object.keys(p)))).catch(console.error);
@@ -967,19 +988,20 @@ export default function Chat({
       setConversations((prev) => [c, ...prev]);
       setMessagesByConv((prev) => ({ ...prev, [c.id]: [] }));
       setSelected(c.id);
-      setShowProjectPicker(false);
+      setPickerStep(null);
     } catch (e) {
       console.error(e);
     }
   };
 
   const handleNewChat = () => {
-    // The picker also chooses the harness, so it opens whenever there's a choice.
-    if (projects.length === 0 && harnesses.length < 2) {
-      newChat();
-    } else {
-      setShowProjectPicker(true);
-    }
+    setNewHarness(null);
+    setPickerStep("harness");
+  };
+
+  const pickHarness = (name: string) => {
+    setNewHarness(name);
+    setPickerStep("project");
   };
 
   const dropFromView = (id: string) => {
@@ -1110,42 +1132,60 @@ export default function Chat({
           onClose={() => setRenaming(null)}
         />
       )}
-      {showProjectPicker && (
-        <div className="modal-overlay" onClick={() => setShowProjectPicker(false)}>
+      {pickerStep && (
+        <div className="modal-overlay" onClick={() => setPickerStep(null)}>
           <div className="modal-content project-picker" onClick={(e) => e.stopPropagation()}>
-            {harnesses.length > 1 && (
-              <div className="harness-picker" role="radiogroup" aria-label="Agent">
-                {harnesses.map((h) => (
-                  <button
-                    key={h.name}
-                    role="radio"
-                    aria-checked={newHarness === h.name}
-                    className={`harness-option ${newHarness === h.name ? "active" : ""}`}
-                    onClick={() => setNewHarness(h.name)}
-                  >
-                    {h.label}
-                  </button>
-                ))}
-              </div>
+            {pickerStep === "harness" ? (
+              <>
+                <h3 className="modal-title">Select Agent</h3>
+                <ul className="project-picker-list">
+                  {harnesses.map((h) => (
+                    <li key={h.name}>
+                      <button className="project-picker-item harness-picker-item" onClick={() => pickHarness(h.name)}>
+                        <HarnessIcon name={h.name} />
+                        <span className="harness-picker-text">
+                          <span className="project-picker-name">{h.label}</span>
+                          <span className="project-picker-path">{h.name}</span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="modal-actions">
+                  <button className="modal-close-btn" onClick={() => setPickerStep(null)}>Cancel</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="modal-title">
+                  Select Project
+                  <span className="picker-step-context">
+                    <HarnessIcon name={newHarness} />
+                    {harnesses.find((h) => h.name === newHarness)?.label ?? newHarness}
+                  </span>
+                </h3>
+                <ul className="project-picker-list">
+                  <li>
+                    <button className="project-picker-item" onClick={() => newChat()}>
+                      <span className="project-picker-name">No project</span>
+                      <span className="project-picker-path">Default working directory</span>
+                    </button>
+                  </li>
+                  {projects.map((p) => (
+                    <li key={p.name}>
+                      <button className="project-picker-item" onClick={() => newChat(p.name)}>
+                        <span className="project-picker-name">{p.name}</span>
+                        <span className="project-picker-path">{p.path}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="modal-actions">
+                  <button className="modal-close-btn" onClick={() => setPickerStep("harness")}>Back</button>
+                  <button className="modal-close-btn" onClick={() => setPickerStep(null)}>Cancel</button>
+                </div>
+              </>
             )}
-            <h3 className="modal-title">Select Project</h3>
-            <ul className="project-picker-list">
-              <li>
-                <button className="project-picker-item" onClick={() => newChat()}>
-                  <span className="project-picker-name">No project</span>
-                  <span className="project-picker-path">Default working directory</span>
-                </button>
-              </li>
-              {projects.map((p) => (
-                <li key={p.name}>
-                  <button className="project-picker-item" onClick={() => newChat(p.name)}>
-                    <span className="project-picker-name">{p.name}</span>
-                    <span className="project-picker-path">{p.path}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <button className="modal-close-btn" onClick={() => setShowProjectPicker(false)}>Cancel</button>
           </div>
         </div>
       )}
@@ -1188,19 +1228,19 @@ export default function Chat({
                 onClick={() => selectConv(c.id)}
               >
                 <div className="chat-list-title-row">
+                  <HarnessMarker name={c.harness} />
                   {st === "unread" && <span className="status-dot" title="Unread" />}
                   {st === "done" && <span className="status-check" title="Done">&#10003;</span>}
                   <span className="chat-list-title">{c.title || "New chat"}</span>
-                  {c.harness !== "claude-code" && <span className="chat-list-harness">{c.harness}</span>}
-                  {c.project && <span className="chat-list-project">{c.project}</span>}
                 </div>
                 <div className="chat-list-meta">
-                  <span>{formatTime(c.updated_at)}</span>
+                  <span className="chat-list-time">{formatTime(c.updated_at)}</span>
                   {formatUsage(usage[c.id]) && (
                     <span className="chat-list-usage" title="Token usage / cost">
                       {formatUsage(usage[c.id])}
                     </span>
                   )}
+                  {c.project && <span className="chat-list-project">{c.project}</span>}
                   <div className="chat-list-actions">
                     <div className="menu-anchor">
                       <button
