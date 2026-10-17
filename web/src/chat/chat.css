@@ -97,14 +97,20 @@
 }
 
 .notify-toggle {
+  display: flex;
+  align-items: center;
   background: none;
+  color: var(--text-h);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 4px 7px;
-  font-size: 14px;
-  line-height: 1;
+  padding: 5px;
   cursor: pointer;
   opacity: 0.55;
+}
+
+.notify-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .notify-toggle.on {
