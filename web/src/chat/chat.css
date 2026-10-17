@@ -90,6 +90,38 @@
   opacity: 0.9;
 }
 
+.chat-sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notify-toggle {
+  display: flex;
+  align-items: center;
+  background: none;
+  color: var(--text-h);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.notify-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.notify-toggle.on {
+  opacity: 1;
+}
+
+.notify-toggle:disabled {
+  cursor: default;
+  opacity: 0.3;
+}
+
 .chat-list {
   list-style: none;
   margin: 0;

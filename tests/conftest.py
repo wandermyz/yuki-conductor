@@ -35,3 +35,21 @@ def isolated_plugin_registry(monkeypatch, tmp_path):
     # The env override must not leak in from the developer's shell either.
     monkeypatch.delenv("CHANNELS", raising=False)
     return path
+
+
+@pytest.fixture(autouse=True)
+def isolated_push_subscriptions(monkeypatch, tmp_path):
+    """Keep browser push out of the real workspace.
+
+    Every web assistant message calls ``web_push.notify``, which reads the
+    module-level subscription store; bound to the real DB, a test reply would
+    send a real notification to the user's browsers.
+    """
+    from yuki_conductor import web_push
+    from yuki_conductor.web_push import PushSubscriptionStore
+
+    store = PushSubscriptionStore(db_path=tmp_path / "push.db")
+    monkeypatch.setattr(web_push, "subscriptions", store)
+    monkeypatch.setattr(web_push, "VAPID_KEY_FILE", tmp_path / "vapid-private.pem")
+    monkeypatch.setattr(web_push, "_vapid", None)
+    return store

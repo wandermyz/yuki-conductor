@@ -31,6 +31,8 @@ import type {
   StreamStep,
   WSEvent,
 } from "./api";
+import { disablePush, enablePush, getPushState } from "../webPush";
+import type { PushState } from "../webPush";
 import "./chat.css";
 import claudeCodeIcon from "../assets/harness/claude-code.svg";
 import piIcon from "../assets/harness/pi.svg";
@@ -53,6 +55,77 @@ function HarnessMarker({ name }: { name: string }) {
     <span className="chat-harness-marker" title={name} aria-label={name}>
       <HarnessIcon name={name} />
     </span>
+  );
+}
+
+/* ---------- Browser push notifications ---------- */
+
+const PUSH_TITLES: Record<PushState, string> = {
+  unsupported: "Notifications need HTTPS and a browser with Web Push",
+  denied: "Notifications are blocked for this site in browser settings",
+  off: "Turn on browser notifications for replies",
+  on: "Browser notifications on — click to turn off",
+};
+
+/** Outlined bell (Lucide's `bell` / `bell-off`), matching the tab icons. */
+function BellIcon({ off }: { off: boolean }) {
+  return (
+    <svg
+      className="notify-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M10.268 21a2 2 0 0 0 3.464 0" />
+      {off ? (
+        <>
+          <path d="M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742" />
+          <path d="m2 2 20 20" />
+          <path d="M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05" />
+        </>
+      ) : (
+        <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />
+      )}
+    </svg>
+  );
+}
+
+function NotificationToggle() {
+  const [state, setState] = useState<PushState | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    getPushState().then(setState).catch(console.error);
+  }, []);
+
+  if (state === null || state === "unsupported") return null;
+
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      setState(await (state === "on" ? disablePush() : enablePush()));
+    } catch (err) {
+      console.error(err);
+      alert(`Couldn't change notifications: ${err}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      className={`notify-toggle ${state === "on" ? "on" : ""}`}
+      onClick={toggle}
+      disabled={busy || state === "denied"}
+      title={PUSH_TITLES[state]}
+      aria-label={PUSH_TITLES[state]}
+    >
+      <BellIcon off={state !== "on"} />
+    </button>
   );
 }
 
@@ -1297,9 +1370,12 @@ export default function Chat({
               title={wsConnected ? "Connected" : "Disconnected"}
             />
           </h2>
-          <button className="new-chat-btn" onClick={handleNewChat}>
-            + New
-          </button>
+          <div className="chat-sidebar-actions">
+            <NotificationToggle />
+            <button className="new-chat-btn" onClick={handleNewChat}>
+              + New
+            </button>
+          </div>
         </div>
         <div className="chat-filter-bar">
           <button
