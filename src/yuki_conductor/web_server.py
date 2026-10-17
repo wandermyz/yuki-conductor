@@ -15,6 +15,7 @@ from fastapi import (
     File,
     HTTPException,
     Query,
+    Request,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
@@ -23,7 +24,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from yuki_conductor import zellij_manager
+from yuki_conductor import web_push, zellij_manager
 from yuki_conductor.config import WEB_UPLOADS_DIR
 from yuki_conductor.conversation_store import ConversationStore
 from yuki_conductor.harness import HARNESSES, default_harness
@@ -536,6 +537,39 @@ def create_api() -> FastAPI:
             "platform": platform.name,
             "created": created,
         }
+
+    # ── Browser notifications (Web Push) ──────────────────────────────────
+
+    class WebPushKeys(BaseModel):
+        p256dh: str
+        auth: str
+
+    class WebPushSubscription(BaseModel):
+        """A browser `PushSubscription`, as `subscription.toJSON()` serializes it."""
+
+        endpoint: str
+        keys: WebPushKeys
+
+    class WebPushEndpoint(BaseModel):
+        endpoint: str
+
+    @api.get("/api/webpush/key")
+    def webpush_key():
+        return {"public_key": web_push.public_key()}
+
+    @api.post("/api/webpush/subscriptions")
+    def webpush_subscribe(body: WebPushSubscription, request: Request):
+        web_push.subscriptions.add(
+            body.endpoint,
+            body.keys.p256dh,
+            body.keys.auth,
+            user_agent=request.headers.get("user-agent"),
+        )
+        return {"ok": True}
+
+    @api.post("/api/webpush/unsubscribe")
+    def webpush_unsubscribe(body: WebPushEndpoint):
+        return {"ok": True, "removed": web_push.subscriptions.remove(body.endpoint)}
 
     # ── Automations (cron) endpoints ──────────────────────────────────────
 

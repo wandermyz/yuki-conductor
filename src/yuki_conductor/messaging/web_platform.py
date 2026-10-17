@@ -12,6 +12,7 @@ import uuid
 from collections.abc import Iterable
 from pathlib import Path
 
+from yuki_conductor import web_push
 from yuki_conductor.config import WEB_UPLOADS_DIR
 from yuki_conductor.conversation_store import (
     ConversationStore,
@@ -195,6 +196,7 @@ class WebPlatform:
             # The status change has to reach browsers too, or the conversation
             # only looks unread after a reload.
             self._manager.broadcast(conversation_key, {"type": "status", "status": "unread"})
+        self._notify(conversation_key, msg.text)
 
     def set_processing(self, conversation_key: str, message_id: str, on: bool) -> None:
         self._manager.set_processing(conversation_key, message_id, on)
@@ -247,7 +249,13 @@ class WebPlatform:
         self._manager.broadcast(
             conv.id, {"type": "message", "message": serialize_message(stored)}
         )
+        self._notify(conv.id, text)
         return conv.id
+
+    def _notify(self, conversation_key: str, text: str) -> None:
+        """Browser push for a new assistant message (see `web_push`)."""
+        conv = self._store.get_conversation(conversation_key)
+        web_push.notify(conversation_key, (conv.title if conv else None) or "", text)
 
     def reserve_thread(self, title: str | None = None, harness: str = "claude-code") -> str:
         """Create an empty conversation and return its id.

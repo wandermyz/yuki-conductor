@@ -31,6 +31,8 @@ import type {
   StreamStep,
   WSEvent,
 } from "./api";
+import { disablePush, enablePush, getPushState } from "../webPush";
+import type { PushState } from "../webPush";
 import "./chat.css";
 import claudeCodeIcon from "../assets/harness/claude-code.svg";
 import piIcon from "../assets/harness/pi.svg";
@@ -53,6 +55,50 @@ function HarnessMarker({ name }: { name: string }) {
     <span className="chat-harness-marker" title={name} aria-label={name}>
       <HarnessIcon name={name} />
     </span>
+  );
+}
+
+/* ---------- Browser push notifications ---------- */
+
+const PUSH_TITLES: Record<PushState, string> = {
+  unsupported: "Notifications need HTTPS and a browser with Web Push",
+  denied: "Notifications are blocked for this site in browser settings",
+  off: "Turn on browser notifications for replies",
+  on: "Browser notifications on — click to turn off",
+};
+
+function NotificationToggle() {
+  const [state, setState] = useState<PushState | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    getPushState().then(setState).catch(console.error);
+  }, []);
+
+  if (state === null || state === "unsupported") return null;
+
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      setState(await (state === "on" ? disablePush() : enablePush()));
+    } catch (err) {
+      console.error(err);
+      alert(`Couldn't change notifications: ${err}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      className={`notify-toggle ${state === "on" ? "on" : ""}`}
+      onClick={toggle}
+      disabled={busy || state === "denied"}
+      title={PUSH_TITLES[state]}
+      aria-label={PUSH_TITLES[state]}
+    >
+      {state === "on" ? "🔔" : "🔕"}
+    </button>
   );
 }
 
@@ -1227,9 +1273,12 @@ export default function Chat({
               title={wsConnected ? "Connected" : "Disconnected"}
             />
           </h2>
-          <button className="new-chat-btn" onClick={handleNewChat}>
-            + New
-          </button>
+          <div className="chat-sidebar-actions">
+            <NotificationToggle />
+            <button className="new-chat-btn" onClick={handleNewChat}>
+              + New
+            </button>
+          </div>
         </div>
         <div className="chat-filter-bar">
           <button

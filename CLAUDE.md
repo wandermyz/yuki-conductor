@@ -26,6 +26,7 @@ src/yuki_conductor/
   cron_config.py    — cron.yaml parsing, cadence prose, surgical field edits
   daemon.py         — daemon management dispatcher (daemon_macos / daemon_linux / daemon_windows)
   web_server.py     — FastAPI HTTP server (agent conductor web UI)
+  web_push.py       — browser push notifications (VAPID key, subscriptions, fan-out)
 web/                — React + Vite frontend (pnpm, TypeScript)
 plugins/
   yuki-conductor/   — bundled skill plugin, injected into every session (cron skill)
@@ -338,6 +339,21 @@ empty reservation when the run ends in `<silence>` and posted nothing. Slack has
 no reservation, so a cron run on Slack can't push until its thread exists.
 
 The `yuki-conductor-send` skill (bundled plugin) documents `send` for the model.
+
+### Browser notifications
+
+Every assistant message `WebPlatform` delivers — a reply, a cron result
+(`start_thread` or `send`), a push — also goes out as a Web Push notification
+(`web_push.py`) to each browser subscribed via the 🔔 toggle in the chat
+sidebar. The service worker `web/public/sw.js` shows it, unless a focused
+window is already on that conversation; a click focuses the app and opens the
+conversation. Subscriptions live in the `push_subscriptions` table and are
+dropped when the push service answers 404/410. The VAPID key is generated on
+first use at `~/.yuki-conductor/.secrets/vapid-private.pem`; deleting it
+invalidates every subscription. Push needs a secure context, so it only works
+through HTTPS (`tailscale serve`) or localhost. Slack threads aren't covered —
+Slack notifies on its own. Tests are isolated by the autouse
+`isolated_push_subscriptions` fixture.
 
 ## Frontend Deployment Gotchas
 
