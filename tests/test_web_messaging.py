@@ -46,9 +46,7 @@ def test_post_message_invokes_claude_and_persists_reply(client, monkeypatch):
     from yuki_conductor.harness.base import RunResult
 
     fake = RunResult(text="hello from claude", session_id="claude-1")
-    monkeypatch.setattr(
-        "yuki_conductor.messaging.conversation.run_agent", lambda *a, **k: fake
-    )
+    monkeypatch.setattr("yuki_conductor.messaging.conversation.run_agent", lambda *a, **k: fake)
 
     conv = client.post("/api/conversations", json={"title": None}).json()
     r = client.post(f"/api/conversations/{conv['id']}/messages", json={"text": "hi"})
@@ -103,12 +101,13 @@ def test_delete_conversation(client):
 
 def test_push_into_existing_conversation(client):
     conv = client.post("/api/conversations", json={"title": "watched"}).json()
-    r = client.post(
-        "/api/push", json={"conversation_id": conv["id"], "text": "progress update"}
-    )
+    r = client.post("/api/push", json={"conversation_id": conv["id"], "text": "progress update"})
     assert r.status_code == 200
     assert r.json() == {
-        "ok": True, "conversation_id": conv["id"], "platform": "web", "created": False,
+        "ok": True,
+        "conversation_id": conv["id"],
+        "platform": "web",
+        "created": False,
     }
 
     msgs = client.get(f"/api/conversations/{conv['id']}/messages").json()
@@ -139,9 +138,7 @@ def test_push_with_attachment_stores_it(client, tmp_path):
     img = tmp_path / "pic.png"
     img.write_bytes(b"\x89PNG")
     conv = client.post("/api/conversations", json={"title": "watched"}).json()
-    r = client.post(
-        "/api/push", json={"conversation_id": conv["id"], "attachments": [str(img)]}
-    )
+    r = client.post("/api/push", json={"conversation_id": conv["id"], "attachments": [str(img)]})
     assert r.status_code == 200
 
     [msg] = client.get(f"/api/conversations/{conv['id']}/messages").json()
@@ -229,6 +226,29 @@ def test_push_to_new_conversation_broadcasts_status(client, monkeypatch):
     client.post("/api/push", json={"text": "cron fired"})
     assert [p["type"] for p in sent] == ["message", "status"]
     assert sent[0]["pushed"] is True
+
+
+def test_reader_page_renders_reply_as_article(client):
+    conv = client.post("/api/conversations", json={"title": "Voices"}).json()
+    first = web_server.conv_store.add_message(
+        conv["id"], "assistant", "# Heading\n\nFirst **reply** <script>x</script>"
+    )
+    web_server.conv_store.add_message(conv["id"], "assistant", "second reply")
+    web_server.conv_store.add_message(conv["id"], "user", "a follow-up")
+
+    r = client.get(f"/read/{conv['id']}/{first.id}")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    page = r.text
+    assert "<article>" in page and "<h1>Voices</h1>" in page
+    assert "<strong>reply</strong>" in page
+    assert "<script>" not in page  # raw HTML in a reply is escaped
+
+    # `last` skips the trailing user message and returns the newest assistant reply.
+    assert "second reply" in client.get(f"/read/{conv['id']}/last").text
+
+    assert client.get(f"/read/{conv['id']}/nope").status_code == 404
+    assert client.get("/read/nope/last").status_code == 404
 
 
 def test_frontend_cache_headers(monkeypatch, tmp_path):

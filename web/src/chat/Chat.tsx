@@ -371,7 +371,15 @@ function markdownToSpeech(md: string): string {
     .trim();
 }
 
-function MessageActions({ text }: { text: string }) {
+function MessageActions({
+  text,
+  canSpeak,
+  readerUrl,
+}: {
+  text: string;
+  canSpeak: boolean;
+  readerUrl?: string;
+}) {
   const [copied, setCopied] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined;
@@ -424,7 +432,7 @@ function MessageActions({ text }: { text: string }) {
       >
         {copied ? "✓" : "⧉"}
       </button>
-      {synth && (
+      {synth && canSpeak && (
         <button
           type="button"
           className={`bubble-action ${speaking ? "is-active" : ""}`}
@@ -434,6 +442,18 @@ function MessageActions({ text }: { text: string }) {
         >
           {speaking ? "■" : "▶"}
         </button>
+      )}
+      {readerUrl && (
+        <a
+          className="bubble-action"
+          href={readerUrl}
+          target="_blank"
+          rel="noreferrer"
+          title="Open as article (for Safari Reader)"
+          aria-label="Open message as an article page"
+        >
+          ¶
+        </a>
       )}
     </div>
   );
@@ -482,7 +502,17 @@ function MessageBubble({ msg, onRetry }: { msg: ChatMessage; onRetry: (msg: Chat
       )}
       <div className="bubble-time">
         {formatTime(msg.created_at)}
-        {msg.text && <MessageActions text={msg.text} />}
+        {msg.text && (
+          <MessageActions
+            text={msg.text}
+            canSpeak={msg.role === "assistant"}
+            readerUrl={
+              msg.role === "assistant"
+                ? `/read/${encodeURIComponent(msg.conversation_id)}/${encodeURIComponent(msg.id)}`
+                : undefined
+            }
+          />
+        )}
         {msg.status === "sending" && <span className="msg-status"> · Sending…</span>}
         {msg.status === "failed" && (
           <span className="msg-status msg-status-failed">

@@ -19,7 +19,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -40,6 +40,7 @@ from yuki_conductor.messaging.web_platform import (
     resolve_file,
     serialize_message,
 )
+from yuki_conductor.reader_page import render_reader_page
 from yuki_conductor.store import CronRunStore, ProjectStore, SessionStore
 
 logger = logging.getLogger(__name__)
@@ -851,6 +852,20 @@ def create_api() -> FastAPI:
             pass
         finally:
             ws_manager.remove(websocket)
+
+    @api.get("/read/{conv_id}/{msg_id}", response_class=HTMLResponse)
+    def reader_page(conv_id: str, msg_id: str):
+        """One reply as a plain article page for Safari Reader; `last` = latest reply."""
+        conv = conv_store.get_conversation(conv_id)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        if msg_id == "last":
+            msg = conv_store.latest_message(conv_id, "assistant")
+        else:
+            msg = conv_store.get_message(conv_id, msg_id)
+        if msg is None:
+            raise HTTPException(status_code=404, detail="Message not found")
+        return render_reader_page(msg, conv.title)
 
     return api
 

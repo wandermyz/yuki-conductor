@@ -662,6 +662,7 @@
   border-radius: 8px;
   cursor: pointer;
   opacity: 0.75;
+  text-decoration: none;
 }
 
 .bubble-action:hover {
