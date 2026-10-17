@@ -927,6 +927,11 @@
   height: 14px;
 }
 
+.chat-list-meta .chat-harness-marker .harness-icon {
+  width: 12px;
+  height: 12px;
+}
+
 .chat-thread-header .chat-harness-marker .harness-icon {
   width: 18px;
   height: 18px;
