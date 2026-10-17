@@ -32,6 +32,10 @@ class StoredMessage:
     text: str
     attachments: list[StoredAttachment] = field(default_factory=list)
     created_at: float = 0.0
+    # Only an assistant message ever has these: how full the model's context
+    # was at the end of the turn that produced it, and how big that window is.
+    context_tokens: int | None = None
+    context_window: int | None = None
 
 
 @dataclass
@@ -103,6 +107,8 @@ class ConversationStore:
                         input_tokens INTEGER,
                         output_tokens INTEGER,
                         cost_usd REAL,
+                        context_tokens INTEGER,
+                        context_window INTEGER,
                         created_at REAL NOT NULL
                     )
                     """
@@ -127,6 +133,13 @@ class ConversationStore:
                     )
                 if "archived_at" not in cols:
                     con.execute("ALTER TABLE conversations ADD COLUMN archived_at REAL")
+                usage_cols = {
+                    row[1]
+                    for row in con.execute("PRAGMA table_info(message_usage)").fetchall()
+                }
+                for name in ("context_tokens", "context_window"):
+                    if name not in usage_cols:
+                        con.execute(f"ALTER TABLE message_usage ADD COLUMN {name} INTEGER")
                 con.commit()
             finally:
                 con.close()
@@ -350,21 +363,24 @@ class ConversationStore:
         before: float | None = None,
         limit: int = 100,
     ) -> list[StoredMessage]:
+        # Usage lives in its own table, so left join it to keep user messages.
+        select = (
+            "SELECT m.id, m.conversation_id, m.role, m.text, m.attachments_json, m.created_at, "
+            "u.context_tokens, u.context_window "
+            "FROM messages m LEFT JOIN message_usage u ON u.message_id = m.id "
+            "WHERE m.conversation_id = ?"
+        )
         with self._lock:
             con = self._connect()
             try:
                 if before is not None:
                     rows = con.execute(
-                        "SELECT id, conversation_id, role, text, attachments_json, created_at "
-                        "FROM messages WHERE conversation_id = ? AND created_at < ? "
-                        "ORDER BY created_at DESC LIMIT ?",
+                        select + " AND m.created_at < ? ORDER BY m.created_at DESC LIMIT ?",
                         (conv_id, before, limit),
                     ).fetchall()
                 else:
                     rows = con.execute(
-                        "SELECT id, conversation_id, role, text, attachments_json, created_at "
-                        "FROM messages WHERE conversation_id = ? "
-                        "ORDER BY created_at DESC LIMIT ?",
+                        select + " ORDER BY m.created_at DESC LIMIT ?",
                         (conv_id, limit),
                     ).fetchall()
                 msgs: list[StoredMessage] = []
@@ -387,6 +403,8 @@ class ConversationStore:
                             text=r[3],
                             attachments=atts,
                             created_at=r[5],
+                            context_tokens=r[6],
+                            context_window=r[7],
                         )
                     )
                 msgs.reverse()  # ascending by time
@@ -401,18 +419,29 @@ class ConversationStore:
         input_tokens: int | None = None,
         output_tokens: int | None = None,
         cost_usd: float | None = None,
+        context_tokens: int | None = None,
+        context_window: int | None = None,
     ) -> None:
         """Record token usage and/or cost for an assistant message."""
-        if input_tokens is None and output_tokens is None and cost_usd is None:
+        if (
+            input_tokens is None
+            and output_tokens is None
+            and cost_usd is None
+            and context_tokens is None
+        ):
             return
         with self._lock:
             con = self._connect()
             try:
                 con.execute(
                     "INSERT OR REPLACE INTO message_usage "
-                    "(message_id, conversation_id, input_tokens, output_tokens, cost_usd, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (message_id, conversation_id, input_tokens, output_tokens, cost_usd, time.time()),
+                    "(message_id, conversation_id, input_tokens, output_tokens, cost_usd, "
+                    "context_tokens, context_window, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        message_id, conversation_id, input_tokens, output_tokens, cost_usd,
+                        context_tokens, context_window, time.time(),
+                    ),
                 )
                 con.commit()
             finally:

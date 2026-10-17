@@ -425,6 +425,18 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
     lock every Slack thread to it;
   - cron: a task's `harness:`;
   - otherwise the default (first in `HARNESSES`).
+- **Context occupation is measured on the turn's last model call.**
+  `RunResult.context_tokens` is that call's prompt-side tokens — Claude Code:
+  `input + cache_creation + cache_read` of the last *top-level* assistant record
+  (a subagent's own small context is ignored); pi: `input + cacheRead +
+  cacheWrite` of the last `message_end`. The result record's own `usage` sums
+  every call of the turn, so it is never the window size. `context_window` is
+  the window that call ran against: Claude Code reports it per model in
+  `modelUsage`, pi never reports it at all, so pi's is read from pi's own
+  catalogs — `<agent-dir>/models.json` (or `PI_CODING_AGENT_DIR`) over the
+  cached `models-store.json`. Both are stored per assistant message in
+  `message_usage` and reach the chat through the message list: a meter in the
+  thread header plus a label on each reply.
 - **Model pins are Claude Code only.** `/<prefix>-model` stores a Claude alias, so
   the conversation core passes `IncomingMessage.model` only to `claude-code`
   turns; other harnesses use their own default (e.g. `PI_DEFAULT_MODEL`).
