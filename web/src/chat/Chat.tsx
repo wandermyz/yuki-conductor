@@ -1328,12 +1328,12 @@ export default function Chat({
                 onClick={() => selectConv(c.id)}
               >
                 <div className="chat-list-title-row">
-                  <HarnessMarker name={c.harness} />
                   {st === "unread" && <span className="status-dot" title="Unread" />}
                   {st === "done" && <span className="status-check" title="Done">&#10003;</span>}
                   <span className="chat-list-title">{c.title || "New chat"}</span>
                 </div>
                 <div className="chat-list-meta">
+                  <HarnessMarker name={c.harness} />
                   <span className="chat-list-time">{formatTime(c.updated_at)}</span>
                   {formatUsage(usage[c.id]) && (
                     <span className="chat-list-usage" title="Token usage / cost">
