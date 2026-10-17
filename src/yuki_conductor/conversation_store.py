@@ -383,32 +383,36 @@ class ConversationStore:
                         select + " ORDER BY m.created_at DESC LIMIT ?",
                         (conv_id, limit),
                     ).fetchall()
-                msgs: list[StoredMessage] = []
-                for r in rows:
-                    raw = json.loads(r[4]) if r[4] else []
-                    atts = [
-                        StoredAttachment(
-                            id=a["id"],
-                            filename=a["filename"],
-                            url=a["url"],
-                            mime_type=a.get("mime_type"),
-                        )
-                        for a in raw
-                    ]
-                    msgs.append(
-                        StoredMessage(
-                            id=r[0],
-                            conversation_id=r[1],
-                            role=r[2],
-                            text=r[3],
-                            attachments=atts,
-                            created_at=r[5],
-                            context_tokens=r[6],
-                            context_window=r[7],
-                        )
-                    )
+                msgs = [_row_to_message(r) for r in rows]
                 msgs.reverse()  # ascending by time
                 return msgs
+            finally:
+                con.close()
+
+    def get_message(self, conv_id: str, msg_id: str) -> StoredMessage | None:
+        with self._lock:
+            con = self._connect()
+            try:
+                row = con.execute(
+                    "SELECT id, conversation_id, role, text, attachments_json, created_at "
+                    "FROM messages WHERE conversation_id = ? AND id = ?",
+                    (conv_id, msg_id),
+                ).fetchone()
+                return _row_to_message(row) if row else None
+            finally:
+                con.close()
+
+    def latest_message(self, conv_id: str, role: str) -> StoredMessage | None:
+        with self._lock:
+            con = self._connect()
+            try:
+                row = con.execute(
+                    "SELECT id, conversation_id, role, text, attachments_json, created_at "
+                    "FROM messages WHERE conversation_id = ? AND role = ? "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (conv_id, role),
+                ).fetchone()
+                return _row_to_message(row) if row else None
             finally:
                 con.close()
 
@@ -491,3 +495,27 @@ class ConversationStore:
                 }
             finally:
                 con.close()
+
+
+def _row_to_message(r: tuple) -> StoredMessage:
+    raw = json.loads(r[4]) if r[4] else []
+    atts = [
+        StoredAttachment(
+            id=a["id"],
+            filename=a["filename"],
+            url=a["url"],
+            mime_type=a.get("mime_type"),
+        )
+        for a in raw
+    ]
+    return StoredMessage(
+        id=r[0],
+        conversation_id=r[1],
+        role=r[2],
+        text=r[3],
+        attachments=atts,
+        created_at=r[5],
+        # Only `list_messages` joins the usage table.
+        context_tokens=r[6] if len(r) > 6 else None,
+        context_window=r[7] if len(r) > 7 else None,
+    )
