@@ -133,17 +133,23 @@
 
 .chat-list-meta {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
+  min-width: 0;
   font-size: 11px;
   color: var(--text);
+}
+
+.chat-list-time {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .chat-list-usage {
   font-size: 10px;
   color: var(--text);
   opacity: 0.7;
-  margin-left: 6px;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 
@@ -196,6 +202,7 @@
 
 .chat-list-actions {
   display: flex;
+  margin-left: auto;
   align-items: center;
   gap: 2px;
 }
@@ -901,12 +908,29 @@
   border-radius: 4px;
   padding: 1px 6px;
   color: var(--text);
-  flex-shrink: 0;
+  min-width: 0;
   white-space: nowrap;
-  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Non-default harness (e.g. pi): marks the agent a conversation runs on. */
+/* The agent a conversation runs on: its icon, or a text badge without one. */
+.chat-harness-marker {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.chat-harness-marker .harness-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.chat-thread-header .chat-harness-marker .harness-icon {
+  width: 18px;
+  height: 18px;
+}
+
 .chat-list-harness {
   font-size: 10px;
   border: 1px solid var(--accent-border, var(--border));
@@ -919,38 +943,49 @@
 
 /* ---- Harness choice in the new-chat picker ---- */
 
-.harness-picker {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 12px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.harness-option {
-  flex: 1;
-  background: none;
-  border: none;
-  border-radius: 6px;
-  padding: 6px 10px;
-  cursor: pointer;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-}
-
-.harness-option.active {
-  background: var(--accent-bg);
-  color: var(--text-h);
-  font-weight: 500;
-}
-
 /* ---- Project picker modal ---- */
 
 .project-picker {
   min-width: 340px;
   max-width: 440px;
+}
+
+.picker-step-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.picker-step-context .harness-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.project-picker-item.harness-picker-item {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+.harness-picker-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.harness-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .project-picker-list {
