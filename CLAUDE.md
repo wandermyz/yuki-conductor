@@ -467,7 +467,7 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
   outcome from the last assistant message's `stopReason`.
 - **pi and the GPU:** pi usually runs on Strata, which shares the GPU with
   ComfyUI. That sharing is handled entirely outside this repo, by
-  `gpu-workload` in wandering-vibe. yuki-conductor never checks or switches the
+  vhotseat (`~/Projects/vhotseat`). yuki-conductor never checks or switches the
   GPU; when Strata refuses with its "before_load command failed" 503, the parser
   just turns that into a readable "GPU busy" reply.
 - Adding a harness means a module in `harness/` with a `launch()` and a
