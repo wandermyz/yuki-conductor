@@ -46,7 +46,7 @@ from yuki_conductor.skills import core_prompt
 # only when it changed and at most this often.
 PROGRESS_INTERVAL_S = 2.0
 
-# What Strata says when gpu-workload refuses to give it the GPU.
+# What Strata says when vhotseat refuses to give it the GPU.
 _GPU_BUSY_MARKER = "the before_load command failed"
 GPU_BUSY_REPLY = (
     "Strata is unavailable right now: the GPU is busy with ComfyUI jobs. "
