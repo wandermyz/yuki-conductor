@@ -148,8 +148,8 @@ frontend build are a 409 with a readable `detail`. `updater.py` serializes git
 behind one lock, since every open browser tab polls.
 
 The frontend (`UpdatePrompt.tsx`, mounted in `App`) polls every 5 minutes and
-pops a modal listing the new commits with **Update & restart** / **Snooze**
-(24 h, `localStorage`). The Plugins tab has an **Update** button beside
+pops a modal listing the new commits with **Update & restart**, **Cancel**
+(back at the next poll) and **Snooze 1 hour** (`localStorage`). The Plugins tab has an **Update** button beside
 Restart daemon. Either reloads the page once the daemon is back.
 
 ### Archived conversations

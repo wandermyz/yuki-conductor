@@ -3,7 +3,7 @@ import { checkForUpdate, runUpdate } from "./chat/api";
 import type { UpdateStatus } from "./chat/api";
 
 const POLL_MS = 5 * 60 * 1000;
-const SNOOZE_MS = 24 * 60 * 60 * 1000;
+const SNOOZE_MS = 60 * 60 * 1000;
 const SNOOZE_KEY = "yuki-update-snoozed-until";
 
 function snoozed(): boolean {
@@ -33,10 +33,15 @@ export default function UpdatePrompt() {
 
   if (!status) return null;
 
-  const snooze = () => {
-    window.localStorage.setItem(SNOOZE_KEY, String(Date.now() + SNOOZE_MS));
+  // Cancel just closes the modal; the next poll brings it back.
+  const cancel = () => {
     setStatus(null);
     setError(null);
+  };
+
+  const snooze = () => {
+    window.localStorage.setItem(SNOOZE_KEY, String(Date.now() + SNOOZE_MS));
+    cancel();
   };
 
   const update = () => {
@@ -84,8 +89,11 @@ export default function UpdatePrompt() {
         )}
         {error && <div className="plugin-banner error">{error}</div>}
         <div className="modal-actions update-actions">
+          <button className="modal-close-btn" onClick={cancel} disabled={busy}>
+            Cancel
+          </button>
           <button className="modal-close-btn" onClick={snooze} disabled={busy}>
-            Snooze
+            Snooze 1 hour
           </button>
           <button
             className="action-btn restart-btn"
