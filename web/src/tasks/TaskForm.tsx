@@ -6,6 +6,23 @@ import Markdown from "../Markdown";
 import { createTask, editTask } from "./api";
 import type { Task, TaskInput } from "./api";
 
+/** A new task in progress survives Cancel, a dismissed dialog and a reload. */
+const DRAFT_KEY = "task-draft";
+
+interface Draft {
+  input: TaskInput;
+  uploads: AttachmentRef[];
+}
+
+function loadDraft(): Draft | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    return raw ? (JSON.parse(raw) as Draft) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Create a task, or edit one nobody has picked up yet. */
 export default function TaskForm({
   task,
@@ -18,14 +35,18 @@ export default function TaskForm({
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
-  const [input, setInput] = useState<TaskInput>({
-    title: task?.title ?? "",
-    body: task?.body ?? "",
-    project: task?.project ?? "",
-    harness: task?.harness ?? "",
-    use_worktree: task?.use_worktree ?? true,
-  });
-  const [uploads, setUploads] = useState<AttachmentRef[]>([]);
+  const [draft] = useState(() => (task ? null : loadDraft()));
+  const [input, setInput] = useState<TaskInput>(
+    () =>
+      draft?.input ?? {
+        title: task?.title ?? "",
+        body: task?.body ?? "",
+        project: task?.project ?? "",
+        harness: task?.harness ?? "",
+        use_worktree: task?.use_worktree ?? true,
+      },
+  );
+  const [uploads, setUploads] = useState<AttachmentRef[]>(draft?.uploads ?? []);
   const [preview, setPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +65,19 @@ export default function TaskForm({
       })
       .catch(console.error);
   }, []);
+
+  const hasDraft = !task && (!!input.title.trim() || !!input.body.trim() || uploads.length > 0);
+
+  useEffect(() => {
+    if (task) return;
+    if (hasDraft) localStorage.setItem(DRAFT_KEY, JSON.stringify({ input, uploads }));
+    else localStorage.removeItem(DRAFT_KEY);
+  }, [task, hasDraft, input, uploads]);
+
+  const discard = () => {
+    localStorage.removeItem(DRAFT_KEY);
+    onCancel();
+  };
 
   const set = <K extends keyof TaskInput>(key: K, value: TaskInput[K]) =>
     setInput((cur) => ({ ...cur, [key]: value }));
@@ -66,6 +100,7 @@ export default function TaskForm({
       const saved = task
         ? await editTask(task.id, input)
         : await createTask({ ...input, attachment_ids: uploads.map((u) => u.id) });
+      if (!task) localStorage.removeItem(DRAFT_KEY);
       onSaved(saved);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -166,6 +201,11 @@ export default function TaskForm({
         {error && <p className="task-error">{error}</p>}
 
         <div className="modal-actions task-form-actions">
+          {hasDraft && (
+            <button className="task-form-discard" onClick={discard}>
+              Discard draft
+            </button>
+          )}
           <button onClick={onCancel}>Cancel</button>
           <button
             className="primary"
