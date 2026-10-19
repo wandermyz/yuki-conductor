@@ -140,6 +140,11 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Matches the filters' and archived toggle's side padding. */
+.task-list-empty {
+  padding: 0 16px;
+}
+
 .task-list {
   list-style: none;
   margin: 0;
