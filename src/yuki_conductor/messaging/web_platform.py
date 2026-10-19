@@ -202,7 +202,7 @@ class WebPlatform:
             # The status change has to reach browsers too, or the conversation
             # only looks unread after a reload.
             self._manager.broadcast(conversation_key, {"type": "status", "status": "unread"})
-        self._notify(conversation_key, msg.text)
+        self._notify(conversation_key, pushed=msg.pushed)
 
     def set_processing(self, conversation_key: str, message_id: str, on: bool) -> None:
         self._manager.set_processing(conversation_key, message_id, on)
@@ -255,16 +255,19 @@ class WebPlatform:
         self._manager.broadcast(
             conv.id, {"type": "message", "message": serialize_message(stored)}
         )
-        self._notify(conv.id, text)
+        self._notify(conv.id)
         return conv.id
 
-    def _notify(self, conversation_key: str, text: str) -> None:
-        """Browser push for a new assistant message (see `web_push`)."""
+    def _notify(self, conversation_key: str, pushed: bool = False) -> None:
+        """Browser push for a new assistant message (see `web_push`).
+
+        Names the conversation, never the message: the user opens it to read.
+        """
         conv = self._store.get_conversation(conversation_key)
         web_push.notify(
             web_push.conversation_target(conversation_key),
             (conv.title if conv else None) or "",
-            text,
+            "Posted an update" if pushed else "Responded to a conversation",
         )
 
     def reserve_thread(self, title: str | None = None, harness: str = "claude-code") -> str:

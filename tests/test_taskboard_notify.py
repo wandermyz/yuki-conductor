@@ -41,18 +41,18 @@ def _running():
     return task
 
 
-def test_needs_input_pushes_with_the_question(pushes):
+def test_needs_input_pushes_without_the_question(pushes):
     notify.set_platforms({})
     task = _running()
     taskboard.store.add_comment(task.id, "agent", "Postgres or SQLite?")
     transition(task.id, NEEDS_INPUT, reason="the agent asked for input", notify=True)
     ((target, title, text),) = pushes
     assert target == {"kind": "task", "id": task.id}
-    assert title == f"Task #{task.id} · Needs Input: Add cache"
-    assert text == "Postgres or SQLite?"
+    assert title == f"Task #{task.id}: Add cache"
+    assert text == "Moved to Needs Input"
 
 
-def test_review_includes_the_pr_and_reaches_slack(pushes):
+def test_review_reaches_slack_without_content(pushes):
     slack = FakeSlack()
     notify.set_platforms({"slack": slack})
     try:
@@ -61,8 +61,8 @@ def test_review_includes_the_pr_and_reaches_slack(pushes):
         transition(task.id, READY_FOR_REVIEW, reason="PR opened", notify=True)
     finally:
         notify.set_platforms({})
-    assert pushes[0][2].startswith("https://github.com/o/r/pull/1")
-    assert slack.sent and "Ready for Review" in slack.sent[0]
+    assert pushes[0][2] == "Moved to Ready for Review"
+    assert slack.sent == [f"*Task #{task.id}: Add cache* — Moved to Ready for Review"]
 
 
 def test_silent_transitions(pushes):
@@ -88,11 +88,11 @@ def test_slack_failure_is_swallowed(pushes):
     assert len(pushes) == 1
 
 
-def test_comment_with_notify_pushes_it(pushes):
+def test_comment_with_notify_pushes_that_it_exists(pushes):
     from yuki_conductor.taskboard import actions
 
     notify.set_platforms({})
     task = _running()
     actions.add_comment(task.id, "Halfway: tests pass", author="agent", notify_user=True)
     actions.add_comment(task.id, "quiet progress note", author="agent")
-    assert pushes == [({"kind": "task", "id": task.id}, f"Task #{task.id}: Add cache", "Halfway: tests pass")]
+    assert pushes == [({"kind": "task", "id": task.id}, f"Task #{task.id}: Add cache", "Agent posted a comment")]

@@ -72,21 +72,23 @@ def test_web_reply_and_push_notify_subscribers(tmp_path, isolated_push_subscript
     platform.send(conv.id, OutgoingMessage(text="interim", pushed=True))
 
     assert [c["data"] for c in sent] == [
-        {"target": {"kind": "conversation", "id": conv.id}, "title": "Weekly report", "body": "All done here."},
-        {"target": {"kind": "conversation", "id": conv.id}, "title": "Weekly report", "body": "interim"},
+        {"target": {"kind": "conversation", "id": conv.id}, "title": "Weekly report",
+         "body": "Responded to a conversation"},
+        {"target": {"kind": "conversation", "id": conv.id}, "title": "Weekly report", "body": "Posted an update"},
     ]
     assert sent[0]["sub"] == SUB
 
 
-def test_start_thread_notifies_and_body_is_truncated(tmp_path, isolated_push_subscriptions, sent):
+def test_start_thread_notifies_without_the_text(tmp_path, isolated_push_subscriptions, sent):
     isolated_push_subscriptions.add(SUB["endpoint"], "pk", "au")
     platform = WebPlatform(ConversationStore(db_path=tmp_path / "conv.db"), ConnectionManager())
 
-    conv_id = platform.start_thread("x" * 500, title="Cron")
+    conv_id = platform.start_thread("the secret result", title="Cron")
 
     (call,) = sent
     assert call["data"]["target"] == {"kind": "conversation", "id": conv_id}
-    assert len(call["data"]["body"]) == web_push.MAX_BODY_CHARS
+    assert call["data"]["title"] == "Cron"
+    assert call["data"]["body"] == "Responded to a conversation"
 
 
 def test_no_subscribers_sends_nothing(tmp_path, sent):

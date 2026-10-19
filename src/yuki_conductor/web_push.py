@@ -33,8 +33,6 @@ VAPID_KEY_FILE = DATA_DIR / ".secrets" / "vapid-private.pem"
 VAPID_SUBJECT = "mailto:yuki-conductor@users.noreply.github.com"
 # How long a push service holds a message for an offline browser.
 PUSH_TTL_SECONDS = 24 * 3600
-# Notification bodies are a glance, not the message.
-MAX_BODY_CHARS = 180
 
 _vapid_lock = threading.Lock()
 _vapid: Vapid | None = None
@@ -132,11 +130,6 @@ class PushSubscriptionStore:
 subscriptions = PushSubscriptionStore()
 
 
-def _excerpt(text: str) -> str:
-    flat = " ".join(text.split())
-    return flat if len(flat) <= MAX_BODY_CHARS else flat[: MAX_BODY_CHARS - 1] + "…"
-
-
 def _send_all(payload: str) -> None:
     vapid = _load_vapid()
     for sub in subscriptions.list_all():
@@ -169,11 +162,12 @@ def task_target(task_id: int) -> dict:
     return {"kind": "task", "id": task_id}
 
 
-def notify(target: dict, title: str, text: str) -> None:
+def notify(target: dict, title: str, body: str) -> None:
     """Push a notification to every subscriber.
 
     `target` is what a click opens: `conversation_target(id)` or
-    `task_target(id)`. Sends on a background thread: push services can be
+    `task_target(id)`. `body` says what happened, never the content itself.
+    Sends on a background thread: push services can be
     slow, and the caller is usually delivering something that shouldn't wait
     on them.
     """
@@ -183,7 +177,7 @@ def notify(target: dict, title: str, text: str) -> None:
         {
             "target": target,
             "title": title or "yuki-conductor",
-            "body": _excerpt(text) or "New message",
+            "body": body,
         }
     )
     threading.Thread(target=_send_all, args=(payload,), daemon=True, name="web-push").start()
