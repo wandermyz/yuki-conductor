@@ -26,7 +26,10 @@ To attach a file to your *final* response, you don't need this skill either: put
 yuki-conductor send "your message text"
 ```
 
-By default this opens a **new** conversation in the web chat. To post into the
+By default this opens a **new** conversation in the web chat — except inside a
+taskboard task run (`YUKI_TASK_ID` is set), where it posts the message as a
+comment on your task instead, since the task's timeline is where the user
+follows it. To post into the
 conversation you are already part of (web or Slack), pass its id:
 
 ```

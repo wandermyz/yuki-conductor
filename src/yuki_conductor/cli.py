@@ -54,7 +54,8 @@ def main(argv: list[str] | None = None) -> None:
         "--conversation",
         "-c",
         default=None,
-        help="Conversation id to post into. Omit to open a new web conversation.",
+        help="Conversation id to post into. Omit to open a new web conversation "
+        "(or, inside a task run, to comment on that task).",
     )
     send_parser.add_argument(
         "--attach",
@@ -143,6 +144,17 @@ def main(argv: list[str] | None = None) -> None:
         if missing:
             print(f"Not a file: {', '.join(missing)}", file=sys.stderr)
             sys.exit(1)
+
+        from yuki_conductor.cli_task import env_task_id
+
+        # A task run has no conversation; its thread is the task's timeline,
+        # so a push without -c lands there instead of in a new conversation.
+        task_id = env_task_id()
+        if args.conversation is None and task_id is not None:
+            payload = {"body": text, "author": "agent", "attachments": attachments}
+            c = api_request("POST", f"/api/tasks/{task_id}/comments", payload, what="Send")
+            print(f"Posted comment #{c['id']} on task #{task_id}")
+            return
 
         payload = {
             "text": text,

@@ -51,13 +51,13 @@ def _id_and_text(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("args", nargs="+", metavar="[ID] TEXT", help="TEXT may be - for stdin")
 
 
-def _env_task_id() -> int | None:
+def env_task_id() -> int | None:
     raw = os.environ.get("YUKI_TASK_ID")
     return int(raw) if raw and raw.isdigit() else None
 
 
 def _resolve_id(explicit: int | None) -> int:
-    task_id = explicit if explicit is not None else _env_task_id()
+    task_id = explicit if explicit is not None else env_task_id()
     if task_id is None:
         _die("No task id: pass one, or run inside a task (YUKI_TASK_ID)")
     return task_id
@@ -150,7 +150,7 @@ def handle(args) -> None:
             _die("Refusing to post an empty comment")
         # On its own task an agent comments as the agent; on any other task
         # its comment is input that task's agent should get, like a user's.
-        own = _env_task_id() is not None and task_id == _env_task_id()
+        own = env_task_id() is not None and task_id == env_task_id()
         payload = {
             "body": text,
             "author": "agent" if own else "user",
@@ -161,7 +161,7 @@ def handle(args) -> None:
         print(f"Posted comment #{c['id']} on task #{task_id}")
     elif cmd == "ask":
         task_id, text = _split_id(args.args)
-        if task_id != _env_task_id():
+        if task_id != env_task_id():
             _die("`task ask` only works on your own running task; use `task comment` elsewhere")
         api_request("POST", f"/api/tasks/{task_id}/ask", {"question": _text(text)}, what="Ask")
         print(f"Asked on task #{task_id}. End your turn now; the user's reply starts the next one.")
@@ -177,7 +177,7 @@ def handle(args) -> None:
             "use_worktree": args.worktree,
             "body": _text(args.body),
             "attachments": _files(args.attach),
-            "parent_task_id": _env_task_id(),
+            "parent_task_id": env_task_id(),
         }
         t = api_request("POST", "/api/tasks", payload, what="Create")
         print(f"Created task #{t['id']}: {t['title']}")

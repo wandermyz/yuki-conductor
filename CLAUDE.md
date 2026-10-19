@@ -438,7 +438,8 @@ model, because nothing else tells it the tag exists; both `system_prompt()` and
 `/api/push` looks up the platform that owns the conversation: a
 `ConversationStore` row means web, and otherwise the `SessionStore`
 `session_type` names a receiver's platform (Slack). Omitting `-c` opens a new
-web conversation. The message is sent with `pushed=True`; `WebPlatform` uses
+web conversation — unless the run is a task turn (`YUKI_TASK_ID`), where the
+CLI posts an agent comment on that task instead and never calls `/api/push`. The message is sent with `pushed=True`; `WebPlatform` uses
 that to tag the WebSocket payload (drives the notification sound) and mark the
 conversation unread. `web_server.PUSH_MARKER` is appended to the text itself so
 a push still reads differently from a reply after a reload. Attachment paths
