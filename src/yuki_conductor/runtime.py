@@ -152,6 +152,7 @@ def start() -> None:
         receivers.append(rec)
         platforms_by_name[rec.platform.name] = rec.platform
 
+    from yuki_conductor.config import build_web_frontend, web_frontend_stale
     from yuki_conductor.cron_scheduler import start_cron_scheduler
     from yuki_conductor.taskboard import start_taskboard
     from yuki_conductor.web_server import (
@@ -160,6 +161,12 @@ def start() -> None:
         start_web_server,
         ws_manager,
     )
+
+    # Before the web server starts: mount_static only mounts a dist that exists.
+    if web_frontend_stale():
+        logger.info("Web frontend missing or older than its sources; building")
+        if not build_web_frontend():
+            logger.error("Web frontend build failed; serving whatever web/dist holds")
 
     set_receivers(receivers)
     web_app = start_web_server()
