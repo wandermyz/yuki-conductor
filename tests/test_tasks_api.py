@@ -78,6 +78,18 @@ def test_web_uploads_resolve_to_paths(client, monkeypatch, tmp_path):
     assert client.post("/api/tasks", json={"title": "t", "project": "proj", "attachment_ids": ["zzz"]}).status_code == 400
 
 
+def test_edit_adds_web_uploads(client, monkeypatch, tmp_path):
+    spec, shot = tmp_path / "spec.md", tmp_path / "shot.png"
+    spec.write_text("spec")
+    shot.write_bytes(b"png")
+    monkeypatch.setattr(routes, "resolve_file", lambda fid: shot if fid == "abc" else None)
+    task = _create(client, attachments=[str(spec)])
+    r = client.patch(f"/api/tasks/{task['id']}", json={"body": "![shot](/api/files/abc)", "attachment_ids": ["abc"]})
+    assert r.status_code == 200, r.text
+    assert taskboard.store.get(task["id"]).attachments == [str(spec), str(shot)]
+    assert taskboard.store.get(task["id"]).body == "![shot](/api/files/abc)"
+
+
 def test_list_counts_comments_and_hides_archive(client):
     a = _create(client, title="a")
     _create(client, title="b")

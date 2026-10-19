@@ -5,13 +5,27 @@ agent hasn't seen), and a fresh session standing in for one that's gone (the
 whole task plus its timeline, since none of it is in the new session).
 """
 
+import re
 from datetime import datetime
 
+from yuki_conductor.messaging.web_platform import resolve_file
 from yuki_conductor.task_store import Task, TaskComment
+
+# A file pasted in the web UI is referenced inline as `![name](/api/files/<id>)`
+# so the preview can show it; the agent needs the path on disk instead.
+_UPLOAD_URL = re.compile(r"/api/files/([0-9a-f]+)")
 
 
 def _attachment_tags(paths: list[str]) -> str:
     return "".join(f"<attachment>{p}</attachment>\n" for p in paths)
+
+
+def _local_paths(text: str) -> str:
+    def sub(m: re.Match) -> str:
+        path = resolve_file(m.group(1))
+        return str(path) if path else m.group(0)
+
+    return _UPLOAD_URL.sub(sub, text)
 
 
 def render_comment(comment: TaskComment) -> str:
@@ -25,7 +39,7 @@ def render_comment(comment: TaskComment) -> str:
         lines.append(f"({comment.external_url})")
     if comment.quote_comment_id is not None:
         lines.append(f"(replying to comment #{comment.quote_comment_id})")
-    lines.append(_attachment_tags(comment.attachments) + comment.body)
+    lines.append(_attachment_tags(comment.attachments) + _local_paths(comment.body))
     return "\n".join(lines)
 
 
@@ -36,7 +50,7 @@ def _task_header(task: Task, cwd: str) -> str:
     return (
         f"# Task #{task.id}: {task.title}\n\n"
         f"{where}\n\n"
-        f"{_attachment_tags(task.attachments)}{task.body}".rstrip()
+        f"{_attachment_tags(task.attachments)}{_local_paths(task.body)}".rstrip()
     )
 
 

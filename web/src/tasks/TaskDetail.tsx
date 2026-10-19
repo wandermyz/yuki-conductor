@@ -3,6 +3,7 @@ import { uploadFile } from "../chat/api";
 import type { AttachmentRef, StreamStep } from "../chat/api";
 import { HarnessIcon, StepList } from "../chat/shared";
 import Markdown from "../Markdown";
+import { imageMarkers, insertAt, pastedFiles, withoutMarker } from "../paste";
 import {
   cancelTask,
   commentOnTask,
@@ -190,11 +191,12 @@ export default function TaskDetail({
     setBusy(false);
   };
 
-  const addFiles = async (files: FileList | null) => {
-    if (!files) return;
+  /** Upload `files`; pasted images also get an inline marker at `markerAt`. */
+  const addFiles = async (files: File[], markerAt?: number) => {
     try {
-      const added = await Promise.all(Array.from(files).map(uploadFile));
+      const added = await Promise.all(files.map(uploadFile));
       setUploads((cur) => [...cur, ...added]);
+      if (markerAt !== undefined) setDraft((cur) => insertAt(cur, markerAt, imageMarkers(added)));
     } catch (e) {
       setError(String(e));
     }
@@ -358,7 +360,14 @@ export default function TaskDetail({
             {uploads.map((u) => (
               <span key={u.id} className="task-file-chip">
                 📎 {u.filename}
-                <button onClick={() => setUploads((cur) => cur.filter((x) => x.id !== u.id))}>×</button>
+                <button
+                  onClick={() => {
+                    setUploads((cur) => cur.filter((x) => x.id !== u.id));
+                    setDraft((cur) => withoutMarker(cur, u));
+                  }}
+                >
+                  ×
+                </button>
               </span>
             ))}
           </div>
@@ -367,8 +376,14 @@ export default function TaskDetail({
           ref={composerRef}
           value={draft}
           rows={3}
-          placeholder="Comment (Markdown). Select text above to quote it."
+          placeholder="Comment (Markdown). Select text above to quote it, paste images to attach them."
           onChange={(e) => setDraft(e.target.value)}
+          onPaste={(e) => {
+            const files = pastedFiles(e);
+            if (!files.length) return;
+            e.preventDefault();
+            addFiles(files, e.currentTarget.selectionStart);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
@@ -379,7 +394,7 @@ export default function TaskDetail({
         <div className="task-composer-row">
           <label className="task-attach-btn" title="Attach files">
             📎
-            <input type="file" multiple hidden onChange={(e) => addFiles(e.target.files)} />
+            <input type="file" multiple hidden onChange={(e) => addFiles(Array.from(e.target.files ?? []))} />
           </label>
           <span className="task-composer-hint">{composerHint}</span>
           <button

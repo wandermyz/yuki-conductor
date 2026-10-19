@@ -53,3 +53,17 @@ def test_full_context_includes_system_history():
     assert "session is gone" in text
     assert "Use **redis**." in text
     assert "picked up" in text and "did half" in text
+
+
+def test_pasted_file_markers_point_at_the_file_on_disk(monkeypatch, tmp_path):
+    shot = tmp_path / "pasted.png"
+    monkeypatch.setattr(prompts, "resolve_file", lambda fid: shot if fid == "abc123" else None)
+    task = taskboard.store.create(
+        title="t", project="proj", harness="claude-code", use_worktree=False,
+        body="See ![pasted.png](/api/files/abc123) and ![gone](/api/files/fff)",
+    )
+    comment = taskboard.store.add_comment(task.id, "user", "again ![x](/api/files/abc123)")
+    text = prompts.first_turn(task, [comment], "/repo")
+    assert f"![pasted.png]({shot})" in text
+    assert f"![x]({shot})" in text
+    assert "![gone](/api/files/fff)" in text

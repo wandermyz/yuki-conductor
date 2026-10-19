@@ -115,6 +115,7 @@ class TaskEdit(BaseModel):
     use_worktree: bool | None = None
     body: str | None = None
     attachments: list[str] | None = None  # the full new list of paths
+    attachment_ids: list[str] = []  # /api/uploads ids (web), added to the list
 
 
 class CommentCreate(BaseModel):
@@ -186,12 +187,15 @@ def get_task(task_id: int):
 
 @router.patch("/api/tasks/{task_id}")
 def edit_task(task_id: int, body: TaskEdit):
-    fields = {k: getattr(body, k) for k in body.model_fields_set}
+    fields = {k: getattr(body, k) for k in body.model_fields_set - {"attachment_ids"}}
     nulls = [k for k, v in fields.items() if v is None and k != "attachments"]
     if nulls:
         raise HTTPException(status_code=400, detail=f"Can't clear: {', '.join(nulls)}")
-    if "attachments" in fields:
-        fields["attachments"] = _paths(fields["attachments"] or [], [])
+    if "attachments" in fields or body.attachment_ids:
+        current = fields.get("attachments")
+        if current is None:
+            current = _call(actions.get, task_id).attachments
+        fields["attachments"] = _paths(current, body.attachment_ids)
     return serialize_task(_call(actions.edit, task_id, **fields))
 
 

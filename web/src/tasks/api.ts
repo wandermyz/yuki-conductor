@@ -113,7 +113,7 @@ export const getTask = (id: number) => call<TaskDetail>("GET", `/api/tasks/${id}
 export const createTask = (input: TaskInput & { attachment_ids: string[] }) =>
   call<Task>("POST", "/api/tasks", input);
 
-export const editTask = (id: number, fields: Partial<TaskInput>) =>
+export const editTask = (id: number, fields: Partial<TaskInput> & { attachment_ids?: string[] }) =>
   call<Task>("PATCH", `/api/tasks/${id}`, fields);
 
 export const commentOnTask = (
