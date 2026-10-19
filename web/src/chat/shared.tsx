@@ -1,5 +1,6 @@
 /** Pieces the chat and the taskboard both draw. */
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import type { HarnessInfo, Project, StreamStep } from "./api";
 import { HARNESS_ICONS } from "./harnessIcons";
 
@@ -11,6 +12,9 @@ export function HarnessIcon({ name }: { name: string | null }) {
 /**
  * The two-step "which agent, which project" modal that starts a conversation
  * or a task. The agent step is skipped when only one harness is available.
+ *
+ * Rendered into `document.body`, so it looks the same wherever it's opened
+ * rather than picking up the host view's styles (e.g. `.tasks-view button`).
  */
 export function NewSessionPicker({
   harnesses,
@@ -34,7 +38,7 @@ export function NewSessionPicker({
   const harness = single ? (harnesses[0]?.name ?? null) : chosen;
   const label = harnesses.find((h) => h.name === harness)?.label ?? harness;
 
-  return (
+  return createPortal(
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal-content project-picker" onClick={(e) => e.stopPropagation()}>
         {!single && chosen === null ? (
@@ -98,7 +102,8 @@ export function NewSessionPicker({
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
