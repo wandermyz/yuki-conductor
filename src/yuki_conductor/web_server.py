@@ -7,6 +7,7 @@ import shutil
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 import uvicorn
@@ -47,6 +48,12 @@ from yuki_conductor.store import CronRunStore, ProjectStore, SessionStore
 logger = logging.getLogger(__name__)
 
 _receivers: list = []
+
+# Identifies this daemon process. After asking for a restart, the frontend
+# polls /api/daemon until it reports a different one: that's the only reliable
+# "the new daemon is up", since a proxy like `tailscale serve` answers 502
+# rather than failing the request while the daemon is down.
+BOOT_ID = uuid.uuid4().hex
 
 
 def set_receivers(receivers: list) -> None:
@@ -855,7 +862,8 @@ def create_api() -> FastAPI:
 
         The web server runs *inside* the daemon, so the restart must be
         detached before it kills anything — otherwise it kills its own caller
-        mid-response. Returns immediately; the frontend polls /api/status.
+        mid-response. Returns immediately; the frontend polls /api/daemon
+        until the boot id changes.
         """
         from yuki_conductor.daemon import spawn_detached_restart
 
@@ -864,7 +872,11 @@ def create_api() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from None
         _clear_restart_required()
-        return {"ok": True, "restarting": True}
+        return {"ok": True, "restarting": True, "boot_id": BOOT_ID}
+
+    @api.get("/api/daemon")
+    def daemon_info():
+        return {"boot_id": BOOT_ID}
 
     @api.get("/api/update")
     def check_update():
@@ -898,7 +910,12 @@ def create_api() -> FastAPI:
                 status_code=500, detail=f"Updated, but restart failed: {exc}"
             ) from None
         _clear_restart_required()
-        return {"ok": True, "restarting": True, **status.to_dict()}
+        return {
+            "ok": True,
+            "restarting": True,
+            "boot_id": BOOT_ID,
+            **status.to_dict(),
+        }
 
     @api.post("/api/admin/rebuild")
     def admin_rebuild():
