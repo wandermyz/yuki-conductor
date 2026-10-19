@@ -53,3 +53,24 @@ def isolated_push_subscriptions(monkeypatch, tmp_path):
     monkeypatch.setattr(web_push, "VAPID_KEY_FILE", tmp_path / "vapid-private.pem")
     monkeypatch.setattr(web_push, "_vapid", None)
     return store
+
+
+@pytest.fixture(autouse=True)
+def isolated_task_store(monkeypatch, tmp_path):
+    """Keep taskboard tasks and the pause switch out of the real workspace.
+
+    ``taskboard`` binds its stores to the real DB at import time, and every
+    part of the board reads them through the package, so rebinding here
+    covers all of it.
+    """
+    from yuki_conductor import taskboard
+    from yuki_conductor.task_store import TaskboardStateStore, TaskStore
+    from yuki_conductor.taskboard import transitions
+
+    store = TaskStore(db_path=tmp_path / "tasks.db")
+    monkeypatch.setattr(taskboard, "store", store)
+    monkeypatch.setattr(taskboard, "board_state", TaskboardStateStore(db_path=tmp_path / "tasks.db"))
+    # Listeners registered at import (web broadcast, notify, cleanup) must
+    # not fire on a test's transitions; tests that want one add it.
+    monkeypatch.setattr(transitions, "_listeners", [])
+    return store

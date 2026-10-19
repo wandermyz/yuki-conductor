@@ -9,6 +9,9 @@ src/yuki_conductor/
   plugins.py        — plugin identity, injection points, discovery + status
   plugin_config.py  — plugins.yaml parsing and surgical field edits
   store.py          — SQLite-backed session & model stores
+  task_store.py     — SQLite-backed taskboard tasks + comments, pause switch
+  taskboard/        — the taskboard (see docs/plans/2026-10-18-taskboard*.md)
+    transitions.py     — the only code that changes a task's status; listener hooks
   harness/          — the agent CLIs a turn can run on (see Harnesses)
     base.py            — StreamEvent, RunResult, Harness / StreamParser protocols
     process.py         — run_agent: subprocess, idle watchdog, cancel registry
