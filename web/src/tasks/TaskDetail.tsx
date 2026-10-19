@@ -219,14 +219,29 @@ export default function TaskDetail({
 
   return (
     <div className="task-detail">
-      <button className="back-btn" onClick={onBack}>
-        ‹ Tasks
-      </button>
-
-      <header className="task-detail-header">
-        <h2>
+      {/* One line, like the chat's thread header, so the tabs line up. */}
+      <div className="task-detail-bar">
+        <button className="task-back" onClick={onBack} aria-label="Back to tasks">
+          ‹
+        </button>
+        <h2 className="task-detail-title" title={task.title}>
           <span className="task-id">#{task.id}</span> {task.title}
         </h2>
+        <div className="task-actions">
+          {task.editable && <button onClick={onEdit}>Edit</button>}
+          {task.status === "todo" && (
+            <button onClick={() => act(() => moveTaskToTop(task.id))}>Move to top</button>
+          )}
+          {(task.status === "todo" || task.status === "in_progress") && (
+            <button onClick={() => act(() => cancelTask(task.id))}>Cancel</button>
+          )}
+          {(task.status === "needs_input" || task.status === "ready_for_review") && (
+            <button onClick={() => act(() => markTaskDone(task.id))}>Mark done</button>
+          )}
+        </div>
+      </div>
+
+      <header className="task-detail-header">
         <div className="task-meta">
           <StatusBadge status={task.status} />
           <span>{task.project}</span>
@@ -270,18 +285,6 @@ export default function TaskDetail({
             <button onClick={() => act(() => retryCleanup(task.id))}>Retry cleanup</button>
           </p>
         )}
-        <div className="task-actions">
-          {task.editable && <button onClick={onEdit}>Edit</button>}
-          {task.status === "todo" && (
-            <button onClick={() => act(() => moveTaskToTop(task.id))}>Move to top</button>
-          )}
-          {(task.status === "todo" || task.status === "in_progress") && (
-            <button onClick={() => act(() => cancelTask(task.id))}>Cancel</button>
-          )}
-          {(task.status === "needs_input" || task.status === "ready_for_review") && (
-            <button onClick={() => act(() => markTaskDone(task.id))}>Mark done</button>
-          )}
-        </div>
         {error && <p className="task-error">{error}</p>}
       </header>
 

@@ -43,8 +43,27 @@
   flex-direction: column;
 }
 
-.task-sidebar-header button {
-  padding: 4px 12px;
+/* Same box as the chat's sidebar header (.chat-sidebar-header), so switching
+   tabs doesn't make the top line jump. */
+.tasks-view .task-sidebar {
+  padding-top: 0;
+}
+
+.tasks-view .task-sidebar-header {
+  margin: 0 0 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tasks-view .task-sidebar-header h2 {
+  font-size: 16px;
+}
+
+.tasks-view .task-sidebar-header button {
+  font-size: 13px;
+  padding: 0 12px;
+  height: 28px;
+  min-height: 0;
 }
 
 /* Pause switch and per-harness capacity */
@@ -289,20 +308,38 @@
   min-height: 0;
 }
 
-.task-detail > .back-btn {
-  margin: 12px 16px 0;
-  align-self: flex-start;
+/* Same box as the chat's thread header (.chat-thread-header). */
+.task-detail-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  min-height: 59px;
+}
+
+.task-detail-title {
+  margin: 0;
+  font-size: 16px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tasks-view .task-back {
+  display: none;
+  padding: 4px 10px;
+  min-height: 0;
+  font-size: 16px;
+  line-height: 1;
 }
 
 .task-detail-header {
-  padding: 16px 24px 12px;
+  padding: 10px 24px 12px;
   border-bottom: 1px solid var(--border);
-}
-
-.task-detail-header h2 {
-  margin: 0 0 8px;
-  font-size: 20px;
-  overflow-wrap: anywhere;
 }
 
 .task-meta {
@@ -346,13 +383,15 @@
 
 .task-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
-.task-actions:empty {
-  display: none;
+.tasks-view .task-actions button {
+  font-size: 13px;
+  padding: 4px 10px;
+  min-height: 34px;
+  white-space: nowrap;
 }
 
 .task-timeline {
@@ -726,6 +765,14 @@
     padding: 0;
   }
 
+  .tasks-view .task-back {
+    display: inline-block;
+  }
+
+  .task-detail-bar {
+    padding: 12px;
+  }
+
   .task-detail-header,
   .task-timeline,
   .task-composer {
@@ -741,6 +788,16 @@
   .task-form button,
   .task-attach-btn {
     min-height: 44px;
+  }
+
+  /* The header rows keep chat's height; their buttons stay compact. */
+  .tasks-view .task-actions button,
+  .tasks-view .task-back {
+    min-height: 34px;
+  }
+
+  .tasks-view .task-sidebar-header button {
+    min-height: 0;
   }
 
   .tasks-view .task-filters button {
