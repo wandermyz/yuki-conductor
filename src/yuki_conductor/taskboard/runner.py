@@ -145,6 +145,7 @@ def _run(task: Task, cwd: str) -> _Turn:
             cwd=cwd,
             task_id=task.id,
             on_event=lambda event: live.step(task.id, event),
+            kind="task",
         )
 
     result = run(prompt, session_id)

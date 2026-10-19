@@ -13,7 +13,7 @@ import pytest
 
 from yuki_conductor.config import CLAUDE_DEFAULT_MODEL
 from yuki_conductor.harness.claude_code import ClaudeCodeHarness
-from yuki_conductor.harness.process import run_agent
+from yuki_conductor.harness.process import run_agent, running_runs
 
 CLAUDE = ClaudeCodeHarness()
 
@@ -59,6 +59,27 @@ def test_basic_call():
     assert "stream-json" in cmd_str
     assert "--verbose" in cmd_str
     assert "hi" in cmd_str
+
+
+def test_runs_in_flight_are_counted_by_kind():
+    seen = {}
+    mock_proc = _mock_popen(stdout=_stream(_result_record()))
+
+    def popen(*args, **kwargs):
+        seen.update(running_runs())
+        return mock_proc
+
+    with patch("subprocess.Popen", side_effect=popen):
+        run_agent(CLAUDE, "hi", kind="task")
+
+    assert seen == {"task": 1}
+    assert running_runs() == {}
+
+
+def test_failed_launch_is_not_left_counted():
+    with patch("subprocess.Popen", side_effect=FileNotFoundError):
+        run_agent(CLAUDE, "hi")
+    assert running_runs() == {}
 
 
 def test_intermediate_steps_are_streamed_to_callback():

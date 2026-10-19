@@ -11,7 +11,9 @@ import os
 import subprocess
 import threading
 import time
-from collections.abc import Callable
+from collections import Counter
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
 from yuki_conductor.config import CLAUDE_TIMEOUT, CLAUDE_WORKING_DIR, project_dir
 from yuki_conductor.harness.base import (
@@ -31,6 +33,30 @@ _WATCHDOG_POLL_SECONDS = 5.0
 _active_processes: dict[str, subprocess.Popen] = {}
 _cancelled: set[str] = set()
 _active_lock = threading.Lock()
+
+
+# Agent runs in flight, by kind ("chat", "task", "automation"). Unlike the
+# cancel registry this counts every run, keyed or not, from launch to result.
+_running: Counter[str] = Counter()
+
+
+@contextmanager
+def _track_run(kind: str) -> Iterator[None]:
+    with _active_lock:
+        _running[kind] += 1
+    try:
+        yield
+    finally:
+        with _active_lock:
+            _running[kind] -= 1
+            if not _running[kind]:
+                del _running[kind]
+
+
+def running_runs() -> dict[str, int]:
+    """How many agent runs are in flight, by kind. Kinds with none are omitted."""
+    with _active_lock:
+        return dict(_running)
 
 
 def register_process(key: str, proc: subprocess.Popen) -> None:
@@ -112,6 +138,7 @@ def run_agent(
     push_conversation_id: str | None = None,
     on_event: Callable[[StreamEvent], None] | None = None,
     task_id: int | None = None,
+    kind: str = "chat",
 ) -> RunResult:
     """Run one turn of `harness` and return its result.
 
@@ -137,7 +164,28 @@ def run_agent(
         task_id: Taskboard task this turn works on. Adds the taskboard section
             to the system prompt and `YUKI_TASK_ID` to the env, which the
             `yuki-conductor task` commands default to.
+        kind: What the run is for — "chat", "task" or "automation" — as
+            reported by `running_runs()`.
     """
+    with _track_run(kind):
+        return _run_agent(
+            harness, prompt, session_id, timeout, model, conversation_key, cwd,
+            push_conversation_id, on_event, task_id,
+        )
+
+
+def _run_agent(
+    harness: Harness,
+    prompt: str,
+    session_id: str | None,
+    timeout: int | None,
+    model: str | None,
+    conversation_key: str | None,
+    cwd: str | None,
+    push_conversation_id: str | None,
+    on_event: Callable[[StreamEvent], None] | None,
+    task_id: int | None,
+) -> RunResult:
     effective_cwd = cwd or CLAUDE_WORKING_DIR
     launch = harness.launch(RunRequest(
         prompt=prompt,
