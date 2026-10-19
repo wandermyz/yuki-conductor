@@ -75,6 +75,12 @@
   font-size: 13px;
 }
 
+/* Keeps the default button look, just shorter. */
+.tasks-view .task-pause {
+  padding: 2px 12px;
+  min-height: 28px;
+}
+
 .task-capacity {
   display: flex;
   gap: 12px;
@@ -851,6 +857,10 @@ a.pr-marker:hover {
 
   .tasks-view .task-sidebar-header button {
     min-height: 0;
+  }
+
+  .tasks-view .task-pause {
+    min-height: 32px;
   }
 
   .tasks-view .task-filters button {
