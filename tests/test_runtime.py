@@ -35,6 +35,7 @@ def test_no_apps_starts_only_web_and_cron():
         patch("yuki_conductor.plugin_config.ensure_file"),
         patch("yuki_conductor.web_server.start_web_server") as web_mock,
         patch("yuki_conductor.cron_scheduler.start_cron_scheduler") as cron_mock,
+        patch("yuki_conductor.taskboard.start_taskboard") as board_mock,
     ):
         from yuki_conductor.runtime import start
 
@@ -43,6 +44,7 @@ def test_no_apps_starts_only_web_and_cron():
     web_mock.assert_called_once()
     cron_mock.assert_called_once()
     assert cron_mock.call_args.kwargs["platforms_by_name"] == {}
+    board_mock.assert_called_once()
 
 
 def test_slack_only_builds_slack_receiver():
@@ -54,6 +56,7 @@ def test_slack_only_builds_slack_receiver():
         patch("yuki_conductor.runtime._build_receiver", return_value=fake) as build,
         patch("yuki_conductor.web_server.start_web_server"),
         patch("yuki_conductor.cron_scheduler.start_cron_scheduler") as cron_mock,
+        patch("yuki_conductor.taskboard.start_taskboard"),
     ):
         from yuki_conductor.runtime import start
 
@@ -139,6 +142,7 @@ def test_broken_channel_does_not_kill_startup():
         patch("yuki_conductor.plugin_config.ensure_file"),
         patch("yuki_conductor.web_server.start_web_server"),
         patch("yuki_conductor.cron_scheduler.start_cron_scheduler") as cron_mock,
+        patch("yuki_conductor.taskboard.start_taskboard"),
     ):
         from yuki_conductor.runtime import start
 

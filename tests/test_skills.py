@@ -536,3 +536,18 @@ def test_core_prompt_keeps_the_contract_but_not_the_skill_listing():
     assert "`Skill` tool" not in core
     assert "## yuki-conductor capabilities" not in core
     assert "`Skill` tool" in skills.system_prompt(plugin_dirs=[], cwd=None)
+
+
+# --------------------------------------------------------------------------
+# Taskboard section
+# --------------------------------------------------------------------------
+
+
+def test_taskboard_section_only_for_tasks():
+    assert "## Taskboard" not in skills.core_prompt()
+    assert "## Taskboard" not in skills.system_prompt([], cwd=None)
+    for prompt in (skills.core_prompt(task_id=3), skills.system_prompt([], cwd=None, task_id=3)):
+        assert "## Taskboard" in prompt
+        assert "task #3" in prompt
+        assert "yuki-conductor task ask" in prompt
+        assert skills.GITHUB_AGENT_MARKER in prompt

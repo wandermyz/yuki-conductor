@@ -111,6 +111,7 @@ def run_agent(
     cwd: str | None = None,
     push_conversation_id: str | None = None,
     on_event: Callable[[StreamEvent], None] | None = None,
+    task_id: int | None = None,
 ) -> RunResult:
     """Run one turn of `harness` and return its result.
 
@@ -133,6 +134,9 @@ def run_agent(
         on_event: Called from the reader thread for every intermediate step.
             Exceptions raised by the callback are logged and swallowed so a
             broken UI subscriber can't kill the run.
+        task_id: Taskboard task this turn works on. Adds the taskboard section
+            to the system prompt and `YUKI_TASK_ID` to the env, which the
+            `yuki-conductor task` commands default to.
     """
     effective_cwd = cwd or CLAUDE_WORKING_DIR
     launch = harness.launch(RunRequest(
@@ -141,9 +145,12 @@ def run_agent(
         model=model,
         cwd=effective_cwd,
         conversation_key=push_conversation_id,
+        task_id=task_id,
     ))
     # Let injected skills locate the yuki-conductor project (e.g. to run its CLI).
     env = {**launch.env, "YUKI_CONDUCTOR_PROJECT": str(project_dir())}
+    if task_id is not None:
+        env["YUKI_TASK_ID"] = str(task_id)
     effective_timeout = timeout if timeout is not None else CLAUDE_TIMEOUT
 
     try:
@@ -216,9 +223,22 @@ def run_agent(
             stderr.strip() or raw_stdout.strip()
             or f"{harness.bin} exited with code {proc.returncode}"
         )
-        return RunResult(text=error_text, session_id=session_id, is_error=True)
+        return RunResult(
+            text=error_text,
+            session_id=session_id,
+            is_error=True,
+            session_missing=_reports_missing_session(harness, session_id, error_text),
+        )
 
-    return parser.finish(raw_stdout, session_id)
+    result = parser.finish(raw_stdout, session_id)
+    if result.is_error and _reports_missing_session(harness, session_id, result.text):
+        result.session_missing = True
+    return result
+
+
+def _reports_missing_session(harness: Harness, session_id: str | None, text: str) -> bool:
+    marker = harness.missing_session_marker
+    return bool(session_id and marker and marker in text)
 
 
 def _consume_stream(
