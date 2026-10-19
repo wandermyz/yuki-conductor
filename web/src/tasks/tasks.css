@@ -653,6 +653,16 @@ a.pr-marker:hover {
   overflow-x: auto;
 }
 
+/* Pasted images, inline as ![name](/api/files/<id>) */
+.task-timeline .markdown img,
+.task-form-preview .markdown img {
+  display: block;
+  max-width: 100%;
+  max-height: 480px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
 .task-timeline .markdown th,
 .task-timeline .markdown td,
 .task-form-preview .markdown th,

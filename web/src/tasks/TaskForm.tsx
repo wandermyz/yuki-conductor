@@ -3,6 +3,7 @@ import { uploadFile } from "../chat/api";
 import type { AttachmentRef, HarnessInfo, Project } from "../chat/api";
 import { HarnessIcon, NewSessionPicker } from "../chat/shared";
 import Markdown from "../Markdown";
+import { imageMarkers, insertAt, pastedFiles, withoutMarker } from "../paste";
 import { createTask, editTask } from "./api";
 import type { Task, TaskInput } from "./api";
 import { DRAFT_KEY, loadDraft } from "./draft";
@@ -61,14 +62,21 @@ export default function TaskForm({
   const set = <K extends keyof TaskInput>(key: K, value: TaskInput[K]) =>
     setInput((cur) => ({ ...cur, [key]: value }));
 
-  const addFiles = async (files: FileList | null) => {
-    if (!files) return;
+  /** Upload `files`; pasted images also get an inline marker at `markerAt`. */
+  const addFiles = async (files: File[], markerAt?: number) => {
     try {
-      const added = await Promise.all(Array.from(files).map(uploadFile));
+      const added = await Promise.all(files.map(uploadFile));
       setUploads((cur) => [...cur, ...added]);
+      if (markerAt !== undefined)
+        setInput((cur) => ({ ...cur, body: insertAt(cur.body, markerAt, imageMarkers(added)) }));
     } catch (e) {
       setError(String(e));
     }
+  };
+
+  const removeUpload = (u: AttachmentRef) => {
+    setUploads((cur) => cur.filter((x) => x.id !== u.id));
+    setInput((cur) => ({ ...cur, body: withoutMarker(cur.body, u) }));
   };
 
   const save = async () => {
@@ -76,9 +84,10 @@ export default function TaskForm({
     setSaving(true);
     setError(null);
     try {
+      const attachment_ids = uploads.map((u) => u.id);
       const saved = task
-        ? await editTask(task.id, input)
-        : await createTask({ ...input, attachment_ids: uploads.map((u) => u.id) });
+        ? await editTask(task.id, { ...input, attachment_ids })
+        : await createTask({ ...input, attachment_ids });
       if (!task) localStorage.removeItem(DRAFT_KEY);
       onSaved(saved);
     } catch (e) {
@@ -132,10 +141,16 @@ export default function TaskForm({
         ) : (
           <textarea
             className="task-form-body"
-            placeholder="What should the agent do? Markdown and ```mermaid diagrams work."
+            placeholder="What should the agent do? Markdown and ```mermaid diagrams work. Paste images or files to attach them."
             value={input.body}
             rows={8}
             onChange={(e) => set("body", e.target.value)}
+            onPaste={(e) => {
+              const files = pastedFiles(e);
+              if (!files.length) return;
+              e.preventDefault();
+              addFiles(files, e.currentTarget.selectionStart);
+            }}
           />
         )}
 
@@ -151,20 +166,18 @@ export default function TaskForm({
           </span>
         </label>
 
-        {!task && (
-          <div className="task-form-files">
-            {uploads.map((u) => (
-              <span key={u.id} className="task-file-chip">
-                📎 {u.filename}
-                <button onClick={() => setUploads((cur) => cur.filter((x) => x.id !== u.id))}>×</button>
-              </span>
-            ))}
-            <label className="task-attach-btn">
-              Attach files
-              <input type="file" multiple hidden onChange={(e) => addFiles(e.target.files)} />
-            </label>
-          </div>
-        )}
+        <div className="task-form-files">
+          {uploads.map((u) => (
+            <span key={u.id} className="task-file-chip">
+              📎 {u.filename}
+              <button onClick={() => removeUpload(u)}>×</button>
+            </span>
+          ))}
+          <label className="task-attach-btn">
+            Attach files
+            <input type="file" multiple hidden onChange={(e) => addFiles(Array.from(e.target.files ?? []))} />
+          </label>
+        </div>
 
         {error && <p className="task-error">{error}</p>}
 

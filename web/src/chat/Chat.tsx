@@ -31,6 +31,7 @@ import type {
   StreamStep,
   WSEvent,
 } from "./api";
+import { pastedFiles } from "../paste";
 import { disablePush, enablePush, getPushState } from "../webPush";
 import type { PushState } from "../webPush";
 import SidebarResizer from "../SidebarResizer";
@@ -715,13 +716,12 @@ function Composer({
     localStorage.removeItem(draftKey);
   };
 
-  const onPickFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const addFiles = async (files: File[]) => {
+    if (files.length === 0) return;
     setUploading(true);
     try {
       const uploaded: AttachmentRef[] = [];
-      for (const f of Array.from(files)) {
+      for (const f of files) {
         uploaded.push(await uploadFile(f));
       }
       setPending((p) => [...p, ...uploaded]);
@@ -729,6 +729,16 @@ function Composer({
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
     }
+  };
+
+  const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>) =>
+    addFiles(Array.from(e.target.files ?? []));
+
+  const onPaste = (e: React.ClipboardEvent) => {
+    const files = pastedFiles(e);
+    if (!files.length) return;
+    e.preventDefault();
+    addFiles(files);
   };
 
   return (
@@ -782,6 +792,7 @@ function Composer({
           rows={1}
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onPaste={onPaste}
           onKeyDown={(e) => {
             if (
               e.key === "Enter" &&

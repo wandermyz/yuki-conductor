@@ -353,6 +353,11 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
   `task:<id>`; Chat ignores those keys. `live.py` is the only link from the
   board to the web layer.
 - Done tasks older than 30 days are archived (hidden unless asked for).
+- **Pasted files**: pasting into the chat composer, the task form or a task
+  comment uploads the clipboard's files (`web/src/paste.ts`). In tasks, a
+  pasted image also gets an inline `![name](/api/files/<id>)` marker so
+  Preview and the timeline show it; `prompts.py` rewrites those URLs to the
+  file's path on disk before the agent sees the text.
 
 ## Key Commands
 
