@@ -43,6 +43,8 @@ src/yuki_conductor/
   web_server.py     — FastAPI HTTP server (agent conductor web UI)
   web_push.py       — browser push notifications (VAPID key, subscriptions, fan-out)
 web/                — React + Vite frontend (pnpm, TypeScript)
+  src/tasks/          — the Tasks tab (list, detail, form)
+  src/Markdown.tsx    — shared Markdown renderer; ```mermaid via pele
 plugins/
   yuki-conductor/   — bundled skill plugin, injected into every session (cron, send, task skills)
   slack/            — bundled channel plugin (Slack Socket Mode)
@@ -143,10 +145,11 @@ directly (`SELECT … FROM conversations WHERE archived_at IS NOT NULL`).
 
 ### Web tabs
 
-The tab bar holds four: Chat, Projects, Automations, and a `⋯` overflow.
-Sessions, Status, and Plugins live behind the overflow (`OVERFLOW_TABS` in
-`App.tsx`), which renders a list view and shows as active whenever one of its
-children is current. Deep links (`#sessions`, `#plugins`, …) remain valid.
+The tab bar holds four: Chat, Tasks, Automations, and a `⋯` overflow.
+Projects, Sessions, Status, and Plugins live behind the overflow
+(`OVERFLOW_TABS` in `App.tsx`), which renders a list view and shows as active
+whenever one of its children is current. Deep links (`#projects`, `#plugins`,
+`#tasks/<id>`, …) remain valid.
 
 
 ## Skill Discovery

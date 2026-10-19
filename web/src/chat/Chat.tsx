@@ -34,20 +34,8 @@ import type {
 import { disablePush, enablePush, getPushState } from "../webPush";
 import type { PushState } from "../webPush";
 import "./chat.css";
-import claudeCodeIcon from "../assets/harness/claude-code.svg";
-import piIcon from "../assets/harness/pi.svg";
-
-// Official marks: Claude's spark (claude.ai) and pi's logo (pi.dev).
-const HARNESS_ICONS: Record<string, string> = {
-  "claude-code": claudeCodeIcon,
-  pi: piIcon,
-};
-
-function HarnessIcon({ name }: { name: string | null }) {
-  const src = name ? HARNESS_ICONS[name] : undefined;
-  return src ? <img className="harness-icon" src={src} alt="" aria-hidden="true" /> : null;
-}
-
+import { HARNESS_ICONS } from "./harnessIcons";
+import { HarnessIcon, StepList } from "./shared";
 /** Marks the agent a conversation runs on: its icon, or its name if it has none. */
 function HarnessMarker({ name }: { name: string }) {
   if (!HARNESS_ICONS[name]) return <span className="chat-list-harness">{name}</span>;
@@ -679,44 +667,6 @@ function agentName(conv: Conversation): string {
   return conv.harness === "claude-code" ? "Claude" : conv.harness;
 }
 
-const STEP_ICONS: Record<StreamStep["kind"], string> = {
-  init: "●",
-  text: "✎",
-  thinking: "…",
-  tool_use: "▸",
-  tool_result: "↳",
-};
-
-/** How many trailing steps stay visible; older ones collapse away. */
-const VISIBLE_STEPS = 8;
-
-function StepList({
-  steps,
-  running,
-  agent,
-}: {
-  steps: StreamStep[];
-  running: boolean;
-  agent: string;
-}) {
-  const visible = steps.slice(-VISIBLE_STEPS);
-  const hidden = steps.length - visible.length;
-  return (
-    <div className={running ? "step-list" : "step-list step-list-done"}>
-      {hidden > 0 && (
-        <div className="step-hidden">…{hidden} earlier step{hidden === 1 ? "" : "s"}</div>
-      )}
-      {visible.map((s) => (
-        <div key={s.seq} className={`step step-${s.kind}`}>
-          <span className="step-icon">{STEP_ICONS[s.kind] ?? "·"}</span>
-          <span className="step-label">{s.label}</span>
-        </div>
-      ))}
-      {running && <div className="responding-shimmer">{agent} is responding…</div>}
-    </div>
-  );
-}
-
 function Composer({
   conversationId,
   agent,
@@ -1027,7 +977,10 @@ export default function Chat({
           window.location.reload();
           return;
         }
+        if (e.type === "task") return; // the Tasks tab's business
         const cid = e.conversation_id;
+        // Taskboard turns stream on the same socket, keyed `task:<id>`.
+        if (cid.startsWith("task:")) return;
         if (e.type === "message") {
           setMessagesByConv((prev) => {
             const msgs = prev[cid] || [];

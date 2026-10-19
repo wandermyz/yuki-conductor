@@ -70,6 +70,8 @@ export type WSEvent =
   | { type: "step"; conversation_id: string; step: StreamStep }
   | { type: "title"; conversation_id: string; title: string }
   | { type: "status"; conversation_id: string; status: ConvStatus }
+  /** A taskboard task changed (status, fields or comments): refetch it. */
+  | { type: "task"; id: number }
   | { type: "reload" };
 
 export async function listConversations(): Promise<Conversation[]> {

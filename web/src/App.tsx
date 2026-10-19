@@ -4,12 +4,14 @@ import Chat from "./chat/Chat";
 import PluginsView from "./PluginsView";
 import ProjectsView from "./ProjectsView";
 import StatusView from "./StatusView";
+import TasksView from "./tasks/TasksView";
 import Terminal from "./Terminal";
 import "./App.css";
 
 type Tab =
   | "sessions"
   | "chat"
+  | "tasks"
   | "projects"
   | "automations"
   | "status"
@@ -467,6 +469,7 @@ function SessionsView() {
 
 const ALL_TABS: Tab[] = [
   "chat",
+  "tasks",
   "projects",
   "automations",
   "sessions",
@@ -476,10 +479,11 @@ const ALL_TABS: Tab[] = [
 ];
 
 /** Tabs behind the "More" overflow. The bar holds four; these are the rest. */
-const OVERFLOW_TABS: Tab[] = ["sessions", "status", "plugins"];
+const OVERFLOW_TABS: Tab[] = ["projects", "sessions", "status", "plugins"];
 
 const TAB_LABELS: Record<Tab, string> = {
   chat: "Chat",
+  tasks: "Tasks",
   projects: "Projects",
   automations: "Automations",
   sessions: "Sessions",
@@ -489,6 +493,7 @@ const TAB_LABELS: Record<Tab, string> = {
 };
 
 const TAB_BLURBS: Partial<Record<Tab, string>> = {
+  projects: "Folders chats and tasks can work in",
   sessions: "Slack threads and Zellij terminals",
   status: "Health of each running channel",
   plugins: "Install, enable, and restart",
@@ -510,6 +515,13 @@ function TabIcon({ tab }: { tab: Tab }) {
       return (
         <svg {...common}>
           <path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z" />
+        </svg>
+      );
+    case "tasks":
+      return (
+        <svg {...common}>
+          <rect x="4" y="3" width="16" height="18" rx="2" />
+          <path d="M8 8l1.5 1.5L12 7M8 14l1.5 1.5L12 13M14 8.5h2.5M14 14.5h2.5" />
         </svg>
       );
     case "projects":
@@ -582,23 +594,35 @@ function MoreView({ onSelect }: { onSelect: (tab: Tab) => void }) {
   );
 }
 
-function parseHash(): { tab: Tab; chatId: string | null } {
+interface Route {
+  tab: Tab;
+  chatId: string | null;
+  taskId: number | null;
+}
+
+function parseHash(): Route {
   const hash = window.location.hash.replace(/^#/, "");
-  if (hash.startsWith("chat/")) return { tab: "chat", chatId: hash.slice(5) || null };
+  const none = { chatId: null, taskId: null };
+  if (hash.startsWith("chat/")) return { tab: "chat", chatId: hash.slice(5) || null, taskId: null };
+  if (hash.startsWith("tasks/")) {
+    const id = Number(hash.slice(6));
+    return { tab: "tasks", chatId: null, taskId: Number.isInteger(id) && id > 0 ? id : null };
+  }
   // Deep links to the overflowed tabs stay valid — they just render with the
   // "More" tab highlighted rather than a tab of their own.
   if ((ALL_TABS as string[]).includes(hash))
-    return { tab: hash as Tab, chatId: null };
+    return { tab: hash as Tab, ...none };
   // Fall back to localStorage for users without a hash yet
   const saved = window.localStorage.getItem("yuki-tab");
   if (saved && (ALL_TABS as string[]).includes(saved))
-    return { tab: saved as Tab, chatId: null };
-  return { tab: "chat", chatId: null };
+    return { tab: saved as Tab, ...none };
+  return { tab: "chat", ...none };
 }
 
 function App() {
   const [tab, setTab] = useState<Tab>(() => parseHash().tab);
   const [chatId, setChatId] = useState<string | null>(() => parseHash().chatId);
+  const [taskId, setTaskId] = useState<number | null>(() => parseHash().taskId);
 
   // Sync hash -> state on popstate (back/forward)
   useEffect(() => {
@@ -610,6 +634,9 @@ function App() {
       if (parsed.tab === "chat") {
         setChatId(parsed.chatId);
       }
+      if (parsed.tab === "tasks") {
+        setTaskId(parsed.taskId);
+      }
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
@@ -617,17 +644,24 @@ function App() {
 
   // Sync state -> hash + localStorage
   useEffect(() => {
-    const hash = tab === "chat" && chatId ? `chat/${chatId}` : tab;
+    const hash =
+      tab === "chat" && chatId
+        ? `chat/${chatId}`
+        : tab === "tasks" && taskId !== null
+          ? `tasks/${taskId}`
+          : tab;
     if (window.location.hash !== `#${hash}`) {
       window.location.hash = hash;
     }
     window.localStorage.setItem("yuki-tab", tab);
-  }, [tab, chatId]);
+  }, [tab, chatId, taskId]);
 
   const renderTab = () => {
     switch (tab) {
       case "chat":
         return <Chat selectedId={chatId} onSelectId={setChatId} />;
+      case "tasks":
+        return <TasksView selectedId={taskId} onSelectId={setTaskId} />;
       case "projects":
         return <ProjectsView />;
       case "automations":
@@ -644,7 +678,7 @@ function App() {
   };
 
   // The overflow tab reads as active whenever one of its children is showing.
-  const barTabs: Tab[] = ["chat", "projects", "automations", "more"];
+  const barTabs: Tab[] = ["chat", "tasks", "automations", "more"];
   const isActive = (t: Tab) =>
     t === "more" ? tab === "more" || OVERFLOW_TABS.includes(tab) : tab === t;
 

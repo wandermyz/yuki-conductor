@@ -29,6 +29,19 @@
   }
 }
 
+/* Mermaid diagrams (pele) follow the app theme. */
+:root {
+  --pele-bg: transparent;
+  --pele-fg: var(--text-h);
+  --pele-muted: var(--text);
+  --pele-line: var(--text);
+  --pele-surface: var(--bg);
+  --pele-surface-alt: var(--accent-bg);
+  --pele-border: var(--border);
+  --pele-accent: var(--accent);
+  --pele-font: var(--sans);
+}
+
 * {
   box-sizing: border-box;
 }
