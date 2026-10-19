@@ -753,6 +753,10 @@
   justify-content: flex-end;
 }
 
+.task-form-discard {
+  margin-right: auto;
+}
+
 /* ---------- Mobile ---------- */
 
 @media (max-width: 640px) {
