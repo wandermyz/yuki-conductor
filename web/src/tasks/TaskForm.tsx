@@ -109,8 +109,8 @@ export default function TaskForm({
   };
 
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-content task-form" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay">
+      <div className="modal-content task-form">
         <h3 className="modal-title">{task ? `Edit task #${task.id}` : "New task"}</h3>
 
         <input
