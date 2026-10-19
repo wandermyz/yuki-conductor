@@ -133,6 +133,22 @@ def _create(task: Task, repo: str) -> tuple[str, str]:
     return str(path), branch
 
 
+def _remove_worktree(repo: str, path: Path) -> None:
+    """Remove a worktree, counting one git doesn't know and the disk doesn't
+    hold (or holds only as an empty directory) as already removed."""
+    if not path.exists():
+        return
+    try:
+        _git(repo, "worktree", "remove", "--force", str(path))
+    except WorktreeError as exc:
+        if "is not a working tree" not in str(exc):
+            raise
+        if path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
+        if path.exists():
+            raise
+
+
 def cleanup(task: Task, repo: str, *, keep_remote: bool = False) -> list[str]:
     """Remove a finished task's worktree, local branch and remote branch.
 
@@ -144,8 +160,8 @@ def cleanup(task: Task, repo: str, *, keep_remote: bool = False) -> list[str]:
     """
     kept: list[str] = []
     with _repo_lock(repo):
-        if task.worktree_path and Path(task.worktree_path).exists():
-            _git(repo, "worktree", "remove", "--force", task.worktree_path)
+        if task.worktree_path:
+            _remove_worktree(repo, Path(task.worktree_path))
         _git(repo, "worktree", "prune")
         branch = task.branch
         if not branch or not branch.startswith("task/"):
