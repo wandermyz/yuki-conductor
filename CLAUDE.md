@@ -469,7 +469,10 @@ Every assistant message `WebPlatform` delivers — a reply, a cron result
 user also goes out as a Web Push notification
 (`web_push.py`) to each browser subscribed via the 🔔 toggle in the chat
 sidebar. Each push names a target, `{kind: "conversation" | "task", id}`
-(`web_push.conversation_target` / `task_target`). The service worker
+(`web_push.conversation_target` / `task_target`). A notification names the
+conversation or task and what happened ("Responded to a conversation",
+"Moved to Needs Input", "Agent posted a comment"), never the content — Slack
+task notifications too. The service worker
 `web/public/sw.js` shows it, unless a focused window is already on that
 target; a click focuses the app and opens `#chat/<id>` or `#tasks/<id>`. Subscriptions live in the `push_subscriptions` table and are
 dropped when the push service answers 404/410. The VAPID key is generated on
