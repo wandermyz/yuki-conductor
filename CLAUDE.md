@@ -455,20 +455,25 @@ Slack notifies on its own. Tests are isolated by the autouse
 
 ## Frontend Deployment Gotchas
 
-The production daemon serves the **built** frontend from `web/dist/`.
+The production daemon serves the **built** frontend from `web/dist/`, which is
+**never in git**: each machine builds its own, so it always matches that
+checkout. Don't commit a build (not even `index.html`) — its hashed asset names
+change on every build, so it would conflict across PRs and go stale on merge.
 
-**After frontend-only changes**, run:
-```
-uv run yuki-conductor web rebuild
-```
-This rebuilds the frontend and, if the daemon is running, broadcasts a WebSocket reload to all connected browsers automatically. No daemon restart needed.
+What builds it:
+- **Daemon startup** — `runtime.start()` builds when `config.web_frontend_stale()`
+  finds `web/dist/index.html` missing or older than any frontend source (fresh
+  clone, a pull, Windows' yuki-watcher, the Restart daemon button).
+- `uv run yuki-conductor web rebuild` — rebuilds and, if the daemon is running,
+  reloads every connected browser. Use it after frontend-only changes; no
+  restart needed.
+- `yuki-conductor daemon restart` (macOS/Linux) and self-update (when the
+  update touched `web/`).
 
 **After backend changes** (Python code), you must restart the daemon — the running process keeps old code in memory.
 
-Other things that can go wrong:
-
-1. **Worktree builds don't carry over**: If you build frontend in a git worktree, the hashed asset filenames (e.g. `index-BFz3Cwkn.js`) differ from the main branch. After merging, always rebuild in the main worktree.
-2. **Hash mismatch after merge**: `web/dist/` is gitignored, so only `index.html` is tracked. If a merge updates `index.html` to reference new hashed filenames but the actual JS/CSS files on disk are from an older build, the page loads blank (404 on assets). Always rebuild after any merge that touches frontend code.
+A build in a git worktree only lands in that worktree's `web/dist/`; the daemon
+serves the main checkout's.
 
 ## Pre-commit / Pre-PR Checks
 

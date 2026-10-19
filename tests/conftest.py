@@ -90,3 +90,15 @@ def no_stray_harvester():
     loops = ("taskboard-harvester", "taskboard-pr-watcher")
     leaked = [t.name for t in threading.enumerate() if t.name in loops]
     assert not leaked, "a test started the real taskboard loop; patch start_taskboard"
+
+
+@pytest.fixture(autouse=True)
+def no_web_build(monkeypatch):
+    """Stop ``runtime.start()`` from running a real pnpm build.
+
+    It builds web/dist whenever the checkout's is missing or stale, which in a
+    fresh worktree is always; tests that care patch the check themselves.
+    """
+    from yuki_conductor import config
+
+    monkeypatch.setattr(config, "web_frontend_stale", lambda: False)

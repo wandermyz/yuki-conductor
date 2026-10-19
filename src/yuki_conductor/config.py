@@ -203,6 +203,31 @@ def build_web_frontend() -> bool:
         return False
 
 
+# What a frontend build reads, relative to web/. A change to any of them means
+# web/dist no longer matches the checkout.
+_WEB_SOURCES = ("src", "public", "index.html", "package.json", "pnpm-lock.yaml", "vite.config.ts")
+
+
+def web_frontend_stale() -> bool:
+    """True when web/dist is missing or older than any frontend source file.
+
+    web/dist is never in git, so each machine builds its own; this is how the
+    daemon notices a fresh clone or a pull that changed the frontend.
+    """
+    web_dir = project_dir() / "web"
+    built = web_dir / "dist" / "index.html"
+    if not built.exists():
+        return True
+    built_at = built.stat().st_mtime
+    for name in _WEB_SOURCES:
+        source = web_dir / name
+        paths = source.rglob("*") if source.is_dir() else [source]
+        for path in paths:
+            if path.is_file() and path.stat().st_mtime > built_at:
+                return True
+    return False
+
+
 def slack_cron_channel() -> str:
     channel = os.environ.get("SLACK_CRON_CHANNEL", "")
     if not channel:
