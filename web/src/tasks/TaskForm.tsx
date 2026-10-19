@@ -1,48 +1,41 @@
 import { useEffect, useState } from "react";
-import { listHarnesses, listProjects, uploadFile } from "../chat/api";
+import { uploadFile } from "../chat/api";
 import type { AttachmentRef, HarnessInfo, Project } from "../chat/api";
 import { HarnessIcon } from "../chat/shared";
 import Markdown from "../Markdown";
 import { createTask, editTask } from "./api";
 import type { Task, TaskInput } from "./api";
+import { DRAFT_KEY, loadDraft } from "./draft";
 
-/** A new task in progress survives Cancel, a dismissed dialog and a reload. */
-const DRAFT_KEY = "task-draft";
-
-interface Draft {
-  input: TaskInput;
-  uploads: AttachmentRef[];
-}
-
-function loadDraft(): Draft | null {
-  try {
-    const raw = localStorage.getItem(DRAFT_KEY);
-    return raw ? (JSON.parse(raw) as Draft) : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Create a task, or edit one nobody has picked up yet. */
+/**
+ * Create a task, or edit one nobody has picked up yet. A new task's agent and
+ * project were chosen in the picker (`picked`) or come from its saved draft,
+ * so only an edit can change them here.
+ */
 export default function TaskForm({
   task,
+  picked,
+  harnesses,
+  projects,
   onSaved,
   onCancel,
 }: {
   task?: Task;
+  picked?: { harness: string | null; project: string };
+  harnesses: HarnessInfo[];
+  projects: Project[];
   onSaved: (task: Task) => void;
   onCancel: () => void;
 }) {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
   const [draft] = useState(() => (task ? null : loadDraft()));
   const [input, setInput] = useState<TaskInput>(
     () =>
       draft?.input ?? {
         title: task?.title ?? "",
         body: task?.body ?? "",
-        project: task?.project ?? "",
-        harness: task?.harness ?? "",
+        project: task?.project ?? picked?.project ?? "",
+        // Empty means the server's default harness.
+        harness: task?.harness ?? picked?.harness ?? "",
         use_worktree: task?.use_worktree ?? true,
       },
   );
@@ -50,21 +43,6 @@ export default function TaskForm({
   const [preview, setPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    listProjects()
-      .then((ps) => {
-        setProjects(ps);
-        setInput((cur) => (cur.project || !ps.length ? cur : { ...cur, project: ps[0].name }));
-      })
-      .catch(console.error);
-    listHarnesses()
-      .then(({ default: def, harnesses: hs }) => {
-        setHarnesses(hs.filter((h) => h.available));
-        setInput((cur) => (cur.harness ? cur : { ...cur, harness: def }));
-      })
-      .catch(console.error);
-  }, []);
 
   const hasDraft = !task && (!!input.title.trim() || !!input.body.trim() || uploads.length > 0);
 
@@ -111,7 +89,21 @@ export default function TaskForm({
   return (
     <div className="modal-overlay">
       <div className="modal-content task-form">
-        <h3 className="modal-title">{task ? `Edit task #${task.id}` : "New task"}</h3>
+        <h3 className="modal-title">
+          {task ? `Edit task #${task.id}` : "New task"}
+          {!task && (
+            <span className="picker-step-context">
+              {harnesses.length > 1 && (
+                <>
+                  <HarnessIcon name={input.harness} />
+                  {harnesses.find((h) => h.name === input.harness)?.label ?? input.harness}
+                  {" · "}
+                </>
+              )}
+              {input.project}
+            </span>
+          )}
+        </h3>
 
         <input
           className="task-form-title"
@@ -143,33 +135,39 @@ export default function TaskForm({
           />
         )}
 
-        <label className="task-form-field">
-          <span>Project</span>
-          <select value={input.project} onChange={(e) => set("project", e.target.value)}>
-            {projects.length === 0 && <option value="">No projects — add one in Projects</option>}
-            {projects.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {task && (
+          <>
+            <label className="task-form-field">
+              <span>Project</span>
+              <select value={input.project} onChange={(e) => set("project", e.target.value)}>
+                {projects.length === 0 && <option value="">No projects — add one in Projects</option>}
+                {projects.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        <div className="task-form-field">
-          <span>Agent</span>
-          <div className="task-form-harnesses">
-            {harnesses.map((h) => (
-              <button
-                key={h.name}
-                className={input.harness === h.name ? "active" : ""}
-                onClick={() => set("harness", h.name)}
-              >
-                <HarnessIcon name={h.name} />
-                {h.label}
-              </button>
-            ))}
-          </div>
-        </div>
+            {harnesses.length > 1 && (
+              <div className="task-form-field">
+                <span>Agent</span>
+                <div className="task-form-harnesses">
+                  {harnesses.map((h) => (
+                    <button
+                      key={h.name}
+                      className={input.harness === h.name ? "active" : ""}
+                      onClick={() => set("harness", h.name)}
+                    >
+                      <HarnessIcon name={h.name} />
+                      {h.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
 
         <label className="task-form-check">
           <input
