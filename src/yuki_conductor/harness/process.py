@@ -197,6 +197,9 @@ def _run_agent(
     ))
     # Let injected skills locate the yuki-conductor project (e.g. to run its CLI).
     env = {**launch.env, "YUKI_CONDUCTOR_PROJECT": str(project_dir())}
+    # Only a task turn has a task: an inherited id would make `send` and
+    # `task comment` write to a task this run isn't working on.
+    env.pop("YUKI_TASK_ID", None)
     if task_id is not None:
         env["YUKI_TASK_ID"] = str(task_id)
     effective_timeout = timeout if timeout is not None else CLAUDE_TIMEOUT

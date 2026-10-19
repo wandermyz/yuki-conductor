@@ -25,6 +25,12 @@ def _captured_request(mock_urlopen):
     return mock_urlopen.call_args[0][0]
 
 
+@pytest.fixture(autouse=True)
+def outside_task(monkeypatch):
+    # These tests may themselves run inside a task turn.
+    monkeypatch.delenv("YUKI_TASK_ID", raising=False)
+
+
 def test_send_posts_to_named_conversation(capsys):
     with patch("urllib.request.urlopen", return_value=_mock_response()) as m:
         main(["send", "-c", "conv-1", "hello there"])
@@ -101,3 +107,26 @@ def test_send_reports_http_error(capsys):
     with patch("urllib.request.urlopen", side_effect=err), pytest.raises(SystemExit):
         main(["send", "-c", "nope", "hi"])
     assert "404" in capsys.readouterr().err
+
+
+def test_send_inside_task_comments_on_it(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("YUKI_TASK_ID", "7")
+    pic = tmp_path / "pic.png"
+    pic.write_bytes(b"png")
+    with patch("urllib.request.urlopen", return_value=_mock_response({"id": 42})) as m:
+        main(["send", "--attach", str(pic), "halfway there"])
+
+    req = _captured_request(m)
+    assert req.full_url.endswith("/api/tasks/7/comments")
+    assert json.loads(req.data) == {
+        "body": "halfway there", "author": "agent", "attachments": [str(pic)], "notify": True,
+    }
+    assert "comment #42 on task #7" in capsys.readouterr().out
+
+
+def test_send_inside_task_with_conversation_still_pushes(monkeypatch):
+    monkeypatch.setenv("YUKI_TASK_ID", "7")
+    with patch("urllib.request.urlopen", return_value=_mock_response()) as m:
+        main(["send", "-c", "conv-1", "hi"])
+
+    assert _captured_request(m).full_url.endswith("/api/push")
