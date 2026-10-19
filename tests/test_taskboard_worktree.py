@@ -138,6 +138,27 @@ def test_cleanup_tolerates_everything_already_gone(repo):
     assert git(repo, "branch", "--list", task.branch) == ""
 
 
+def test_cleanup_tolerates_a_worktree_git_no_longer_knows(repo):
+    task = _pushed_task(repo)
+    path = repo / ".claude" / "worktrees" / f"task-{task.id}"
+    git(repo, "worktree", "remove", "--force", str(path))
+    path.mkdir()  # an empty leftover directory, not a working tree
+    worktree.cleanup(task, str(repo))
+    assert not path.exists()
+    worktree.cleanup(task, str(repo))  # and with nothing on disk at all
+
+
+def test_cleanup_refuses_to_drop_an_unknown_nonempty_directory(repo):
+    task = _pushed_task(repo)
+    path = repo / ".claude" / "worktrees" / f"task-{task.id}"
+    git(repo, "worktree", "remove", "--force", str(path))
+    path.mkdir()
+    (path / "stray.txt").write_text("x")
+    with pytest.raises(WorktreeError, match="not a working tree"):
+        worktree.cleanup(task, str(repo))
+    assert (path / "stray.txt").exists()
+
+
 def test_cleanup_keeps_unpushed_work(repo):
     task = _task()
     path, branch = ensure_worktree(task, str(repo))
