@@ -1253,6 +1253,52 @@
   cursor: default;
 }
 
+.update-btn {
+  background: none;
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+}
+
+.update-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.update-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.update-prompt .modal-title {
+  margin: 0;
+}
+
+.update-commits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 13px;
+  color: var(--text-h);
+}
+
+.update-commits li {
+  padding: 3px 0;
+}
+
+.update-more,
+.update-note {
+  color: var(--text);
+  font-size: 13px;
+  margin: 0;
+}
+
+.update-actions {
+  justify-content: flex-end;
+}
+
 .plugin-banner {
   font-size: 13px;
   line-height: 1.4;

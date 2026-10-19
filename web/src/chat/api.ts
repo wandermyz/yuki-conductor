@@ -495,6 +495,54 @@ export async function restartDaemon(): Promise<void> {
   if (!r.ok) return pluginError(r);
 }
 
+export interface UpdateCommit {
+  sha: string;
+  short: string;
+  author: string;
+  date: string;
+  subject: string;
+}
+
+export interface UpdateStatus {
+  branch: string;
+  upstream: string;
+  current: string;
+  latest: string;
+  behind: number;
+  ahead: number;
+  /** Tracked files with uncommitted changes; updating refuses while any exist. */
+  dirty: string[];
+  commits: UpdateCommit[];
+}
+
+/** Fetch origin and report what upstream has that this checkout lacks. */
+export async function checkForUpdate(): Promise<UpdateStatus> {
+  const r = await fetch("/api/update", { cache: "no-store" });
+  if (!r.ok) return pluginError(r);
+  return r.json();
+}
+
+/** Rebase onto upstream and restart. `restarting` is false when already current. */
+export async function applyUpdate(): Promise<UpdateStatus & { restarting: boolean }> {
+  const r = await fetch("/api/update", { method: "POST" });
+  if (!r.ok) return pluginError(r);
+  return r.json();
+}
+
+/**
+ * Rebase onto upstream and restart, then reload once the daemon is back so
+ * the page picks up the rebuilt frontend. Resolves `false` if there was
+ * nothing to update; rejects with the server's message (local changes, a
+ * failed rebase, …).
+ */
+export async function runUpdate(): Promise<boolean> {
+  const result = await applyUpdate();
+  if (!result.restarting) return false;
+  await waitForDaemon();
+  window.location.reload();
+  return true;
+}
+
 /** Resolve once /api/status answers again, or reject after `timeoutMs`. */
 export async function waitForDaemon(timeoutMs = 90000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

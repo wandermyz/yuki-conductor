@@ -866,6 +866,40 @@ def create_api() -> FastAPI:
         _clear_restart_required()
         return {"ok": True, "restarting": True}
 
+    @api.get("/api/update")
+    def check_update():
+        """Fetch origin and list the upstream commits this checkout lacks."""
+        from yuki_conductor import updater
+
+        try:
+            return updater.check().to_dict()
+        except updater.UpdateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+
+    @api.post("/api/update", status_code=202)
+    def apply_update():
+        """Rebase onto the upstream and restart, if there was anything to pull.
+
+        `restarting: false` means the checkout was already up to date.
+        """
+        from yuki_conductor import updater
+        from yuki_conductor.daemon import spawn_detached_restart
+
+        try:
+            status = updater.apply()
+        except updater.UpdateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        if status.behind == 0:
+            return {"ok": True, "restarting": False, **status.to_dict()}
+        try:
+            spawn_detached_restart()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500, detail=f"Updated, but restart failed: {exc}"
+            ) from None
+        _clear_restart_required()
+        return {"ok": True, "restarting": True, **status.to_dict()}
+
     @api.post("/api/admin/rebuild")
     def admin_rebuild():
         """Rebuild the frontend and notify all connected clients to reload."""

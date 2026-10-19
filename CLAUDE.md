@@ -42,6 +42,7 @@ src/yuki_conductor/
   daemon.py         — daemon management dispatcher (daemon_macos / daemon_linux / daemon_windows)
   web_server.py     — FastAPI HTTP server (agent conductor web UI)
   web_push.py       — browser push notifications (VAPID key, subscriptions, fan-out)
+  updater.py        — self-update: git fetch + rebase onto upstream (see Self-update)
 web/                — React + Vite frontend (pnpm, TypeScript)
   src/tasks/          — the Tasks tab (list, detail, form)
   src/Markdown.tsx    — shared Markdown renderer; ```mermaid via pele
@@ -134,6 +135,22 @@ runs *inside* the daemon. `daemon.spawn_detached_restart()` dispatches to
 relaunch), `daemon_macos` (`setsid` + `launchctl kickstart -k`), or
 `daemon_linux` (delayed `systemctl --user restart --no-block`), returns 202 at
 once, and the frontend polls `/api/status` until the socket comes back.
+
+### Self-update
+
+The daemon assumes it runs from a git checkout. `GET /api/update` fetches
+origin and lists the commits on the branch's upstream (`@{upstream}`) that the
+checkout lacks; `POST /api/update` fetches, `git rebase`s onto it, rebuilds the
+frontend if `web/` changed, and restarts via `spawn_detached_restart()` — or
+returns `restarting: false` when already current. Tracked local changes, a
+detached HEAD, no upstream, a conflicting rebase (always aborted) or a failed
+frontend build are a 409 with a readable `detail`. `updater.py` serializes git
+behind one lock, since every open browser tab polls.
+
+The frontend (`UpdatePrompt.tsx`, mounted in `App`) polls every 5 minutes and
+pops a modal listing the new commits with **Update & restart** / **Snooze**
+(24 h, `localStorage`). The Plugins tab has an **Update** button beside
+Restart daemon. Either reloads the page once the daemon is back.
 
 ### Archived conversations
 
