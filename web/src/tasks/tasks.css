@@ -145,7 +145,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Matches the filters' and archived toggle's side padding. */
+/* Matches the filters' and old-tasks toggle's side padding. */
 .task-list-empty {
   padding: 0 16px;
 }
@@ -238,7 +238,7 @@
   color: #b45309;
 }
 
-.task-archived-toggle {
+.task-old-toggle {
   display: flex;
   align-items: center;
   gap: 8px;

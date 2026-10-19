@@ -358,7 +358,17 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
 - **Live steps** go through the same `ConnectionManager` as chat, keyed
   `task:<id>`; Chat ignores those keys. `live.py` is the only link from the
   board to the web layer.
-- Done tasks older than 30 days are archived (hidden unless asked for).
+- Done tasks older than 30 days are hidden from the list unless asked for
+  (`?old=true`, `task list --old`, the "Show done over 30 days ago" toggle).
+- **Archive** (`POST /api/tasks/{id}/archive`, `actions.archive`) sets
+  `tasks.archived_at`, like an archived conversation: the row stays, but the
+  task drops out of every list, `list_status` (so neither the harvester nor
+  the PR watcher sees it), its parent's follow-ups, and `actions.get` 404s
+  it. In Progress must be cancelled first; To Do is cancelled on the way.
+  The worktree and branches are cleaned up (`cleanup.run`) *before* the
+  archive, and a failed cleanup fails the archive with `cleanup_error` set
+  ("Retry archive" in the UI). The final write is compare-and-set on the
+  status, so a task requeued during cleanup isn't archived. No unarchive.
 - **Pasted files**: pasting into the chat composer, the task form or a task
   comment uploads the clipboard's files (`web/src/paste.ts`). In tasks, a
   pasted image also gets an inline `![name](/api/files/<id>)` marker so

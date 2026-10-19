@@ -35,13 +35,13 @@ COMMENT_AUTHORS = ("user", "agent", "system", "github")
 PR_STATES = ("OPEN", "DRAFT", "MERGED", "CLOSED")
 
 # Done tasks older than this are hidden from the default list.
-ARCHIVE_AFTER_SECONDS = 30 * 24 * 3600
+HIDE_DONE_AFTER_SECONDS = 30 * 24 * 3600
 
 _TASK_COLUMNS = (
     "id", "title", "body", "attachments", "project", "harness", "use_worktree",
     "status", "sort_order", "session_id", "worktree_path", "branch", "pr_url",
     "pr_state", "pr_checked_at", "asked_input", "parent_task_id", "cleanup_error",
-    "created_at", "updated_at", "started_at", "done_at",
+    "created_at", "updated_at", "started_at", "done_at", "archived_at",
 )
 _COMMENT_COLUMNS = (
     "id", "task_id", "author", "body", "quote_comment_id", "attachments",
@@ -81,6 +81,7 @@ class Task:
     updated_at: float
     started_at: float | None
     done_at: float | None
+    archived_at: float | None  # set: hidden from the board, only reachable via SQL
 
     @property
     def editable(self) -> bool:
@@ -160,9 +161,12 @@ class TaskStore:
                     "created_at REAL NOT NULL, "
                     "updated_at REAL NOT NULL, "
                     "started_at REAL, "
-                    "done_at REAL)"
+                    "done_at REAL, "
+                    "archived_at REAL)"
                 )
                 columns = {row[1] for row in con.execute("PRAGMA table_info(tasks)")}
+                if "archived_at" not in columns:
+                    con.execute("ALTER TABLE tasks ADD COLUMN archived_at REAL")
                 if "pr_state" not in columns:
                     con.execute("ALTER TABLE tasks ADD COLUMN pr_state TEXT")
                     # The PR watcher's Done moves say how a PR ended.
@@ -228,6 +232,7 @@ class TaskStore:
         return self.get(task_id)
 
     def get(self, task_id: int) -> Task | None:
+        """The task by id, archived or not."""
         with self._lock:
             con = self._connect()
             try:
@@ -239,14 +244,14 @@ class TaskStore:
                 con.close()
         return _task(row) if row else None
 
-    def list_tasks(self, include_archived: bool = False) -> list[Task]:
-        """Every task in queue order. Done tasks past the archive cutoff are
-        left out unless `include_archived`."""
-        sql = f"SELECT {', '.join(_TASK_COLUMNS)} FROM tasks"
+    def list_tasks(self, include_old: bool = False) -> list[Task]:
+        """Every unarchived task in queue order. Done tasks past the cutoff
+        are left out unless `include_old`."""
+        sql = f"SELECT {', '.join(_TASK_COLUMNS)} FROM tasks WHERE archived_at IS NULL"
         params: tuple = ()
-        if not include_archived:
-            sql += " WHERE NOT (status = ? AND done_at < ?)"
-            params = (DONE, time.time() - ARCHIVE_AFTER_SECONDS)
+        if not include_old:
+            sql += " AND NOT (status = ? AND done_at < ?)"
+            params = (DONE, time.time() - HIDE_DONE_AFTER_SECONDS)
         sql += " ORDER BY sort_order, id"
         with self._lock:
             con = self._connect()
@@ -257,13 +262,13 @@ class TaskStore:
         return [_task(r) for r in rows]
 
     def list_status(self, status: str) -> list[Task]:
-        """Tasks in one status, in queue order."""
+        """Unarchived tasks in one status, in queue order."""
         with self._lock:
             con = self._connect()
             try:
                 rows = con.execute(
                     f"SELECT {', '.join(_TASK_COLUMNS)} FROM tasks WHERE status = ? "
-                    "ORDER BY sort_order, id",
+                    "AND archived_at IS NULL ORDER BY sort_order, id",
                     (status,),
                 ).fetchall()
             finally:
@@ -276,7 +281,7 @@ class TaskStore:
             try:
                 rows = con.execute(
                     f"SELECT {', '.join(_TASK_COLUMNS)} FROM tasks "
-                    "WHERE parent_task_id = ? ORDER BY id",
+                    "WHERE parent_task_id = ? AND archived_at IS NULL ORDER BY id",
                     (task_id,),
                 ).fetchall()
             finally:
@@ -336,8 +341,8 @@ class TaskStore:
     def claim(self, task_id: int) -> bool:
         """Move a To Do task to In Progress, atomically.
 
-        Returns False if the task is no longer To Do (cancelled or claimed in
-        the meantime), so pickup can't race a cancel.
+        Returns False if the task is no longer To Do (cancelled, claimed or
+        archived in the meantime), so pickup can't race a cancel.
         """
         now = time.time()
         with self._lock:
@@ -345,7 +350,7 @@ class TaskStore:
             try:
                 cur = con.execute(
                     "UPDATE tasks SET status = ?, started_at = COALESCE(started_at, ?), "
-                    "updated_at = ? WHERE id = ? AND status = ?",
+                    "updated_at = ? WHERE id = ? AND status = ? AND archived_at IS NULL",
                     (IN_PROGRESS, now, now, task_id, TODO),
                 )
                 con.commit()
@@ -380,6 +385,27 @@ class TaskStore:
                 cur = con.execute(
                     sql + " WHERE id = ? AND status = ?",
                     (status, now, now if status == DONE else None, task_id, expected),
+                )
+                con.commit()
+                return cur.rowcount == 1
+            finally:
+                con.close()
+
+    def archive(self, task_id: int, *, expected: str) -> bool:
+        """Hide a task from the board for good, if it's still in `expected`.
+
+        Compare-and-set like `set_status`, so a task requeued (and maybe
+        picked up) while its worktree was being cleaned up isn't archived.
+        There's no unarchive: an archived task is only reachable by SQL.
+        """
+        now = time.time()
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    "UPDATE tasks SET archived_at = ?, updated_at = ? "
+                    "WHERE id = ? AND status = ? AND archived_at IS NULL",
+                    (now, now, task_id, expected),
                 )
                 con.commit()
                 return cur.rowcount == 1

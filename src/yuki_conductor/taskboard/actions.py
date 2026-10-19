@@ -36,8 +36,9 @@ class BoardError(Exception):
 
 
 def get(task_id: int) -> Task:
+    """The task, unless it's unknown or archived (both 404)."""
     task = taskboard.store.get(task_id)
-    if task is None:
+    if task is None or task.archived_at is not None:
         raise BoardError(404, f"Task #{task_id} not found")
     return task
 
@@ -202,6 +203,33 @@ def retry_cleanup(task_id: int) -> Task:
     if not cleanup.run(task_id):
         raise BoardError(500, get(task_id).cleanup_error or "Cleanup failed")
     return get(task_id)
+
+
+def archive(task_id: int) -> None:
+    """Remove the task's worktree and branches, then hide it from the board.
+
+    A running task must be cancelled first; a queued one is cancelled here.
+    If the cleanup fails the task isn't archived, and the error is shown on
+    it like a Done task's.
+    """
+    from yuki_conductor.taskboard import cleanup
+
+    task = get(task_id)
+    if task.status == TODO:
+        try:
+            task = transition(task_id, NEEDS_INPUT, reason="cancelled to archive")
+        except InvalidTransition:
+            task = get(task_id)  # picked up meanwhile
+    if task.status == IN_PROGRESS:
+        raise BoardError(409, "Cancel the running task before archiving it")
+    if not cleanup.run(task_id):
+        raise BoardError(
+            500, f"Cleanup failed, so the task wasn't archived: {get(task_id).cleanup_error}"
+        )
+    if not taskboard.store.archive(task_id, expected=task.status):
+        raise BoardError(409, "The task changed while it was being archived; try again")
+    taskboard.store.add_comment(task_id, "system", "Archived")
+    _changed(task_id)
 
 
 def reorder(ids: list[int]) -> None:

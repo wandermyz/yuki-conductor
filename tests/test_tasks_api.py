@@ -274,6 +274,70 @@ def test_steps_replay(client, monkeypatch):
     assert client.get("/api/tasks/999/steps").status_code == 404
 
 
+def test_archive(client, monkeypatch):
+    from yuki_conductor.taskboard import cleanup
+
+    ran = []
+    monkeypatch.setattr(cleanup, "run", lambda tid: ran.append(tid) or True)
+    parent = _create(client, title="parent")
+    task = _create(client, parent_task_id=parent["id"])
+    claim(task["id"])
+    r = client.post(f"/api/tasks/{task['id']}/archive")
+    assert r.status_code == 409 and "Cancel" in r.json()["detail"]
+    assert ran == []
+    transition(task["id"], READY_FOR_REVIEW, reason="x")
+
+    assert client.post(f"/api/tasks/{task['id']}/archive").status_code == 200
+    assert ran == [task["id"]]
+    assert taskboard.store.get(task["id"]).archived_at is not None  # still in the DB
+    assert [t["title"] for t in client.get("/api/tasks?old=true").json()] == ["parent"]
+    assert client.get(f"/api/tasks/{task['id']}").status_code == 404
+    assert client.get(f"/api/tasks/{parent['id']}").json()["children"] == []
+    assert client.post(f"/api/tasks/{task['id']}/comments", json={"body": "x"}).status_code == 404
+    assert client.post(f"/api/tasks/{task['id']}/archive").status_code == 404
+
+
+def test_archive_cancels_a_queued_task(client, monkeypatch):
+    from yuki_conductor.taskboard import cleanup
+
+    monkeypatch.setattr(cleanup, "run", lambda tid: True)
+    task = _create(client)
+    assert client.post(f"/api/tasks/{task['id']}/archive").status_code == 200
+    stored = taskboard.store.get(task["id"])
+    assert stored.status == NEEDS_INPUT and stored.archived_at is not None
+
+
+def test_archive_fails_when_cleanup_fails(client, monkeypatch):
+    from yuki_conductor.taskboard import cleanup
+
+    def failed(tid):
+        taskboard.store.update_fields(tid, cleanup_error="git broke")
+        return False
+
+    monkeypatch.setattr(cleanup, "run", failed)
+    task = _create(client)
+    transition(task["id"], NEEDS_INPUT, reason="x")
+    r = client.post(f"/api/tasks/{task['id']}/archive")
+    assert r.status_code == 500 and "git broke" in r.json()["detail"]
+    assert taskboard.store.get(task["id"]).archived_at is None
+    assert client.get(f"/api/tasks/{task['id']}").json()["cleanup_error"] == "git broke"
+
+
+def test_archive_loses_to_a_requeue_during_cleanup(client, monkeypatch):
+    from yuki_conductor.taskboard import cleanup
+
+    task = _create(client)
+    transition(task["id"], NEEDS_INPUT, reason="x")
+
+    def requeued(tid):
+        transition(tid, TODO, reason="new comment")
+        return True
+
+    monkeypatch.setattr(cleanup, "run", requeued)
+    assert client.post(f"/api/tasks/{task['id']}/archive").status_code == 409
+    assert taskboard.store.get(task["id"]).archived_at is None
+
+
 def test_retry_cleanup(client, monkeypatch):
     from yuki_conductor.taskboard import cleanup
 

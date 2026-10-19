@@ -127,7 +127,7 @@ export default function TasksView({
   const sidebar = useSidebarWidth("tasks-sidebar-width", 400);
   const [board, setBoard] = useState<BoardState | null>(null);
   const [filter, setFilter] = useState<Filter>("active");
-  const [showArchived, setShowArchived] = useState(false);
+  const [showOld, setShowOld] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   // Live steps of a task's turn, tagged with the task they belong to so a
   // switch of selection never shows another task's stream.
@@ -159,12 +159,12 @@ export default function TasksView({
   }, [selectedId]);
 
   const refreshList = useCallback(() => {
-    listTasks(showArchived)
+    listTasks(showOld)
       .then(setTasks)
       .catch(console.error)
       .finally(() => setLoading(false));
     getBoardState().then(setBoard).catch(console.error);
-  }, [showArchived]);
+  }, [showOld]);
 
   const refreshDetail = useCallback(() => {
     const id = selectedRef.current;
@@ -366,13 +366,9 @@ export default function TasksView({
         </DndContext>
 
         {filter === "done" || filter === "active" ? (
-          <label className="task-archived-toggle">
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={(e) => setShowArchived(e.target.checked)}
-            />
-            Show archived (done over 30 days ago)
+          <label className="task-old-toggle">
+            <input type="checkbox" checked={showOld} onChange={(e) => setShowOld(e.target.checked)} />
+            Show done over 30 days ago
           </label>
         ) : null}
       </aside>
@@ -389,6 +385,10 @@ export default function TasksView({
             onBack={() => onSelectId(null)}
             onEdit={() => setForm("edit")}
             onOpenTask={onSelectId}
+            onArchived={() => {
+              onSelectId(null);
+              refreshList();
+            }}
             onChanged={() => {
               refreshDetail();
               refreshList();

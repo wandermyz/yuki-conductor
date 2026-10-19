@@ -105,8 +105,8 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
   return r.json();
 }
 
-export const listTasks = (archived = false) =>
-  call<Task[]>("GET", `/api/tasks${archived ? "?archived=true" : ""}`);
+/** `old`: include tasks done over 30 days ago. Archived tasks never come back. */
+export const listTasks = (old = false) => call<Task[]>("GET", `/api/tasks${old ? "?old=true" : ""}`);
 
 export const getTask = (id: number) => call<TaskDetail>("GET", `/api/tasks/${id}`);
 
@@ -131,6 +131,7 @@ export const commentOnTask = (
 export const cancelTask = (id: number) => call<Task>("POST", `/api/tasks/${id}/cancel`);
 export const markTaskDone = (id: number) => call<Task>("POST", `/api/tasks/${id}/done`);
 export const retryCleanup = (id: number) => call<Task>("POST", `/api/tasks/${id}/cleanup`);
+export const archiveTask = (id: number) => call<{ ok: boolean }>("POST", `/api/tasks/${id}/archive`);
 export const moveTaskToTop = (id: number) => call<Task>("POST", `/api/tasks/${id}/top`);
 export const reorderTasks = (ids: number[]) => call<{ ok: boolean }>("PUT", "/api/tasks/order", { ids });
 

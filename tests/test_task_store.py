@@ -1,4 +1,4 @@
-"""TaskStore: tasks, queue ordering, comments, archive cutoff."""
+"""TaskStore: tasks, queue ordering, comments, the old-Done cutoff, archiving."""
 
 import sqlite3
 import threading
@@ -7,8 +7,8 @@ import time
 import pytest
 
 from yuki_conductor.task_store import (
-    ARCHIVE_AFTER_SECONDS,
     DONE,
+    HIDE_DONE_AFTER_SECONDS,
     IN_PROGRESS,
     TODO,
     TaskboardStateStore,
@@ -152,17 +152,31 @@ def test_reorder_rejects_non_todo(store):
         store.reorder([a.id, a.id])
 
 
-def test_list_hides_archived_done(store, monkeypatch):
+def test_list_hides_old_done(store, monkeypatch):
     old, recent = _new(store, "old"), _new(store, "recent")
     _new(store, "open")
     store.set_status(old.id, DONE, expected=TODO)
     import yuki_conductor.task_store as ts
 
     real_time = time.time()
-    monkeypatch.setattr(ts.time, "time", lambda: real_time + ARCHIVE_AFTER_SECONDS + 10)
+    monkeypatch.setattr(ts.time, "time", lambda: real_time + HIDE_DONE_AFTER_SECONDS + 10)
     store.set_status(recent.id, DONE, expected=TODO)  # done "now", i.e. 30 days after `old`
     assert [t.title for t in store.list_tasks()] == ["recent", "open"]
-    assert [t.title for t in store.list_tasks(include_archived=True)] == ["old", "recent", "open"]
+    assert [t.title for t in store.list_tasks(include_old=True)] == ["old", "recent", "open"]
+
+
+def test_archive_hides_everywhere_but_keeps_the_row(store):
+    parent = _new(store, "parent")
+    gone = _new(store, "gone", parent_task_id=parent.id)
+    _new(store, "kept")
+    assert not store.archive(gone.id, expected=DONE)  # not in that status
+    assert store.archive(gone.id, expected=TODO)
+    assert not store.archive(gone.id, expected=TODO)  # already archived
+    assert store.get(gone.id).archived_at is not None
+    assert [t.title for t in store.list_tasks(include_old=True)] == ["parent", "kept"]
+    assert _todo_titles(store) == ["parent", "kept"]
+    assert store.children(parent.id) == []
+    assert not store.claim(gone.id)  # never picked up
 
 
 def test_children(store):

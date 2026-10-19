@@ -24,7 +24,7 @@ def register(sub) -> argparse.ArgumentParser:
     lst = tsub.add_parser("list", help="List tasks")
     lst.add_argument("--status", help="todo, in_progress, needs_input, ready_for_review or done")
     lst.add_argument("--project")
-    lst.add_argument("--archived", action="store_true", help="Include archived Done tasks")
+    lst.add_argument("--old", action="store_true", help="Include tasks done over 30 days ago")
 
     comment = tsub.add_parser("comment", help="Comment on a task")
     _id_and_text(comment)
@@ -134,7 +134,7 @@ def handle(args) -> None:
         task = api_request("GET", f"/api/tasks/{_resolve_id(args.id)}", what="Show")
         print(format_task(task))
     elif cmd == "list":
-        query = "?archived=true" if args.archived else ""
+        query = "?old=true" if args.old else ""
         tasks = api_request("GET", f"/api/tasks{query}", what="List")
         for t in tasks:
             if args.status and t["status"] != args.status:

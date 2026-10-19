@@ -1,6 +1,7 @@
 """Worktree creation against a real temp repo with a bare origin."""
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -222,3 +223,22 @@ def test_marking_done_keeps_an_open_prs_branch(repo, monkeypatch):
     assert cleanup.run(task.id)
     assert git(repo, "ls-remote", "--heads", "origin", task.branch) != ""
     assert "still open" in taskboard.store.comments(task.id)[-1].body
+
+
+def test_archive_removes_the_worktree_first(repo, monkeypatch):
+    from yuki_conductor.task_store import NEEDS_INPUT
+    from yuki_conductor.taskboard import actions, cleanup
+    from yuki_conductor.taskboard.transitions import transition
+
+    class Projects:
+        def get_path(self, name):
+            return str(repo)
+
+    monkeypatch.setattr(cleanup, "ProjectStore", Projects)
+    task = _pushed_task(repo)
+    transition(task.id, NEEDS_INPUT, reason="x")
+    actions.archive(task.id)
+    stored = taskboard.store.get(task.id)
+    assert stored.archived_at is not None and stored.worktree_path is None
+    assert not Path(task.worktree_path).exists()
+    assert git(repo, "ls-remote", "--heads", "origin", task.branch) == ""
