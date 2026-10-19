@@ -11,7 +11,7 @@ import {
   retryCleanup,
 } from "./api";
 import type { TaskAttachment, TaskComment, TaskDetail as Detail } from "./api";
-import { StatusBadge } from "./common";
+import { PrMarker, StatusBadge } from "./common";
 import { formatWhen } from "./format";
 
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg)$/i;
@@ -250,11 +250,7 @@ export default function TaskDetail({
           </span>
           {task.branch && <code>{task.branch}</code>}
           {!task.branch && task.use_worktree && <span>worktree</span>}
-          {task.pr_url && (
-            <a href={task.pr_url} target="_blank" rel="noreferrer">
-              PR #{task.pr_url.split("/").pop()}
-            </a>
-          )}
+          {task.pr_url && <PrMarker url={task.pr_url} state={task.pr_state} badge />}
         </div>
         {task.parent && (
           <div className="task-links">

@@ -104,7 +104,8 @@ def format_task(task: dict) -> str:
         + (" · worktree" if task["use_worktree"] else ""),
     ]
     if task.get("pr_url"):
-        lines.append(f"- PR: {task['pr_url']}")
+        state = f" ({task['pr_state'].lower()})" if task.get("pr_state") else ""
+        lines.append(f"- PR: {task['pr_url']}{state}")
     if task.get("parent"):
         lines.append(f"- Parent: #{task['parent']['id']} {task['parent']['title']}")
     for child in task.get("children") or []:

@@ -139,6 +139,15 @@ def test_merged_or_closed_is_done(gh, pr, reason):
     pr_watcher.check_all()
     assert _status(task) == DONE
     assert taskboard.store.comments(task.id)[-1].body.endswith(reason)
+    assert taskboard.store.get(task.id).pr_state == ("MERGED" if pr["merged"] else "CLOSED")
+
+
+def test_poll_records_the_pr_state(gh):
+    task = _in_review()
+    gh.pr = {"state": "open", "merged": False, "draft": True}
+    pr_watcher.check_all()
+    assert taskboard.store.get(task.id).pr_state == "DRAFT"
+    assert _status(task) == READY_FOR_REVIEW
 
 
 def test_gh_failure_leaves_the_task_alone(gh):
@@ -162,5 +171,9 @@ def test_only_review_tasks_with_a_pr_are_polled(gh):
 
 def test_pr_state(gh):
     assert pr_watcher.pr_state(PR, None) == "OPEN"
+    gh.pr = {"state": "open", "merged": False, "draft": True}
+    assert pr_watcher.pr_state(PR, None) == "DRAFT"
+    gh.pr = {"state": "closed", "merged": False}
+    assert pr_watcher.pr_state(PR, None) == "CLOSED"
     gh.pr = {"state": "closed", "merged": True}
     assert pr_watcher.pr_state(PR, None) == "MERGED"

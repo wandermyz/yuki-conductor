@@ -32,7 +32,7 @@ import {
   stepsKey,
 } from "./api";
 import type { BoardState, Task, TaskDetail as Detail, TaskStatus } from "./api";
-import { StatusBadge } from "./common";
+import { PrMarker, StatusBadge } from "./common";
 import { formatWhen } from "./format";
 import TaskDetail from "./TaskDetail";
 import { loadDraft } from "./draft";
@@ -103,7 +103,7 @@ function TaskRow({
           <StatusBadge status={task.status} />
           <HarnessIcon name={task.harness} />
           <span>{task.project}</span>
-          {task.pr_url && <span title={task.pr_url}>PR</span>}
+          {task.pr_url && <PrMarker url={task.pr_url} state={task.pr_state} />}
           {task.comment_count ? <span>💬 {task.comment_count}</span> : null}
           <span className="task-row-time">{formatWhen(task.updated_at)}</span>
         </span>

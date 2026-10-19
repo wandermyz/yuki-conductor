@@ -1,5 +1,6 @@
 """TaskStore: tasks, queue ordering, comments, archive cutoff."""
 
+import sqlite3
 import threading
 import time
 
@@ -220,3 +221,22 @@ def test_pause_state(tmp_path):
     assert TaskboardStateStore(db_path=tmp_path / "t.db").paused()
     state.set_paused(False)
     assert not state.paused()
+
+
+def test_pr_state_column_is_added_and_backfilled(tmp_path):
+    db = tmp_path / "t.db"
+    store = TaskStore(db_path=db)
+    merged, closed, open_ = (_new(store, title=t) for t in ("m", "c", "o"))
+    for task in (merged, closed, open_):
+        store.update_fields(task.id, pr_url=f"https://github.com/o/r/pull/{task.id}")
+    store.add_comment(merged.id, "system", "Ready for Review → Done: PR merged")
+    store.add_comment(closed.id, "system", "Ready for Review → Done: PR closed without merging")
+    con = sqlite3.connect(db)
+    con.execute("ALTER TABLE tasks DROP COLUMN pr_state")
+    con.commit()
+    con.close()
+
+    store = TaskStore(db_path=db)
+    assert [store.get(t.id).pr_state for t in (merged, closed, open_)] == [
+        "MERGED", "CLOSED", None,
+    ]

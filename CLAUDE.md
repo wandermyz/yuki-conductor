@@ -320,7 +320,10 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
   comments → imported as `github` comments (once each, by URL) and the task
   goes to To Do. Comments carrying `skills.GITHUB_AGENT_MARKER` — the footer
   agents must append to everything they post — are ignored, since the agent
-  may post as the user's own account.
+  may post as the user's own account. Each poll also records the PR's
+  `pr_state` (OPEN / DRAFT / MERGED / CLOSED; a newly registered PR starts
+  OPEN, and Done cleanup refreshes it), which the Tasks tab draws as
+  GitHub's octicon in the list and as a state badge in the detail header.
 - **Done** cleanup (`cleanup.py`, background): removes the worktree, the
   local `task/` branch and the remote branch. It keeps a local branch whose
   commits no remote has, and the remote branch of a PR that's still open

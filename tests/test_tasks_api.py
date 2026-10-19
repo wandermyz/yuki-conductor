@@ -192,6 +192,7 @@ def test_ask_and_pr(client):
     assert taskboard.store.comments(task["id"])[-1].author == "agent"
     r = client.post(f"/api/tasks/{task['id']}/pr", json={"url": "https://github.com/o/r/pull/9/"})
     assert r.json()["pr_url"] == "https://github.com/o/r/pull/9"
+    assert r.json()["pr_state"] == "OPEN"
     assert client.post(f"/api/tasks/{task['id']}/pr", json={"url": "https://example.com"}).status_code == 400
 
 
