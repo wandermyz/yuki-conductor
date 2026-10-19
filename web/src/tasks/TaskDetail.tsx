@@ -289,7 +289,11 @@ export default function TaskDetail({
       </header>
 
       <div className="task-timeline" ref={timelineRef} onScroll={onTimelineScroll}>
-        <article className="task-body" data-quote-id="body">
+        <article className="task-comment task-body" data-quote-id="body">
+          <div className="task-comment-head">
+            <span className="task-comment-author">Description</span>
+            <span className="task-comment-time">{formatWhen(task.created_at)}</span>
+          </div>
           {task.body.trim() ? (
             <Markdown text={task.body} />
           ) : (

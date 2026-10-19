@@ -404,18 +404,12 @@
   gap: 12px;
 }
 
-.task-body,
 .task-comment {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px 16px;
   overflow-wrap: anywhere;
   transition: box-shadow 0.3s;
-}
-
-.task-body {
-  background: var(--accent-bg);
-  border-color: transparent;
 }
 
 .task-comment.author-user {
