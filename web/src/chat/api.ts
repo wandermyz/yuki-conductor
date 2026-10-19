@@ -516,8 +516,13 @@ export interface UpdateStatus {
   commits: UpdateCommit[];
 }
 
+/** What GET /api/update adds: agent runs in flight, by kind ("chat", "task", "automation"). */
+export interface UpdateCheck extends UpdateStatus {
+  running: Record<string, number>;
+}
+
 /** Fetch origin and report what upstream has that this checkout lacks. */
-export async function checkForUpdate(): Promise<UpdateStatus> {
+export async function checkForUpdate(): Promise<UpdateCheck> {
   const r = await fetch("/api/update", { cache: "no-store" });
   if (!r.ok) return pluginError(r);
   return r.json();

@@ -149,6 +149,16 @@ def test_api_check(client, upstream):
     body = client.get("/api/update").json()
     assert body["behind"] == 1
     assert body["commits"][0]["subject"] == "Add a"
+    assert body["running"] == {}
+
+
+def test_api_check_reports_runs_in_flight(client):
+    with patch(
+        "yuki_conductor.harness.process.running_runs",
+        return_value={"chat": 1, "task": 2},
+    ):
+        body = client.get("/api/update").json()
+    assert body["running"] == {"chat": 1, "task": 2}
 
 
 def test_api_apply_up_to_date_does_not_restart(client):

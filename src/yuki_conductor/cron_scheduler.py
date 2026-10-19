@@ -133,7 +133,10 @@ def _execute(
 
     prefixed_prompt = _CRON_PROMPT_PREFIX + task.prompt
     result = run_agent(
-        get_harness(harness), prefixed_prompt, push_conversation_id=reserved
+        get_harness(harness),
+        prefixed_prompt,
+        push_conversation_id=reserved,
+        kind="automation",
     )
 
     response_text = result.text or ""

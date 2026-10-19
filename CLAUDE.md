@@ -148,10 +148,13 @@ frontend if `web/` changed, and restarts via `spawn_detached_restart()` — or
 returns `restarting: false` when already current. Tracked local changes, a
 detached HEAD, no upstream, a conflicting rebase (always aborted) or a failed
 frontend build are a 409 with a readable `detail`. `updater.py` serializes git
-behind one lock, since every open browser tab polls.
+behind one lock, since every open browser tab polls. The GET also reports `running`,
+the in-flight agent runs by kind (`chat`, `task`, `automation`), counted by
+`run_agent`'s `kind=` argument in `harness/process.py` — an update restarts
+the daemon and would kill them.
 
-The frontend (`UpdatePrompt.tsx`, mounted in `App`) polls every 5 minutes and
-pops a modal listing the new commits with **Update & restart**, **Cancel**
+The frontend (`UpdatePrompt.tsx`, mounted in `App`) polls every 5 minutes and,
+unless an agent run is in flight, pops a modal listing the new commits with **Update & restart**, **Cancel**
 (back at the next poll) and **Snooze 1 hour** (`localStorage`). The Plugins tab has an **Update** button beside
 Restart daemon. Either reloads the page once the daemon is back.
 

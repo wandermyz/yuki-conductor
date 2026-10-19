@@ -880,11 +880,16 @@ def create_api() -> FastAPI:
 
     @api.get("/api/update")
     def check_update():
-        """Fetch origin and list the upstream commits this checkout lacks."""
+        """Fetch origin and list the upstream commits this checkout lacks.
+
+        `running` counts the agent runs in flight by kind, since updating
+        restarts the daemon and kills them; the popup waits until it's empty.
+        """
         from yuki_conductor import updater
+        from yuki_conductor.harness.process import running_runs
 
         try:
-            return updater.check().to_dict()
+            return {**updater.check().to_dict(), "running": running_runs()}
         except updater.UpdateError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
 

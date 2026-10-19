@@ -10,7 +10,10 @@ function snoozed(): boolean {
   return Number(window.localStorage.getItem(SNOOZE_KEY) ?? 0) > Date.now();
 }
 
-/** Polls /api/update and asks whether to update when upstream has moved. */
+/**
+ * Polls /api/update and asks whether to update when upstream has moved and
+ * no agent run is in flight.
+ */
 export default function UpdatePrompt() {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -19,7 +22,11 @@ export default function UpdatePrompt() {
   const poll = useCallback(() => {
     if (snoozed()) return;
     checkForUpdate()
-      .then((s) => setStatus(s.behind > 0 ? s : null))
+      // Updating restarts the daemon, killing any chat, task or automation
+      // run in flight, so wait for an idle poll before asking.
+      .then((s) =>
+        setStatus(s.behind > 0 && Object.keys(s.running).length === 0 ? s : null),
+      )
       // A checkout that can't update (no upstream, offline) isn't worth a
       // popup every five minutes; the Plugins tab's Update button reports it.
       .catch((e: Error) => console.warn("Update check failed:", e.message));
