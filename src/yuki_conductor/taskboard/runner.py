@@ -127,6 +127,9 @@ def _run(task: Task, cwd: str) -> _Turn:
     else:
         prompt, session_id = prompts.first_turn(task, comments, cwd), None
     delivered = [c.id for c in pending]
+    # Shown as seen while the agent works on them; rolled back if the run
+    # fails, so the next turn sends them again.
+    taskboard.store.mark_delivered(delivered)
 
     def run(prompt: str, session_id: str | None) -> RunResult | None:
         # The cancel registry only knows a process once it's started; check
@@ -223,10 +226,9 @@ def _run_turn(task_id: int) -> None:
     cancelled = result is None or result.cancelled
     if result is None:
         result = RunResult(text="", session_id=None)
-    # A failed run may never have reached the agent; keep its comments
-    # pending so the next turn sends them again.
-    if not result.is_error:
-        taskboard.store.mark_delivered(turn.delivered)
+    # A failed run may never have reached the agent.
+    if result.is_error or turn.result is None:
+        taskboard.store.mark_delivered(turn.delivered, delivered=False)
     text, attachments = split_response(result.text)
     if result.session_id:
         taskboard.store.update_fields(task_id, session_id=result.session_id)

@@ -355,6 +355,9 @@ def test_live_steps_and_processing_are_reported(env):
         def set_processing(self, key, msg_id, on):
             self.events.append(("processing", key, on))
 
+        def broadcast(self, key, payload):
+            self.events.append(("ws", key, payload["type"], payload.get("on")))
+
         def add_step(self, key, step):
             self.events.append(("step", key, step["label"]))
 
@@ -373,6 +376,8 @@ def test_live_steps_and_processing_are_reported(env):
     assert ("processing", key, True) in manager.events
     assert ("step", key, "working") in manager.events
     assert ("processing", key, False) in manager.events
+    assert ("ws", key, "processing", True) in manager.events
+    assert ("ws", key, "processing", False) in manager.events
     assert ("broadcast", task.id) in manager.events
 
 

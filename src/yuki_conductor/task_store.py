@@ -511,7 +511,7 @@ class TaskStore:
                 con.close()
         return [_comment(r) for r in rows]
 
-    def mark_delivered(self, comment_ids: list[int]) -> None:
+    def mark_delivered(self, comment_ids: list[int], delivered: bool = True) -> None:
         if not comment_ids:
             return
         placeholders = ", ".join("?" for _ in comment_ids)
@@ -519,8 +519,8 @@ class TaskStore:
             con = self._connect()
             try:
                 con.execute(
-                    f"UPDATE task_comments SET delivered = 1 WHERE id IN ({placeholders})",
-                    comment_ids,
+                    f"UPDATE task_comments SET delivered = ? WHERE id IN ({placeholders})",
+                    (int(delivered), *comment_ids),
                 )
                 con.commit()
             finally:

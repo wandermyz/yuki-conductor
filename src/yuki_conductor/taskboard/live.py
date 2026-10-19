@@ -27,13 +27,21 @@ def task_changed(task_id: int) -> None:
 
 
 def turn_started(task_id: int) -> None:
-    if _manager is not None:
-        _manager.set_processing(steps_key(task_id), "", True)
+    _set_processing(task_id, True)
 
 
 def turn_ended(task_id: int) -> None:
-    if _manager is not None:
-        _manager.set_processing(steps_key(task_id), "", False)
+    _set_processing(task_id, False)
+
+
+def _set_processing(task_id: int, on: bool) -> None:
+    """Reset (on) or close the step buffer, and tell browsers: a new turn's
+    steps restart their sequence numbers, so the UI must clear the old ones."""
+    if _manager is None:
+        return
+    key = steps_key(task_id)
+    _manager.set_processing(key, "", on)
+    _manager.broadcast(key, {"type": "processing", "on": on, "message_id": ""})
 
 
 def step(task_id: int, event: StreamEvent) -> None:
