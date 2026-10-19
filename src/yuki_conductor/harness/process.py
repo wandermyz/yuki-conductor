@@ -218,6 +218,7 @@ def run_agent(
                 text="(stopped by user)",
                 session_id=session_id,
                 is_error=False,
+                cancelled=True,
             )
         error_text = (
             stderr.strip() or raw_stdout.strip()

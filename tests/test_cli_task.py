@@ -74,6 +74,22 @@ def test_comment_as_agent_defaults_to_own_task(api, monkeypatch):
     assert (comment.author, comment.body) == ("agent", "progress")
 
 
+def test_agent_commenting_on_another_task_is_input_for_it(api, monkeypatch):
+    mine, other = _task(), _task()
+    monkeypatch.setenv("YUKI_TASK_ID", str(mine.id))
+    main(["task", "comment", str(other.id), "heads up"])
+    comment = taskboard.store.comments(other.id)[-1]
+    assert comment.author == "user" and not comment.delivered
+
+
+def test_ask_only_on_own_task(api, monkeypatch, capsys):
+    mine, other = _task(), _task()
+    monkeypatch.setenv("YUKI_TASK_ID", str(mine.id))
+    with pytest.raises(SystemExit):
+        main(["task", "ask", str(other.id), "?"])
+    assert "own running task" in capsys.readouterr().err
+
+
 def test_comment_as_user_with_id_quote_and_attachment(api, tmp_path):
     task = _task()
     first = taskboard.store.add_comment(task.id, "agent", "q")

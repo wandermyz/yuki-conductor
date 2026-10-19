@@ -217,7 +217,10 @@ def _run_turn(task_id: int) -> None:
     turn = _run(task, cwd)
     result = turn.result
 
-    cancelled = _take_cancel(task_id) or result is None
+    # Only a turn that was actually stopped counts: a cancel that arrived
+    # after the agent finished on its own is too late to matter.
+    _take_cancel(task_id)
+    cancelled = result is None or result.cancelled
     if result is None:
         result = RunResult(text="", session_id=None)
     # A failed run may never have reached the agent; keep its comments

@@ -147,9 +147,12 @@ def handle(args) -> None:
         text = _text(text)
         if not text.strip() and not attachments:
             _die("Refusing to post an empty comment")
+        # On its own task an agent comments as the agent; on any other task
+        # its comment is input that task's agent should get, like a user's.
+        own = _env_task_id() is not None and task_id == _env_task_id()
         payload = {
             "body": text,
-            "author": "agent" if _env_task_id() is not None else "user",
+            "author": "agent" if own else "user",
             "quote_comment_id": args.quote,
             "attachments": attachments,
         }
@@ -157,6 +160,8 @@ def handle(args) -> None:
         print(f"Posted comment #{c['id']} on task #{task_id}")
     elif cmd == "ask":
         task_id, text = _split_id(args.args)
+        if task_id != _env_task_id():
+            _die("`task ask` only works on your own running task; use `task comment` elsewhere")
         api_request("POST", f"/api/tasks/{task_id}/ask", {"question": _text(text)}, what="Ask")
         print(f"Asked on task #{task_id}. End your turn now; the user's reply starts the next one.")
     elif cmd == "pr":

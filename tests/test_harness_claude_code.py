@@ -405,3 +405,15 @@ def test_session_exists(tmp_path, monkeypatch):
     assert CLAUDE.session_exists("sess-1", str(cwd))
     assert not CLAUDE.session_exists("sess-2", str(cwd))
     assert not CLAUDE.session_exists("sess-1", str(tmp_path))
+
+
+def test_cancelled_run_is_flagged():
+    from yuki_conductor.harness import process
+
+    mock_proc = _mock_popen(returncode=-15)
+    with (
+        patch("subprocess.Popen", return_value=mock_proc),
+        patch.object(process, "was_cancelled", return_value=True),
+    ):
+        result = run_agent(CLAUDE, "go", conversation_key="task:1")
+    assert result.cancelled and not result.is_error

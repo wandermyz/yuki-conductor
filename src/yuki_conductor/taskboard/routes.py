@@ -186,6 +186,9 @@ def get_task(task_id: int):
 @router.patch("/api/tasks/{task_id}")
 def edit_task(task_id: int, body: TaskEdit):
     fields = {k: getattr(body, k) for k in body.model_fields_set}
+    nulls = [k for k, v in fields.items() if v is None and k != "attachments"]
+    if nulls:
+        raise HTTPException(status_code=400, detail=f"Can't clear: {', '.join(nulls)}")
     if "attachments" in fields:
         fields["attachments"] = _paths(fields["attachments"] or [], [])
     return serialize_task(_call(actions.edit, task_id, **fields))

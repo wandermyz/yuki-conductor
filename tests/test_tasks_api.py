@@ -144,6 +144,35 @@ def test_comment_validation(client):
     assert client.post("/api/tasks/999/comments", json={"body": "x"}).status_code == 404
 
 
+def test_comment_racing_the_end_of_a_turn_still_requeues(client, monkeypatch):
+    """The turn moves the task to review while the comment is being stored."""
+    task = _create(client)
+    claim(task["id"])
+    real_add = taskboard.store.add_comment
+
+    def add_while_turn_ends(task_id, author, body, **kw):
+        if author == "user":
+            transition(task_id, READY_FOR_REVIEW, reason="turn finished")
+        return real_add(task_id, author, body, **kw)
+
+    monkeypatch.setattr(taskboard.store, "add_comment", add_while_turn_ends)
+    client.post(f"/api/tasks/{task['id']}/comments", json={"body": "wait"})
+    assert _status(task["id"]) == TODO
+
+
+def test_quote_must_be_on_the_same_task(client):
+    a, b = _create(client), _create(client)
+    other = client.post(f"/api/tasks/{b['id']}/comments", json={"body": "x"}).json()
+    r = client.post(f"/api/tasks/{a['id']}/comments", json={"body": "y", "quote_comment_id": other["id"]})
+    assert r.status_code == 400
+
+
+def test_edit_rejects_nulls(client):
+    task = _create(client)
+    for field in ("title", "use_worktree", "body"):
+        assert client.patch(f"/api/tasks/{task['id']}", json={field: None}).status_code == 400
+
+
 def test_quote_reply(client):
     task = _create(client)
     first = client.post(f"/api/tasks/{task['id']}/comments", json={"body": "q"}).json()
@@ -155,6 +184,8 @@ def test_quote_reply(client):
 
 def test_ask_and_pr(client):
     task = _create(client)
+    assert client.post(f"/api/tasks/{task['id']}/ask", json={"question": "Which DB?"}).status_code == 409
+    claim(task["id"])
     assert client.post(f"/api/tasks/{task['id']}/ask", json={"question": "Which DB?"}).status_code == 201
     stored = taskboard.store.get(task["id"])
     assert stored.asked_input

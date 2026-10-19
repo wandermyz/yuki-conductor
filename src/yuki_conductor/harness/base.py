@@ -41,6 +41,8 @@ class RunResult:
     # The resumed session no longer exists (the harness said so). The caller
     # can retry with a fresh session that carries the history in the prompt.
     session_missing: bool = False
+    # Stopped through `cancel_process` rather than finishing on its own.
+    cancelled: bool = False
 
 
 @dataclass

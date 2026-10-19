@@ -297,13 +297,27 @@ def test_cancel_lands_in_needs_input_without_agent_comment(env, monkeypatch):
 
     def cancelled(prompt, kwargs):
         runner.request_cancel(task.id)
-        return RunResult(text="(stopped by user)", session_id="s1")
+        return RunResult(text="(stopped by user)", session_id="s1", cancelled=True)
 
     env.script = [cancelled]
     runner.run_turn(task.id)
     assert _status(task) == NEEDS_INPUT
     assert _agent_comments(task) == []
     assert taskboard.store.comments(task.id)[-1].body.endswith("cancelled")
+
+
+def test_cancel_after_the_agent_finished_is_too_late(env, monkeypatch):
+    task = _claimed()
+    monkeypatch.setattr(runner, "cancel_process", lambda key: False)
+
+    def finishes_then_cancel_arrives(prompt, kwargs):
+        runner.request_cancel(task.id)  # nothing left to kill
+        return RunResult(text="All done.", session_id="s1")
+
+    env.script = [finishes_then_cancel_arrives]
+    runner.run_turn(task.id)
+    assert _status(task) == READY_FOR_REVIEW
+    assert _agent_comments(task) == ["All done."]
 
 
 def test_cancel_before_the_run_starts_skips_it(env, monkeypatch):

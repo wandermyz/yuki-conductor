@@ -123,10 +123,18 @@ def add_comment(
         raise BoardError(400, f"Unknown author {author!r}")
     if not body.strip() and not attachments:
         raise BoardError(400, "Empty comment")
-    task = get(task_id)
+    get(task_id)
+    if quote_comment_id is not None and not any(
+        c.id == quote_comment_id for c in taskboard.store.comments(task_id)
+    ):
+        raise BoardError(400, f"Comment #{quote_comment_id} isn't on task #{task_id}")
     comment = taskboard.store.add_comment(
         task_id, author, body, quote_comment_id=quote_comment_id, attachments=attachments
     )
+    # Read the status only after the insert: a turn ending concurrently
+    # re-checks for comments after its own move, so between the two of us
+    # one always sees the other and the comment is never stranded.
+    task = get(task_id)
     if author == "user" and task.status in (NEEDS_INPUT, READY_FOR_REVIEW):
         try:
             transition(task_id, TODO, reason="new comment")
@@ -141,7 +149,8 @@ def ask(task_id: int, question: str) -> TaskComment:
     task to Needs Input."""
     if not question.strip():
         raise BoardError(400, "Empty question")
-    get(task_id)
+    if get(task_id).status != IN_PROGRESS:
+        raise BoardError(409, "Only a running task can ask; comment instead")
     comment = taskboard.store.add_comment(task_id, "agent", question)
     taskboard.store.update_fields(task_id, asked_input=True)
     _changed(task_id)

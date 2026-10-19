@@ -63,6 +63,9 @@ class Harvester:
                 continue  # shown as "harness not enabled" in the UI
             if counts.get(task.harness, 0) >= config.taskboard_limit(task.harness):
                 continue
+            # Forget a stale cancel before claiming, never after: a cancel
+            # that races the claim must survive to stop the new turn.
+            runner.clear_cancel(task.id)
             if claim(task.id) is None:
                 continue  # cancelled or edited away since the list was read
             counts[task.harness] = counts.get(task.harness, 0) + 1
@@ -71,7 +74,6 @@ class Harvester:
         return started
 
     def _start(self, task_id: int, harness: str) -> None:
-        runner.clear_cancel(task_id)
         thread = threading.Thread(
             target=self._run, args=(task_id,), name=f"task-{task_id}", daemon=True
         )
