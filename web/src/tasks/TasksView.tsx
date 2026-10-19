@@ -20,6 +20,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { fetchProcessing, subscribeChatSocket } from "../chat/api";
 import type { StreamStep } from "../chat/api";
 import { HarnessIcon } from "../chat/shared";
+import SidebarResizer from "../SidebarResizer";
+import { useSidebarWidth } from "../sidebarWidth";
 import {
   fetchTaskSteps,
   getBoardState,
@@ -121,6 +123,7 @@ export default function TasksView({
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const sidebar = useSidebarWidth("tasks-sidebar-width", 400);
   const [board, setBoard] = useState<BoardState | null>(null);
   const [filter, setFilter] = useState<Filter>("active");
   const [showArchived, setShowArchived] = useState(false);
@@ -280,7 +283,10 @@ export default function TasksView({
   };
 
   return (
-    <div className={`app tasks-view ${selectedId !== null ? "detail-open" : ""}`}>
+    <div
+      className={`app tasks-view ${selectedId !== null ? "detail-open" : ""}`}
+      style={sidebar.style}
+    >
       <aside className="sidebar task-sidebar">
         <div className="sidebar-header task-sidebar-header">
           <h2>Tasks</h2>
@@ -353,6 +359,7 @@ export default function TasksView({
           </label>
         ) : null}
       </aside>
+      <SidebarResizer sidebar={sidebar} />
 
       <main className="content task-content">
         {shownDetail ? (

@@ -37,8 +37,8 @@
 }
 
 .tasks-view .task-sidebar {
-  width: 400px;
-  min-width: 400px;
+  width: var(--sidebar-width, 400px);
+  min-width: var(--sidebar-width, 400px);
   display: flex;
   flex-direction: column;
 }

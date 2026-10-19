@@ -10,6 +10,8 @@ import {
 } from "./chat/api";
 import type { Automation, CronRun } from "./chat/api";
 import { copyText } from "./chat/Chat";
+import SidebarResizer from "./SidebarResizer";
+import { useSidebarWidth } from "./sidebarWidth";
 
 /** While a run is in flight, poll so the history fills in without a reload. */
 const RUNNING_POLL_MS = 5000;
@@ -331,6 +333,7 @@ export default function AutomationsView() {
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Automation | null>(null);
   const [loading, setLoading] = useState(true);
+  const sidebar = useSidebarWidth("automations-sidebar-width", 300);
 
   const refreshList = useCallback(() => {
     return listAutomations()
@@ -383,7 +386,7 @@ export default function AutomationsView() {
   };
 
   return (
-    <div className={`app automations-view ${selected ? "detail-open" : ""}`}>
+    <div className={`app automations-view ${selected ? "detail-open" : ""}`} style={sidebar.style}>
       <aside className="sidebar">
         <div className="sidebar-header">
           <h2>Automations</h2>
@@ -416,6 +419,7 @@ export default function AutomationsView() {
           ))}
         </ul>
       </aside>
+      <SidebarResizer sidebar={sidebar} />
       <main className="content">
         {detail ? (
           <AutomationDetail

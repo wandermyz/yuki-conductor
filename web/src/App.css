@@ -67,8 +67,8 @@
 /* ---- Sidebar ---- */
 
 .sidebar {
-  width: 300px;
-  min-width: 300px;
+  width: var(--sidebar-width, 300px);
+  min-width: var(--sidebar-width, 300px);
   border-right: 1px solid var(--border);
   overflow-y: auto;
   padding: 16px 0;
