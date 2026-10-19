@@ -151,7 +151,9 @@ def main(argv: list[str] | None = None) -> None:
         # so a push without -c lands there instead of in a new conversation.
         task_id = env_task_id()
         if args.conversation is None and task_id is not None:
-            payload = {"body": text, "author": "agent", "attachments": attachments}
+            payload = {
+                "body": text, "author": "agent", "attachments": attachments, "notify": True,
+            }
             c = api_request("POST", f"/api/tasks/{task_id}/comments", payload, what="Send")
             print(f"Posted comment #{c['id']} on task #{task_id}")
             return

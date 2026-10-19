@@ -124,6 +124,7 @@ class CommentCreate(BaseModel):
     quote_comment_id: int | None = None
     attachments: list[str] = []
     attachment_ids: list[str] = []
+    notify: bool = False
 
 
 class AskBody(BaseModel):
@@ -212,6 +213,7 @@ def comment_on_task(task_id: int, body: CommentCreate):
         author=body.author,
         quote_comment_id=body.quote_comment_id,
         attachments=_paths(body.attachments, body.attachment_ids),
+        notify_user=body.notify,
     )
     return serialize_comment(comment)
 

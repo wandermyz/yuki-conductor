@@ -119,7 +119,7 @@ def test_send_inside_task_comments_on_it(tmp_path, monkeypatch, capsys):
     req = _captured_request(m)
     assert req.full_url.endswith("/api/tasks/7/comments")
     assert json.loads(req.data) == {
-        "body": "halfway there", "author": "agent", "attachments": [str(pic)],
+        "body": "halfway there", "author": "agent", "attachments": [str(pic)], "notify": True,
     }
     assert "comment #42 on task #7" in capsys.readouterr().out
 

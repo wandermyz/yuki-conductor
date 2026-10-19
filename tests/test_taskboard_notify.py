@@ -86,3 +86,13 @@ def test_slack_failure_is_swallowed(pushes):
     finally:
         notify.set_platforms({})
     assert len(pushes) == 1
+
+
+def test_comment_with_notify_pushes_it(pushes):
+    from yuki_conductor.taskboard import actions
+
+    notify.set_platforms({})
+    task = _running()
+    actions.add_comment(task.id, "Halfway: tests pass", author="agent", notify_user=True)
+    actions.add_comment(task.id, "quiet progress note", author="agent")
+    assert pushes == [({"kind": "task", "id": task.id}, f"Task #{task.id}: Add cache", "Halfway: tests pass")]

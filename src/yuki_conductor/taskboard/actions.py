@@ -19,7 +19,7 @@ from yuki_conductor.task_store import (
     Task,
     TaskComment,
 )
-from yuki_conductor.taskboard import live, runner
+from yuki_conductor.taskboard import live, notify, runner
 from yuki_conductor.taskboard.transitions import InvalidTransition, transition
 
 PR_URL_RE = re.compile(r"^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+/?$")
@@ -113,12 +113,13 @@ def add_comment(
     author: str = "user",
     quote_comment_id: int | None = None,
     attachments: list[str] | None = None,
+    notify_user: bool = False,
 ) -> TaskComment:
     """Post a comment. A user comment sends a waiting task back to the queue.
 
     Needs Input and Ready for Review go straight back to To Do. In Progress
     keeps it for when the turn ends; To Do delivers it at pickup. Done tasks
-    stay done.
+    stay done. `notify_user` also pings the user with it, as a push does.
     """
     if author not in API_AUTHORS:
         raise BoardError(400, f"Unknown author {author!r}")
@@ -142,6 +143,8 @@ def add_comment(
         except InvalidTransition:
             pass  # it moved on meanwhile; the comment is still undelivered
     _changed(task_id)
+    if notify_user:
+        notify.on_comment(task, comment)
     return comment
 
 

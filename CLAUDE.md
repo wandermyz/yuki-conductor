@@ -353,7 +353,8 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
   (deleting it would close the PR); what it kept is noted on the timeline,
   failures go to `cleanup_error` with a retry button.
 - **Notifications** (`notify.py`): only moves flagged `notify` (into Needs
-  Input or Ready for Review, including failed runs) — a web push targeting
+  Input or Ready for Review, including failed runs) and comments posted with
+  `notify` (an agent's `yuki-conductor send`) — a web push targeting
   `#tasks/<id>`, plus Slack `send_notification` when Slack is enabled.
 - **Live steps** go through the same `ConnectionManager` as chat, keyed
   `task:<id>`; Chat ignores those keys. `live.py` is the only link from the
@@ -439,7 +440,10 @@ model, because nothing else tells it the tag exists; both `system_prompt()` and
 `ConversationStore` row means web, and otherwise the `SessionStore`
 `session_type` names a receiver's platform (Slack). Omitting `-c` opens a new
 web conversation — unless the run is a task turn (`YUKI_TASK_ID`), where the
-CLI posts an agent comment on that task instead and never calls `/api/push`. The message is sent with `pushed=True`; `WebPlatform` uses
+CLI posts an agent comment on that task instead and never calls `/api/push`.
+That comment carries `notify: true`, so `actions.add_comment` pings the user
+through `notify.on_comment` (web push + Slack), as a push would; a plain
+`task comment` stays silent. The message is sent with `pushed=True`; `WebPlatform` uses
 that to tag the WebSocket payload (drives the notification sound) and mark the
 conversation unread. `web_server.PUSH_MARKER` is appended to the text itself so
 a push still reads differently from a reply after a reload. Attachment paths
