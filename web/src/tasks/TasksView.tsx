@@ -342,9 +342,9 @@ export default function TasksView({
           ))}
         </div>
 
-        {loading && <p className="placeholder">Loading…</p>}
+        {loading && <p className="placeholder task-list-empty">Loading…</p>}
         {!loading && shown.length === 0 && (
-          <p className="placeholder">
+          <p className="placeholder task-list-empty">
             {filter === "active" ? "Nothing queued. Create a task to get an agent on it." : "No tasks here."}
           </p>
         )}
