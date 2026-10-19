@@ -175,3 +175,25 @@ def test_start_taskboard_recovers_and_broadcasts(monkeypatch):
     assert taskboard.store.get(task.id).status == TODO
     assert {"type": "task", "id": task.id} in sent
     assert taskboard.active_harvester is not None
+
+
+def test_task_still_finishing_is_not_picked_up_again():
+    """A turn that ends by re-queueing its task must exit before it restarts."""
+    entered, release = threading.Event(), threading.Event()
+
+    def requeue_then_linger(task_id):
+        transition(task_id, TODO, reason="new comment during the turn")
+        entered.set()
+        release.wait(5)
+
+    h = Harvester(run_turn=requeue_then_linger)
+    task = _new()
+    assert h.tick() == [task.id]
+    entered.wait(5)
+    assert h.tick() == []  # back in To Do, but its thread hasn't exited
+    h._run_turn = Gate()
+    h._run_turn.release.set()
+    release.set()
+    h.join(5)
+    assert h.tick() == [task.id]
+    h.join(5)

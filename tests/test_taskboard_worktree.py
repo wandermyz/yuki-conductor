@@ -80,3 +80,29 @@ def test_not_a_repo(tmp_path):
 def test_default_branch_falls_back_to_main(tmp_path):
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
     assert worktree.default_branch(str(tmp_path)) == "main"
+
+
+def test_default_branch_without_origin_head_finds_master(repo):
+    git(repo, "remote", "set-head", "origin", "--delete")
+    git(repo, "update-ref", "refs/remotes/origin/master", "origin/trunk")
+    assert worktree.default_branch(str(repo)) == "master"
+
+
+def test_parallel_worktrees_on_one_repo(repo):
+    import threading
+
+    tasks = [_task(f"t{i}") for i in range(4)]
+    errors = []
+
+    def make(task):
+        try:
+            ensure_worktree(task, str(repo))
+        except WorktreeError as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=make, args=(t,)) for t in tasks]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []

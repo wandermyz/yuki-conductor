@@ -50,8 +50,19 @@ def first_turn(task: Task, comments: list[TaskComment], cwd: str) -> str:
 
 
 def follow_up(comments: list[TaskComment]) -> str:
-    """Only the comments that arrived since the agent's last turn."""
-    body = "\n\n".join(render_comment(c) for c in comments if c.author != "system")
+    """Only the comments that arrived since the agent's last turn.
+
+    With none (a turn interrupted by a daemon restart, or a task re-queued
+    without a comment), the agent is told to carry on instead.
+    """
+    shown = [c for c in comments if c.author != "system"]
+    if not shown:
+        return (
+            "Continue working on your task. There are no new comments: your "
+            "previous turn was interrupted, or the task was put back in the queue. "
+            "Run `yuki-conductor task show` if you need to re-read it."
+        )
+    body = "\n\n".join(render_comment(c) for c in shown)
     return f"New comments on your task since your last turn:\n\n{body}"
 
 

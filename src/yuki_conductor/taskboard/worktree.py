@@ -7,6 +7,7 @@ A worktree task works on its own branch, `task/<id>-<slug>`, checked out at
 import logging
 import re
 import subprocess
+import threading
 from pathlib import Path
 
 from yuki_conductor.task_store import Task
@@ -14,6 +15,9 @@ from yuki_conductor.task_store import Task
 logger = logging.getLogger(__name__)
 
 WORKTREES_DIR = Path(".claude") / "worktrees"
+
+_repo_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
 
 
 class WorktreeError(Exception):
@@ -52,12 +56,20 @@ def worktree_path(repo: str, task_id: int) -> Path:
 
 
 def default_branch(repo: str) -> str:
-    """The remote's default branch, falling back to `main`."""
+    """The remote's default branch.
+
+    `origin/HEAD` names it in most clones; without it, the first of `main` /
+    `master` the remote has, else `main`.
+    """
     try:
         ref = _git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+        return ref.removeprefix("origin/")
     except WorktreeError:
-        return "main"
-    return ref.removeprefix("origin/")
+        pass
+    for name in ("main", "master"):
+        if _ref_exists(repo, f"refs/remotes/origin/{name}"):
+            return name
+    return "main"
 
 
 def _ensure_ignored(repo: str) -> None:
@@ -78,11 +90,18 @@ def _ensure_ignored(repo: str) -> None:
     exclude.write_text(f"{existing}{sep}{WORKTREES_DIR.as_posix()}/\n")
 
 
-def _branch_exists(repo: str, branch: str) -> bool:
+def _ref_exists(repo: str, ref: str) -> bool:
     return subprocess.run(
-        ["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+        ["git", "-C", repo, "rev-parse", "--verify", "--quiet", ref],
         capture_output=True,
     ).returncode == 0
+
+
+def _repo_lock(repo: str) -> threading.Lock:
+    """One git writer per repo: parallel `fetch`es fight over ref locks."""
+    key = str(Path(repo).resolve())
+    with _locks_guard:
+        return _repo_locks.setdefault(key, threading.Lock())
 
 
 def ensure_worktree(task: Task, repo: str) -> tuple[str, str]:
@@ -92,13 +111,18 @@ def ensure_worktree(task: Task, repo: str) -> tuple[str, str]:
     """
     if task.worktree_path and Path(task.worktree_path).is_dir() and task.branch:
         return task.worktree_path, task.branch
+    with _repo_lock(repo):
+        return _create(task, repo)
+
+
+def _create(task: Task, repo: str) -> tuple[str, str]:
     path = worktree_path(repo, task.id)
     branch = task.branch or branch_name(task)
     _git(repo, "fetch", "origin")
     base = default_branch(repo)
     _ensure_ignored(repo)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if _branch_exists(repo, branch):
+    if _ref_exists(repo, f"refs/heads/{branch}"):
         # A restart between `worktree add` and saving it, or a worktree
         # removed by hand: the branch holds the work, so check it out again.
         _git(repo, "worktree", "prune")

@@ -54,7 +54,11 @@ class Harvester:
             return []
         started = []
         counts = self.running()
+        with self._lock:
+            finishing = set(self._threads)
         for task in taskboard.store.list_status(TODO):
+            if task.id in finishing:
+                continue  # back in To Do, but its last turn's thread is still exiting
             if task.harness not in HARNESSES:
                 continue  # shown as "harness not enabled" in the UI
             if counts.get(task.harness, 0) >= config.taskboard_limit(task.harness):
@@ -67,6 +71,7 @@ class Harvester:
         return started
 
     def _start(self, task_id: int, harness: str) -> None:
+        runner.clear_cancel(task_id)
         thread = threading.Thread(
             target=self._run, args=(task_id,), name=f"task-{task_id}", daemon=True
         )

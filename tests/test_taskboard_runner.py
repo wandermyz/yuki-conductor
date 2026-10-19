@@ -93,12 +93,32 @@ def test_first_turn_runs_in_project_and_lands_in_review(env):
     assert _agent_comments(task) == ["All done."]
 
 
-def test_pr_url_in_reply_is_recorded(env):
+def test_pr_url_in_reply_is_recorded(env, monkeypatch):
+    monkeypatch.setattr(runner, "_origin_repo", lambda cwd: "o/r")
     task = _claimed()
-    env.script = [reply("Opened https://github.com/o/r/pull/42 for review")]
+    env.script = [reply("Fixes the bug upstream reported in https://github.com/up/lib/pull/7. "
+                        "Opened https://github.com/o/r/pull/42 for review")]
     runner.run_turn(task.id)
     assert taskboard.store.get(task.id).pr_url == "https://github.com/o/r/pull/42"
     assert taskboard.store.comments(task.id)[-1].body.endswith("PR opened")
+
+
+def test_unrelated_pr_url_is_not_recorded(env, monkeypatch):
+    monkeypatch.setattr(runner, "_origin_repo", lambda cwd: "o/r")
+    task = _claimed()
+    env.script = [reply("See https://github.com/up/lib/pull/7")]
+    runner.run_turn(task.id)
+    assert taskboard.store.get(task.id).pr_url is None
+
+
+def test_origin_repo_parsing(tmp_path):
+    import subprocess
+
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(tmp_path), "remote", "add", "origin",
+                    "git@github.com:Owner/my.repo.git"], check=True)
+    assert runner._origin_repo(str(tmp_path)) == "Owner/my.repo"
+    assert runner._origin_repo(str(tmp_path / "nope")) is None
 
 
 def test_ask_lands_in_needs_input(env):
@@ -119,6 +139,44 @@ def test_error_lands_in_needs_input_with_details(env):
     runner.run_turn(task.id)
     assert _status(task) == NEEDS_INPUT
     assert any("rate limited" in c.body for c in taskboard.store.comments(task.id) if c.author == "system")
+
+
+def test_failed_run_keeps_its_comments_pending(env):
+    task = taskboard.store.create(title="t", project="proj", harness="claude-code", use_worktree=False)
+    comment = taskboard.store.add_comment(task.id, "user", "use postgres")
+    claim(task.id)
+    env.script = [reply("launch failed", is_error=True)]
+    runner.run_turn(task.id)
+    # Not re-queued as a "new" comment, but sent again on the next turn.
+    assert _status(task) == NEEDS_INPUT
+    assert [c.id for c in taskboard.store.undelivered(task.id)] == [comment.id]
+
+
+def test_resume_without_new_comments_says_continue(env):
+    task = _claimed()
+    taskboard.store.update_fields(task.id, session_id="s1")
+    env.harness.sessions.add("s1")
+    env.script = [reply()]
+    runner.run_turn(task.id)
+    assert env.calls[0]["prompt"].startswith("Continue working on your task")
+
+
+def test_comment_after_the_outcome_check_is_not_stranded(env, monkeypatch):
+    task = _claimed()
+    env.script = [reply()]
+    real_transition = runner.transition
+    posted = []
+
+    def transition_then_comment(task_id, to, **kw):
+        # The user's comment lands just before the move to Ready for Review:
+        # it saw In Progress, so it didn't re-queue the task itself.
+        if not posted:
+            posted.append(taskboard.store.add_comment(task_id, "user", "one more thing"))
+        return real_transition(task_id, to, **kw)
+
+    monkeypatch.setattr(runner, "transition", transition_then_comment)
+    runner.run_turn(task.id)
+    assert _status(task) == TODO
 
 
 def test_comment_during_turn_requeues(env):
@@ -246,6 +304,30 @@ def test_cancel_lands_in_needs_input_without_agent_comment(env, monkeypatch):
     assert _status(task) == NEEDS_INPUT
     assert _agent_comments(task) == []
     assert taskboard.store.comments(task.id)[-1].body.endswith("cancelled")
+
+
+def test_cancel_before_the_run_starts_skips_it(env, monkeypatch):
+    task = _claimed()
+    monkeypatch.setattr(runner, "cancel_process", lambda key: False)
+    runner.request_cancel(task.id)  # e.g. while the worktree was being made
+    runner.run_turn(task.id)
+    assert env.calls == []
+    assert _status(task) == NEEDS_INPUT
+
+
+def test_stale_cancel_is_cleared_at_pickup(env, monkeypatch):
+    from yuki_conductor.taskboard.harvester import Harvester
+
+    monkeypatch.setattr(runner, "cancel_process", lambda key: False)
+    task = taskboard.store.create(title="t", project="proj", harness="claude-code", use_worktree=False)
+    runner.request_cancel(task.id)  # arrived after the previous turn ended
+    env.script = [reply()]
+    h = Harvester()
+    monkeypatch.setattr("yuki_conductor.taskboard.harvester.HARNESSES", {"claude-code": object()})
+    assert h.tick() == [task.id]
+    h.join(5)
+    assert len(env.calls) == 1
+    assert _status(task) == READY_FOR_REVIEW
 
 
 def test_live_steps_and_processing_are_reported(env):

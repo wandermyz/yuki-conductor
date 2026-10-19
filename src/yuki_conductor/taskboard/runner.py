@@ -8,6 +8,7 @@ stranding it.
 
 import logging
 import re
+import subprocess
 import threading
 from dataclasses import dataclass
 
@@ -35,11 +36,23 @@ _cancel_lock = threading.Lock()
 def request_cancel(task_id: int) -> bool:
     """Stop a running task's turn. It then lands in Needs Input.
 
-    Returns False if no turn was running for it.
+    Callers only ask for In Progress tasks. The flag also covers the gaps
+    where no agent process exists yet (worktree setup, between retries).
+    Returns whether a process was killed.
     """
     with _cancel_lock:
         _cancel_requested.add(task_id)
     return cancel_process(live.steps_key(task_id))
+
+
+def clear_cancel(task_id: int) -> None:
+    """Forget a stale request; called when a task is picked up."""
+    _take_cancel(task_id)
+
+
+def _cancel_pending(task_id: int) -> bool:
+    with _cancel_lock:
+        return task_id in _cancel_requested
 
 
 def _take_cancel(task_id: int) -> bool:
@@ -96,20 +109,31 @@ def _working_dir(task: Task) -> str | None:
     return path
 
 
-def _run(task: Task, cwd: str) -> RunResult:
+@dataclass
+class _Turn:
+    result: RunResult | None  # None: cancelled before the agent started
+    delivered: list[int]  # comment ids the prompt carried
+
+
+def _run(task: Task, cwd: str) -> _Turn:
     harness = get_harness(task.harness)
     comments = taskboard.store.comments(task.id)
+    pending = [c for c in comments if not c.delivered]
     if task.session_id and harness.session_exists(task.session_id, cwd):
-        pending = [c for c in comments if not c.delivered]
         prompt, session_id = prompts.follow_up(pending), task.session_id
     elif task.session_id:
         logger.info("Task #%s: session %s is gone, starting fresh", task.id, task.session_id)
         prompt, session_id = prompts.full_context(task, comments, cwd), None
     else:
         prompt, session_id = prompts.first_turn(task, comments, cwd), None
-    taskboard.store.mark_delivered([c.id for c in comments if not c.delivered])
+    delivered = [c.id for c in pending]
 
-    def run(prompt: str, session_id: str | None) -> RunResult:
+    def run(prompt: str, session_id: str | None) -> RunResult | None:
+        # The cancel registry only knows a process once it's started; check
+        # the board's own flag before each start so a cancel never waits for
+        # a whole run.
+        if _cancel_pending(task.id):
+            return None
         return run_agent(
             harness,
             prompt,
@@ -121,16 +145,48 @@ def _run(task: Task, cwd: str) -> RunResult:
         )
 
     result = run(prompt, session_id)
-    if result.session_missing:
+    if result is not None and result.session_missing:
         logger.info("Task #%s: session %s vanished mid-resume, retrying fresh", task.id, session_id)
         result = run(prompts.full_context(task, comments, cwd), None)
-    return result
+    return _Turn(result=result, delivered=delivered)
+
+
+def _origin_repo(cwd: str) -> str | None:
+    """`owner/repo` of the checkout's GitHub origin, if it has one."""
+    try:
+        url = subprocess.run(
+            ["git", "-C", cwd, "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", url)
+    return match.group(1) if match else None
+
+
+def _own_pr_url(text: str, cwd: str) -> str | None:
+    """The first PR URL in the reply that belongs to the project's own repo.
+
+    A reply may cite unrelated PRs (an upstream fix, a related change); only
+    one on the origin repo can be the task's. `task pr` is the reliable way.
+    """
+    repo = _origin_repo(cwd)
+    if repo is None:
+        return None
+    for match in PR_URL_RE.finditer(text):
+        if match.group(0).lower().startswith(f"https://github.com/{repo.lower()}/pull/"):
+            return match.group(0)
+    return None
 
 
 def run_turn(task_id: int) -> None:
     """Run one turn of a claimed (In Progress) task and move it on."""
     try:
         _run_turn(task_id)
+    except InvalidTransition:
+        # Someone else moved the task out of In Progress meanwhile (a restart
+        # recovery, a manual change); their move stands.
+        logger.warning("Task #%s left In Progress before its turn finished", task_id, exc_info=True)
     except Exception as exc:
         logger.exception("Task #%s: turn crashed", task_id)
         try:
@@ -143,20 +199,31 @@ def run_turn(task_id: int) -> None:
         live.task_changed(task_id)
 
 
+def _new_comments(task_id: int, delivered: list[int]) -> bool:
+    """User or GitHub comments the agent hasn't seen: anything undelivered
+    that this turn's prompt didn't carry."""
+    sent = set(delivered)
+    return any(c.id not in sent for c in taskboard.store.undelivered(task_id))
+
+
 def _run_turn(task_id: int) -> None:
     task = taskboard.store.update_fields(task_id, asked_input=False)
     cwd = _working_dir(task)
     if cwd is None:
         return
-    if _take_cancel(task_id):
-        transition(task_id, NEEDS_INPUT, reason="cancelled")
-        return
 
     task = taskboard.store.get(task_id)
     live.turn_started(task_id)
-    result = _run(task, cwd)
+    turn = _run(task, cwd)
+    result = turn.result
 
-    cancelled = _take_cancel(task_id)
+    cancelled = _take_cancel(task_id) or result is None
+    if result is None:
+        result = RunResult(text="", session_id=None)
+    # A failed run may never have reached the agent; keep its comments
+    # pending so the next turn sends them again.
+    if not result.is_error:
+        taskboard.store.mark_delivered(turn.delivered)
     text, attachments = split_response(result.text)
     if result.session_id:
         taskboard.store.update_fields(task_id, session_id=result.session_id)
@@ -165,19 +232,21 @@ def _run_turn(task_id: int) -> None:
             task_id, "agent", text, attachments=[str(a.local_path) for a in attachments]
         )
     task = taskboard.store.get(task_id)
-    if not task.pr_url and (match := PR_URL_RE.search(text)):
-        task = taskboard.store.update_fields(task_id, pr_url=match.group(0))
+    if not task.pr_url and not cancelled and (url := _own_pr_url(text, cwd)):
+        task = taskboard.store.update_fields(task_id, pr_url=url)
 
-    # Everything pending went into this turn's prompt, so anything still
-    # undelivered arrived while it ran.
     outcome = resolve_outcome(
         task,
         result,
         cancelled=cancelled,
-        has_new_comments=bool(taskboard.store.undelivered(task_id)),
+        has_new_comments=_new_comments(task_id, turn.delivered),
     )
     if result.is_error and outcome.status == NEEDS_INPUT:
         taskboard.store.add_comment(
             task_id, "system", f"The run failed:\n\n```\n{result.text.strip()[:4000]}\n```"
         )
     transition(task_id, outcome.status, reason=outcome.reason, notify=outcome.notify)
+    # A comment posted after the check above but before the move saw the task
+    # still In Progress and left it for us; don't strand it.
+    if outcome.status != TODO and _new_comments(task_id, turn.delivered):
+        transition(task_id, TODO, reason="new comment")
