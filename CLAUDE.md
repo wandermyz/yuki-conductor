@@ -277,6 +277,63 @@ Tests that exercise a cron run must not touch the real workspace DB; the autouse
 `isolated_cron_run_store` fixture in `tests/conftest.py` rebinds the store.
 
 
+## Taskboard
+
+A queue of agent tasks the daemon works through on its own: the Tasks tab
+(`web/src/tasks/`), `/api/tasks`, and `src/yuki_conductor/taskboard/`. The
+PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
+
+- **States**: To Do → In Progress → Needs Input / Ready for Review → Done
+  (`task_store.STATUSES`). `taskboard/transitions.py` is the only code that
+  changes a status; it enforces the allowed moves, writes compare-and-set
+  (a move that loses a race raises `InvalidTransition`), leaves a system
+  comment, and calls listeners. Side effects subscribe as listeners in
+  `start_taskboard()`: web broadcast, harvester wake-up, notifications,
+  worktree cleanup. Tests clear the listener list (`isolated_task_store`).
+- **Harvester** (`harvester.py`): picks To Do tasks in `sort_order`, per
+  harness up to `TASKBOARD_CONCURRENCY` (`.env`, e.g. `claude-code:10,pi:1`;
+  defaults 10 / 1 / 1 for anything else), unless paused (`taskboard_state`
+  table, survives restarts; pausing never stops a running turn). On startup
+  it moves every In Progress task back to the top of To Do; its session is
+  kept, so the next pickup resumes it.
+- **A turn** (`runner.py`): a worktree task runs in
+  `<repo>/.claude/worktrees/task-<id>` on `task/<id>-<slug>` from the
+  remote's default branch (`worktree.py`, one git writer per repo); others
+  run in the project dir. One task is one session: a turn resumes it with
+  the undelivered comments, or — if `Harness.session_exists` says it's gone —
+  starts fresh with the whole timeline (`prompts.py`). The reply becomes an
+  agent comment. Where the task goes next, first match wins: new user
+  comment during the turn → To Do; cancelled → Needs Input; failed → Needs
+  Input; agent ran `task ask` → Needs Input; else Ready for Review.
+- **Comments** requeue: a user comment on Needs Input / Ready for Review sends
+  the task to the end of To Do; on In Progress it waits for the turn's end;
+  Done never reopens. Comments are stored before the status is read, and the
+  runner re-checks after its own move, so one racing the end of a turn is
+  never stranded. `delivered` marks what the agent has been sent.
+- **Agents** get a "Taskboard" system-prompt section and `YUKI_TASK_ID`
+  (`run_agent(task_id=...)`), and the bundled `yuki-conductor-task` skill
+  documents `yuki-conductor task show|list|comment|ask|pr|create`
+  (`cli_task.py`, over HTTP like `send`).
+- **PRs** (`pr_watcher.py`): every 5 minutes, each Ready for Review task's PR
+  is read over the GitHub REST API via `gh api` (not `gh pr view`: its
+  GraphQL authors can't tell bots apart). Merged or closed → Done; new
+  comments → imported as `github` comments (once each, by URL) and the task
+  goes to To Do. Comments carrying `skills.GITHUB_AGENT_MARKER` — the footer
+  agents must append to everything they post — are ignored, since the agent
+  may post as the user's own account.
+- **Done** cleanup (`cleanup.py`, background): removes the worktree, the
+  local `task/` branch and the remote branch. It keeps a local branch whose
+  commits no remote has, and the remote branch of a PR that's still open
+  (deleting it would close the PR); what it kept is noted on the timeline,
+  failures go to `cleanup_error` with a retry button.
+- **Notifications** (`notify.py`): only moves flagged `notify` (into Needs
+  Input or Ready for Review, including failed runs) — a web push targeting
+  `#tasks/<id>`, plus Slack `send_notification` when Slack is enabled.
+- **Live steps** go through the same `ConnectionManager` as chat, keyed
+  `task:<id>`; Chat ignores those keys. `live.py` is the only link from the
+  board to the web layer.
+- Done tasks older than 30 days are archived (hidden unless asked for).
+
 ## Key Commands
 
 - `uv run pytest` — run all tests
@@ -285,6 +342,7 @@ Tests that exercise a cron run must not touch the real workspace DB; the autouse
 - `uv run yuki-conductor --help` — show CLI help
 - `uv run yuki-conductor simulate message "test"` — test without Slack
 - `uv run yuki-conductor send -c <conv-id> "text"` — push a message (and `--attach` files) into a web or Slack conversation (see Outbound Messages)
+- `uv run yuki-conductor task show|list|comment|ask|pr|create` — the taskboard from a shell (see Taskboard)
 - `uv run yuki-conductor web rebuild` — rebuild frontend + auto-reload connected browsers
 - `cd web && pnpm dev` — start frontend dev server (proxies /api to port 2333)
 - `cd web && pnpm build` — build frontend for production (output: web/dist/)
@@ -361,11 +419,13 @@ The `yuki-conductor-send` skill (bundled plugin) documents `send` for the model.
 ### Browser notifications
 
 Every assistant message `WebPlatform` delivers — a reply, a cron result
-(`start_thread` or `send`), a push — also goes out as a Web Push notification
+(`start_thread` or `send`), a push — and every taskboard task that needs the
+user also goes out as a Web Push notification
 (`web_push.py`) to each browser subscribed via the 🔔 toggle in the chat
-sidebar. The service worker `web/public/sw.js` shows it, unless a focused
-window is already on that conversation; a click focuses the app and opens the
-conversation. Subscriptions live in the `push_subscriptions` table and are
+sidebar. Each push names a target, `{kind: "conversation" | "task", id}`
+(`web_push.conversation_target` / `task_target`). The service worker
+`web/public/sw.js` shows it, unless a focused window is already on that
+target; a click focuses the app and opens `#chat/<id>` or `#tasks/<id>`. Subscriptions live in the `push_subscriptions` table and are
 dropped when the push service answers 404/410. The VAPID key is generated on
 first use at `~/.yuki-conductor/.secrets/vapid-private.pem`; deleting it
 invalidates every subscription. Push needs a secure context, so it only works
@@ -498,3 +558,4 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
 - `test_harness_claude_code.py` — Claude Code through `run_agent` with a mocked subprocess (flag construction, errors, timeouts, cancel)
 - `test_harness_pi.py` — pi command line, plus its parser against real recorded runs in `tests/fixtures/harness/pi/` (system prompt scrubbed)
 - `test_cli_simulate.py` — integration tests via simulate commands
+- `test_task_store.py`, `test_taskboard_*.py`, `test_tasks_api.py`, `test_cli_task.py` — the taskboard: store, state machine, harvester, runner (fake `run_agent`), worktrees and cleanup against a temp repo with a bare origin, PR watcher with `gh` mocked, API, CLI end to end through the API. The autouse `no_stray_harvester` fixture fails any test that leaves a real board loop running.

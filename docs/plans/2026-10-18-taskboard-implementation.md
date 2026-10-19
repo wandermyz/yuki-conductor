@@ -1,6 +1,11 @@
 # Taskboard — Implementation Plan
 
-> Status: **not started.** Written 2026-10-18. Implements the PRD in
+> Status: **implemented (2026-10-18)**, phases 1–6 on one branch. One
+> deviation: instead of stub modules, `transitions.add_listener()` is how
+> later phases hook status changes. The PR watcher uses `gh api` (REST)
+> throughout rather than `gh pr view`. Not verified end to end: the GitHub
+> PR loop (needs a real repo), and pi's session-file lookup (pi isn't
+> installed on the dev machine). Written 2026-10-18. Implements the PRD in
 > [2026-10-18-taskboard.md](2026-10-18-taskboard.md). Read that first: this
 > document covers *how* to build it, not *what* it does.
 
