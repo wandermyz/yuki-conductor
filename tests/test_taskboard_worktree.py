@@ -131,9 +131,28 @@ def test_cleanup_removes_worktree_and_both_branches(repo):
 
 def test_cleanup_tolerates_everything_already_gone(repo):
     task = _pushed_task(repo)
+    task = taskboard.store.update_fields(task.id, pr_url="https://github.com/o/r/pull/1")
     git(repo, "push", "origin", "--delete", task.branch)  # GitHub deleted it on merge
     worktree.cleanup(task, str(repo))
     worktree.cleanup(task, str(repo))  # and again: idempotent
+    assert git(repo, "branch", "--list", task.branch) == ""
+
+
+def test_cleanup_keeps_unpushed_work(repo):
+    task = _task()
+    path, branch = ensure_worktree(task, str(repo))
+    git(path, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "local only")
+    task = taskboard.store.update_fields(task.id, worktree_path=path, branch=branch)
+    kept = worktree.cleanup(task, str(repo))
+    assert "never pushed" in kept[0]
+    assert git(repo, "branch", "--list", branch) != ""
+
+
+def test_cleanup_keeps_the_branch_of_an_open_pr(repo):
+    task = _pushed_task(repo)
+    kept = worktree.cleanup(task, str(repo), keep_remote=True)
+    assert "still open" in kept[0]
+    assert git(repo, "ls-remote", "--heads", "origin", task.branch) != ""
     assert git(repo, "branch", "--list", task.branch) == ""
 
 
@@ -154,6 +173,7 @@ def test_done_triggers_cleanup_and_records_failure(repo, monkeypatch):
             return str(repo)
 
     monkeypatch.setattr(cleanup, "ProjectStore", Projects)
+    monkeypatch.setattr(cleanup.pr_watcher, "pr_state", lambda url, cwd: "OPEN")
     task = _pushed_task(repo)
     transition(task.id, NEEDS_INPUT, reason="x")
     transition(task.id, "done", reason="marked done")
@@ -165,3 +185,19 @@ def test_done_triggers_cleanup_and_records_failure(repo, monkeypatch):
     git(repo, "remote", "set-url", "origin", "/nowhere")
     assert not cleanup.run(broken.id)
     assert "push" in taskboard.store.get(broken.id).cleanup_error
+
+
+def test_marking_done_keeps_an_open_prs_branch(repo, monkeypatch):
+    from yuki_conductor.taskboard import cleanup
+
+    class Projects:
+        def get_path(self, name):
+            return str(repo)
+
+    monkeypatch.setattr(cleanup, "ProjectStore", Projects)
+    monkeypatch.setattr(cleanup.pr_watcher, "pr_state", lambda url, cwd: "OPEN")
+    task = _pushed_task(repo)
+    taskboard.store.update_fields(task.id, pr_url="https://github.com/o/r/pull/1")
+    assert cleanup.run(task.id)
+    assert git(repo, "ls-remote", "--heads", "origin", task.branch) != ""
+    assert "still open" in taskboard.store.comments(task.id)[-1].body

@@ -6,6 +6,7 @@ best effort.
 """
 
 import logging
+import threading
 
 from yuki_conductor import taskboard, web_push
 from yuki_conductor.task_store import READY_FOR_REVIEW, STATUS_LABELS, Task
@@ -42,7 +43,14 @@ def on_transition(event: TransitionEvent) -> None:
     if not event.notify:
         return
     title, body = message(event.task, event.reason)
-    web_push.notify(web_push.task_target(event.task.id), title, body)
+    # Slack is a network call, and transitions can run on a request thread.
+    threading.Thread(
+        target=_send, args=(event.task.id, title, body), name="task-notify", daemon=True
+    ).start()
+
+
+def _send(task_id: int, title: str, body: str) -> None:
+    web_push.notify(web_push.task_target(task_id), title, body)
     slack = _platforms.get("slack")
     if slack is not None:
         try:

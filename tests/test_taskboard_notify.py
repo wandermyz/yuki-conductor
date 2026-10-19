@@ -8,8 +8,19 @@ from yuki_conductor.taskboard import notify, transitions
 from yuki_conductor.taskboard.transitions import claim, transition
 
 
+class InlineThread:
+    """Run the notification's background send right away."""
+
+    def __init__(self, target, args, **_):
+        self.target, self.args = target, args
+
+    def start(self):
+        self.target(*self.args)
+
+
 @pytest.fixture
 def pushes(monkeypatch):
+    monkeypatch.setattr(notify.threading, "Thread", InlineThread)
     sent = []
     monkeypatch.setattr(web_push, "notify", lambda target, title, text: sent.append((target, title, text)))
     transitions.add_listener(notify.on_transition)

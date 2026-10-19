@@ -133,25 +133,40 @@ def _create(task: Task, repo: str) -> tuple[str, str]:
     return str(path), branch
 
 
-def cleanup(task: Task, repo: str) -> None:
+def cleanup(task: Task, repo: str, *, keep_remote: bool = False) -> list[str]:
     """Remove a finished task's worktree, local branch and remote branch.
 
-    Each step tolerates the thing already being gone. Only `task/` branches
-    are ever deleted. Raises WorktreeError on any other failure.
+    Each step tolerates the thing already being gone, and only `task/`
+    branches are ever deleted. Work that exists nowhere else is kept: a local
+    branch with commits no remote has, and (with `keep_remote`, for a PR that
+    is still open) the remote branch. Returns notes on what was kept. Raises
+    WorktreeError on any other failure.
     """
+    kept: list[str] = []
     with _repo_lock(repo):
         if task.worktree_path and Path(task.worktree_path).exists():
             _git(repo, "worktree", "remove", "--force", task.worktree_path)
         _git(repo, "worktree", "prune")
         branch = task.branch
         if not branch or not branch.startswith("task/"):
-            return
+            return kept
         if _ref_exists(repo, f"refs/heads/{branch}"):
-            _git(repo, "branch", "-D", branch)
-        try:
-            _git(repo, "push", "origin", "--delete", branch)
-        except WorktreeError as exc:
-            # GitHub deletes merged branches itself when the repo says so.
-            if "remote ref does not exist" not in str(exc):
-                raise
-    logger.info("Task #%s: removed worktree and branch %s", task.id, branch)
+            # A task with a PR pushed its work; after a merge GitHub may have
+            # deleted the remote branch, so "on no remote" proves nothing then.
+            if not task.pr_url and _git(
+                repo, "rev-list", "--max-count=1", branch, "--not", "--remotes"
+            ):
+                kept.append(f"Kept local branch `{branch}`: it has commits that were never pushed.")
+            else:
+                _git(repo, "branch", "-D", branch)
+        if keep_remote:
+            kept.append(f"Kept remote branch `{branch}`: its pull request is still open.")
+        else:
+            try:
+                _git(repo, "push", "origin", "--delete", branch)
+            except WorktreeError as exc:
+                # GitHub deletes merged branches itself when the repo says so.
+                if "remote ref does not exist" not in str(exc):
+                    raise
+    logger.info("Task #%s: cleaned up %s", task.id, branch)
+    return kept
