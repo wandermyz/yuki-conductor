@@ -298,23 +298,20 @@
 }
 
 .pr-marker.pr-open {
-  --pr-fill: #1f883d;
   --pr-color: #1a7f37;
 }
 .pr-marker.pr-draft {
-  --pr-fill: #59636e;
   --pr-color: #59636e;
 }
 .pr-marker.pr-merged {
-  --pr-fill: #8250df;
   --pr-color: #8250df;
 }
 .pr-marker.pr-closed {
-  --pr-fill: #cf222e;
   --pr-color: #cf222e;
 }
 
-span.pr-marker:not(.pr-unknown) {
+span.pr-marker:not(.pr-unknown),
+.pr-marker:not(.pr-unknown) .pr-icon {
   color: var(--pr-color);
 }
 
@@ -325,24 +322,6 @@ a.pr-marker {
 
 a.pr-marker:hover {
   text-decoration: underline;
-}
-
-.pr-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-right: 2px;
-  padding: 1px 8px 1px 6px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #fff;
-  background: var(--pr-fill);
-}
-
-.pr-badge .pr-icon {
-  width: 12px;
-  height: 12px;
 }
 
 @media (prefers-color-scheme: dark) {

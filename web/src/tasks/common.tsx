@@ -20,43 +20,36 @@ const PR_LABELS: Record<PrState, string> = {
   CLOSED: "Closed",
 };
 
-/** A task's PR the way GitHub marks one: its state's icon and colour, then
- * its number. `badge` adds the state's name on a filled pill, for the detail
+/** A task's PR the way GitHub marks one: its state's icon, in the state's
+ * colour, then its number. `link` makes it open the PR, for the detail
  * header. A PR not checked yet (null state) gets the open icon, uncoloured. */
 export function PrMarker({
   url,
   state,
-  badge = false,
+  link = false,
 }: {
   url: string;
   state: PrState | null;
-  badge?: boolean;
+  link?: boolean;
 }) {
   const number = url.split("/").pop();
-  const label = state ? PR_LABELS[state] : "Not checked yet";
+  const cls = `pr-marker pr-${(state ?? "unknown").toLowerCase()}`;
+  const title = `PR #${number} · ${state ? PR_LABELS[state] : "Not checked yet"}`;
   const icon = (
     <svg className="pr-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
       <path fill="currentColor" d={PR_ICONS[state ?? "OPEN"]} />
     </svg>
   );
-  const cls = `pr-marker pr-${(state ?? "unknown").toLowerCase()}`;
-  if (!badge) {
+  if (link) {
     return (
-      <span className={cls} title={`PR #${number} · ${label}`}>
-        {icon}#{number}
-      </span>
+      <a className={cls} href={url} target="_blank" rel="noreferrer" title={title}>
+        {icon}PR #{number}
+      </a>
     );
   }
   return (
-    <a className={cls} href={url} target="_blank" rel="noreferrer" title={url}>
-      {state && (
-        <span className="pr-badge">
-          {icon}
-          {label}
-        </span>
-      )}
-      {!state && icon}
-      PR #{number}
-    </a>
+    <span className={cls} title={title}>
+      {icon}#{number}
+    </span>
   );
 }

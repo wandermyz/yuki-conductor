@@ -250,7 +250,7 @@ export default function TaskDetail({
           </span>
           {task.branch && <code>{task.branch}</code>}
           {!task.branch && task.use_worktree && <span>worktree</span>}
-          {task.pr_url && <PrMarker url={task.pr_url} state={task.pr_state} badge />}
+          {task.pr_url && <PrMarker url={task.pr_url} state={task.pr_state} link />}
         </div>
         {task.parent && (
           <div className="task-links">
