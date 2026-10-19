@@ -291,6 +291,32 @@ class TaskStore:
                 con.close()
         return self.get(task_id)
 
+    def edit_if_untouched(self, task_id: int, **fields) -> bool:
+        """Like `update_fields`, but only while the task is To Do and has never
+        been picked up, checked in the same statement so a pickup can't slip
+        in between. Returns whether the edit happened."""
+        unknown = set(fields) - _UPDATABLE
+        if unknown:
+            raise ValueError(f"Not updatable: {', '.join(sorted(unknown))}")
+        if "attachments" in fields:
+            fields["attachments"] = json.dumps(fields["attachments"])
+        if "use_worktree" in fields:
+            fields["use_worktree"] = int(fields["use_worktree"])
+        fields["updated_at"] = time.time()
+        assignments = ", ".join(f"{k} = ?" for k in fields)
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    f"UPDATE tasks SET {assignments} WHERE id = ? AND status = ? "
+                    "AND started_at IS NULL",
+                    (*fields.values(), task_id, TODO),
+                )
+                con.commit()
+                return cur.rowcount == 1
+            finally:
+                con.close()
+
     def claim(self, task_id: int) -> bool:
         """Move a To Do task to In Progress, atomically.
 
@@ -454,6 +480,19 @@ class TaskStore:
 
     def comments(self, task_id: int) -> list[TaskComment]:
         return self._comments("WHERE task_id = ?", (task_id,))
+
+    def comment_counts(self) -> dict[int, int]:
+        """Non-system comments per task, for the list view."""
+        with self._lock:
+            con = self._connect()
+            try:
+                rows = con.execute(
+                    "SELECT task_id, COUNT(*) FROM task_comments WHERE author != 'system' "
+                    "GROUP BY task_id"
+                ).fetchall()
+            finally:
+                con.close()
+        return dict(rows)
 
     def undelivered(self, task_id: int) -> list[TaskComment]:
         """Comments the agent hasn't been sent yet, oldest first."""

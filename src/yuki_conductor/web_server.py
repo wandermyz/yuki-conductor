@@ -95,7 +95,10 @@ def _clear_restart_required() -> None:
 
 
 def create_api() -> FastAPI:
+    from yuki_conductor.taskboard.routes import router as taskboard_router
+
     api = FastAPI(title="Agent Conductor")
+    api.include_router(taskboard_router)
 
     @api.get("/api/favicon")
     def favicon():

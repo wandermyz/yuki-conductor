@@ -17,6 +17,10 @@ src/yuki_conductor/
     prompts.py         — first-turn / follow-up / fresh-session prompts
     worktree.py        — per-task git worktrees
     live.py            — live steps + change broadcasts to the web UI
+    actions.py         — create/edit/comment/cancel/done: what the API and CLI call
+    routes.py          — /api/tasks + /api/taskboard HTTP routes
+  cli_task.py       — `yuki-conductor task …` (show/list/comment/ask/pr/create)
+  cli_http.py       — CLI → daemon HTTP helper (shared with `send`)
   harness/          — the agent CLIs a turn can run on (see Harnesses)
     base.py            — StreamEvent, RunResult, Harness / StreamParser protocols
     process.py         — run_agent: subprocess, idle watchdog, cancel registry
@@ -37,7 +41,7 @@ src/yuki_conductor/
   web_push.py       — browser push notifications (VAPID key, subscriptions, fan-out)
 web/                — React + Vite frontend (pnpm, TypeScript)
 plugins/
-  yuki-conductor/   — bundled skill plugin, injected into every session (cron skill)
+  yuki-conductor/   — bundled skill plugin, injected into every session (cron, send, task skills)
   slack/            — bundled channel plugin (Slack Socket Mode)
 examples/
   echo-plugin/      — reference plugin: manifest, channel, skill dir

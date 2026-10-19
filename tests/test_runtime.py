@@ -186,6 +186,7 @@ def test_start_sends_restart_notification():
         patch("yuki_conductor.runtime._get_commit_short", return_value="abc1234"),
         patch("yuki_conductor.web_server.start_web_server"),
         patch("yuki_conductor.cron_scheduler.start_cron_scheduler"),
+        patch("yuki_conductor.taskboard.start_taskboard"),
     ):
         fake.platform.send_notification = MagicMock()
         from yuki_conductor.runtime import start

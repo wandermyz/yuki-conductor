@@ -74,3 +74,18 @@ def isolated_task_store(monkeypatch, tmp_path):
     # not fire on a test's transitions; tests that want one add it.
     monkeypatch.setattr(transitions, "_listeners", [])
     return store
+
+
+@pytest.fixture(autouse=True)
+def no_stray_harvester():
+    """Fail a test that leaves a real taskboard loop running.
+
+    The loop reads ``taskboard.store`` on every tick, so one leaked from a
+    test (e.g. a ``runtime.start()`` without ``start_taskboard`` patched)
+    claims tasks in every later test's store.
+    """
+    import threading
+
+    yield
+    leaked = [t.name for t in threading.enumerate() if t.name == "taskboard-harvester"]
+    assert not leaked, "a test started the real taskboard loop; patch start_taskboard"

@@ -70,6 +70,10 @@ def main(argv: list[str] | None = None) -> None:
         help="Title for the new conversation (only used without --conversation)",
     )
 
+    from yuki_conductor import cli_task
+
+    cli_task.register(sub)
+
     # CLI subcommands contributed by enabled plugins. A broken plugin must not
     # make the whole CLI unusable, so failures are reported and skipped.
     from yuki_conductor.plugins import discover_plugins, inject_python_path, load_factory
@@ -128,11 +132,7 @@ def main(argv: list[str] | None = None) -> None:
             print(f"session_id: {result.session_id}")
             print(f"response:\n{result.text}")
     elif args.command == "send":
-        import json
-        import urllib.error
-        import urllib.request
-
-        from yuki_conductor.web_server import WEB_PORT
+        from yuki_conductor.cli_http import api_request
 
         text = sys.stdin.read() if args.text == "-" else args.text
         if not text.strip() and not args.attach:
@@ -150,22 +150,12 @@ def main(argv: list[str] | None = None) -> None:
             "title": args.title,
             "attachments": attachments,
         }
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{WEB_PORT}/api/push",
-            method="POST",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                body = json.load(resp)
-        except urllib.error.HTTPError as exc:
-            print(f"Send failed ({exc.code}): {exc.read().decode('utf-8', 'replace')}", file=sys.stderr)
-            sys.exit(1)
-        except urllib.error.URLError as exc:
-            print(f"Daemon not reachable on port {WEB_PORT}: {exc.reason}", file=sys.stderr)
-            sys.exit(1)
+        body = api_request("POST", "/api/push", payload, what="Send")
         print(f"Sent to {body['platform']} conversation {body['conversation_id']}")
+    elif args.command == "task":
+        from yuki_conductor import cli_task
+
+        cli_task.handle(args)
     elif args.command == "web":
         if args.web_command is None:
             web_parser.print_help()
