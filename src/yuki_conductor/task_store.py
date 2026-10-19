@@ -31,13 +31,16 @@ STATUS_LABELS = {
 
 COMMENT_AUTHORS = ("user", "agent", "system", "github")
 
+# A task's PR as GitHub last showed it (`pr_watcher.pr_state`).
+PR_STATES = ("OPEN", "DRAFT", "MERGED", "CLOSED")
+
 # Done tasks older than this are hidden from the default list.
 ARCHIVE_AFTER_SECONDS = 30 * 24 * 3600
 
 _TASK_COLUMNS = (
     "id", "title", "body", "attachments", "project", "harness", "use_worktree",
     "status", "sort_order", "session_id", "worktree_path", "branch", "pr_url",
-    "pr_checked_at", "asked_input", "parent_task_id", "cleanup_error",
+    "pr_state", "pr_checked_at", "asked_input", "parent_task_id", "cleanup_error",
     "created_at", "updated_at", "started_at", "done_at",
 )
 _COMMENT_COLUMNS = (
@@ -49,7 +52,7 @@ _COMMENT_COLUMNS = (
 # dedicated methods so their invariants live in one place.
 _UPDATABLE = frozenset({
     "title", "body", "attachments", "project", "harness", "use_worktree",
-    "session_id", "worktree_path", "branch", "pr_url", "pr_checked_at",
+    "session_id", "worktree_path", "branch", "pr_url", "pr_state", "pr_checked_at",
     "asked_input", "cleanup_error",
 })
 
@@ -69,6 +72,7 @@ class Task:
     worktree_path: str | None
     branch: str | None
     pr_url: str | None
+    pr_state: str | None
     pr_checked_at: float | None
     asked_input: bool
     parent_task_id: int | None
@@ -148,6 +152,7 @@ class TaskStore:
                     "worktree_path TEXT, "
                     "branch TEXT, "
                     "pr_url TEXT, "
+                    "pr_state TEXT, "
                     "pr_checked_at REAL, "
                     "asked_input INTEGER NOT NULL DEFAULT 0, "
                     "parent_task_id INTEGER REFERENCES tasks(id), "
@@ -157,6 +162,17 @@ class TaskStore:
                     "started_at REAL, "
                     "done_at REAL)"
                 )
+                columns = {row[1] for row in con.execute("PRAGMA table_info(tasks)")}
+                if "pr_state" not in columns:
+                    con.execute("ALTER TABLE tasks ADD COLUMN pr_state TEXT")
+                    # The PR watcher's Done moves say how a PR ended.
+                    for state, reason in (("MERGED", "PR merged"), ("CLOSED", "PR closed%")):
+                        con.execute(
+                            "UPDATE tasks SET pr_state = ? WHERE pr_url IS NOT NULL AND id IN "
+                            "(SELECT task_id FROM task_comments WHERE author = 'system' "
+                            "AND body LIKE ?)",
+                            (state, f"%→ Done: {reason}"),
+                        )
                 con.execute(
                     "CREATE TABLE IF NOT EXISTS task_comments ("
                     "id INTEGER PRIMARY KEY AUTOINCREMENT, "

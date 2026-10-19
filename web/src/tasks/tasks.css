@@ -281,6 +281,64 @@
   }
 }
 
+/* PR markers, in GitHub's state colours */
+.pr-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.pr-marker .pr-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.pr-marker.pr-open {
+  --pr-color: #1a7f37;
+}
+.pr-marker.pr-draft {
+  --pr-color: #59636e;
+}
+.pr-marker.pr-merged {
+  --pr-color: #8250df;
+}
+.pr-marker.pr-closed {
+  --pr-color: #cf222e;
+}
+
+span.pr-marker:not(.pr-unknown),
+.pr-marker:not(.pr-unknown) .pr-icon {
+  color: var(--pr-color);
+}
+
+a.pr-marker {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a.pr-marker:hover {
+  text-decoration: underline;
+}
+
+@media (prefers-color-scheme: dark) {
+  .pr-marker.pr-open {
+    --pr-color: #3fb950;
+  }
+  .pr-marker.pr-draft {
+    --pr-color: #9198a1;
+  }
+  .pr-marker.pr-merged {
+    --pr-color: #ab7df8;
+  }
+  .pr-marker.pr-closed {
+    --pr-color: #f85149;
+  }
+}
+
 @keyframes task-pulse {
   50% {
     opacity: 0.6;

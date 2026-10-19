@@ -45,6 +45,7 @@ def serialize_task(task: Task, *, comment_count: int | None = None) -> dict:
         "worktree_path": task.worktree_path,
         "branch": task.branch,
         "pr_url": task.pr_url,
+        "pr_state": task.pr_state,
         "parent_task_id": task.parent_task_id,
         "cleanup_error": task.cleanup_error,
         "editable": task.editable,

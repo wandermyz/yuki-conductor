@@ -162,7 +162,7 @@ def set_pr(task_id: int, url: str) -> Task:
     if not PR_URL_RE.match(url):
         raise BoardError(400, f"Not a GitHub pull request URL: {url!r}")
     get(task_id)
-    task = taskboard.store.update_fields(task_id, pr_url=url.rstrip("/"))
+    task = taskboard.store.update_fields(task_id, pr_url=url.rstrip("/"), pr_state="OPEN")
     _changed(task_id)
     return task
 

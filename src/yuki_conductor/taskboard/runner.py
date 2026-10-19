@@ -238,7 +238,7 @@ def _run_turn(task_id: int) -> None:
         )
     task = taskboard.store.get(task_id)
     if not task.pr_url and not cancelled and (url := _own_pr_url(text, cwd)):
-        task = taskboard.store.update_fields(task_id, pr_url=url)
+        task = taskboard.store.update_fields(task_id, pr_url=url, pr_state="OPEN")
 
     outcome = resolve_outcome(
         task,

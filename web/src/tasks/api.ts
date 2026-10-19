@@ -3,6 +3,8 @@ import type { StreamStep } from "../chat/api";
 
 export type TaskStatus = "todo" | "in_progress" | "needs_input" | "ready_for_review" | "done";
 
+export type PrState = "OPEN" | "DRAFT" | "MERGED" | "CLOSED";
+
 export const STATUS_LABELS: Record<TaskStatus, string> = {
   todo: "To Do",
   in_progress: "In Progress",
@@ -39,6 +41,8 @@ export interface Task {
   worktree_path: string | null;
   branch: string | null;
   pr_url: string | null;
+  /** As GitHub last showed it; null until first checked. */
+  pr_state: PrState | null;
   parent_task_id: number | null;
   cleanup_error: string | null;
   editable: boolean;

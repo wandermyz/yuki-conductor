@@ -42,9 +42,11 @@ def _pr_still_open(task, repo: str) -> bool:
     if not task.pr_url:
         return False
     try:
-        return pr_watcher.pr_state(task.pr_url, repo) == "OPEN"
+        state = pr_watcher.pr_state(task.pr_url, repo)
     except pr_watcher.GhError:
         return True
+    taskboard.store.update_fields(task.id, pr_state=state)
+    return state in ("OPEN", "DRAFT")
 
 
 def on_transition(event: TransitionEvent) -> None:

@@ -24,6 +24,7 @@ from yuki_conductor import taskboard
 from yuki_conductor.skills import GITHUB_AGENT_MARKER
 from yuki_conductor.store import ProjectStore
 from yuki_conductor.task_store import DONE, READY_FOR_REVIEW, TODO, Task
+from yuki_conductor.taskboard import live
 from yuki_conductor.taskboard.transitions import InvalidTransition, transition
 
 logger = logging.getLogger(__name__)
@@ -71,12 +72,14 @@ def _api(path: str, cwd: str | None, *, paginate: bool = False) -> object:
 
 
 def pr_state(pr_url: str, cwd: str | None) -> str:
-    """"MERGED", "CLOSED" or "OPEN"."""
+    """One of `task_store.PR_STATES`: "MERGED", "CLOSED", "DRAFT" or "OPEN"."""
     owner, repo, number = _parse(pr_url)
     pr = _api(f"repos/{owner}/{repo}/pulls/{number}", cwd)
     if pr.get("merged"):
         return "MERGED"
-    return "CLOSED" if pr.get("state") == "closed" else "OPEN"
+    if pr.get("state") == "closed":
+        return "CLOSED"
+    return "DRAFT" if pr.get("draft") else "OPEN"
 
 
 def fetch(pr_url: str, cwd: str | None) -> tuple[str, list[dict]]:
@@ -158,7 +161,9 @@ def check(task: Task) -> None:
         taskboard.store.add_comment(
             task.id, "github", c["body"], external_url=c["url"], external_author=c["author"]
         )
-    taskboard.store.update_fields(task.id, pr_checked_at=polled_at)
+    taskboard.store.update_fields(task.id, pr_checked_at=polled_at, pr_state=state)
+    if state != task.pr_state:
+        live.task_changed(task.id)
     # Merged or closed wins over new comments: the work is over, and the
     # comments stay on the timeline for the record.
     try:
