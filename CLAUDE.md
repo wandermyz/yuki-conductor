@@ -492,6 +492,13 @@ Before making any commit or creating a PR, you MUST run both:
 
 Do not commit or open a PR if either fails.
 
+**UI changes:** whenever a change touches what the web UI looks like, finish by
+screenshotting the affected view (the `playwright-cli` skill against the daemon
+at `http://127.0.0.1:2333`, desktop and a ~390px-wide mobile viewport) and send
+the screenshots to the user with your reply. Remember the daemon serves the main
+checkout's `web/dist/`, so build there (or point the browser at a `pnpm dev`
+server in the worktree) before capturing.
+
 ## Code Style
 
 Keep the code clean. **No backward compatibility is required.** This project has a single user and no external consumers, so:
