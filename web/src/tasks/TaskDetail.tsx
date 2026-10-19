@@ -5,6 +5,7 @@ import { HarnessIcon, StepList } from "../chat/shared";
 import Markdown from "../Markdown";
 import { imageMarkers, insertAt, pastedFiles, withoutMarker } from "../paste";
 import {
+  archiveTask,
   cancelTask,
   commentOnTask,
   markTaskDone,
@@ -124,6 +125,7 @@ export default function TaskDetail({
   onBack,
   onEdit,
   onOpenTask,
+  onArchived,
   onChanged,
 }: {
   task: Detail;
@@ -132,6 +134,7 @@ export default function TaskDetail({
   onBack: () => void;
   onEdit: () => void;
   onOpenTask: (id: number) => void;
+  onArchived: () => void;
   onChanged: () => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -170,6 +173,22 @@ export default function TaskDetail({
     },
     [onChanged],
   );
+
+  // Archived tasks never come back in the UI; they stay in the DB. The
+  // server removes the worktree and branches first, and refuses if it can't.
+  const archive = async () => {
+    if (!confirm("Archive this task? Its worktree and branches are removed, and it disappears from the board.")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await archiveTask(task.id);
+      onArchived();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      onChanged(); // show the cleanup error, if that's what failed
+    }
+    setBusy(false);
+  };
 
   const quote = (text: string, commentId: number | null) => {
     setDraft((cur) => (cur && !cur.endsWith("\n") ? `${cur}\n\n` : cur) + quoteBlock(text));
@@ -240,6 +259,11 @@ export default function TaskDetail({
           {(task.status === "needs_input" || task.status === "ready_for_review") && (
             <button onClick={() => act(() => markTaskDone(task.id))}>Mark done</button>
           )}
+          {task.status !== "in_progress" && (
+            <button disabled={busy} onClick={archive}>
+              Archive
+            </button>
+          )}
         </div>
       </div>
 
@@ -280,7 +304,13 @@ export default function TaskDetail({
         {task.cleanup_error && (
           <p className="task-warning">
             Cleanup failed: {task.cleanup_error}{" "}
-            <button onClick={() => act(() => retryCleanup(task.id))}>Retry cleanup</button>
+            {task.status === "done" ? (
+              <button onClick={() => act(() => retryCleanup(task.id))}>Retry cleanup</button>
+            ) : (
+              <button disabled={busy} onClick={archive}>
+                Retry archive
+              </button>
+            )}
           </p>
         )}
         {error && <p className="task-error">{error}</p>}

@@ -143,8 +143,8 @@ class StateBody(BaseModel):
 
 
 @router.get("/api/tasks")
-def list_tasks(archived: bool = False):
-    tasks = taskboard.store.list_tasks(include_archived=archived)
+def list_tasks(old: bool = False):
+    tasks = taskboard.store.list_tasks(include_old=old)
     counts = taskboard.store.comment_counts()
     return [serialize_task(t, comment_count=counts.get(t.id, 0)) for t in tasks]
 
@@ -181,7 +181,11 @@ def get_task(task_id: int):
         for c in taskboard.store.children(task_id)
     ]
     parent = taskboard.store.get(task.parent_task_id) if task.parent_task_id else None
-    data["parent"] = {"id": parent.id, "title": parent.title, "status": parent.status} if parent else None
+    data["parent"] = (
+        {"id": parent.id, "title": parent.title, "status": parent.status}
+        if parent and parent.archived_at is None
+        else None
+    )
     return data
 
 
@@ -235,6 +239,12 @@ def finish_task(task_id: int):
 @router.post("/api/tasks/{task_id}/cleanup")
 def retry_task_cleanup(task_id: int):
     return serialize_task(_call(actions.retry_cleanup, task_id))
+
+
+@router.post("/api/tasks/{task_id}/archive")
+def archive_task(task_id: int):
+    _call(actions.archive, task_id)
+    return {"ok": True}
 
 
 @router.post("/api/tasks/{task_id}/top")
