@@ -193,7 +193,7 @@ export default function PluginsView() {
     setRestart("restarting");
     setRestartError(null);
     restartDaemon()
-      .then(() => waitForDaemon())
+      .then((bootId) => waitForDaemon(bootId))
       .then(() => {
         setRestart("done");
         refresh();

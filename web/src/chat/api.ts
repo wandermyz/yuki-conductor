@@ -487,12 +487,13 @@ export async function removePlugin(name: string): Promise<void> {
 
 /**
  * Ask the daemon to restart itself. Returns as soon as the detached restarter
- * is spawned — the daemon is still up at that point, so callers must poll
- * `/api/status` to find out when the new one is serving.
+ * is spawned — the daemon is still up at that point, so callers must pass the
+ * returned boot id to `waitForDaemon` to find out when the new one is serving.
  */
-export async function restartDaemon(): Promise<void> {
+export async function restartDaemon(): Promise<string> {
   const r = await fetch("/api/daemon/restart", { method: "POST" });
   if (!r.ok) return pluginError(r);
+  return (await r.json()).boot_id;
 }
 
 export interface UpdateCommit {
@@ -523,7 +524,9 @@ export async function checkForUpdate(): Promise<UpdateStatus> {
 }
 
 /** Rebase onto upstream and restart. `restarting` is false when already current. */
-export async function applyUpdate(): Promise<UpdateStatus & { restarting: boolean }> {
+export async function applyUpdate(): Promise<
+  UpdateStatus & { restarting: boolean; boot_id?: string }
+> {
   const r = await fetch("/api/update", { method: "POST" });
   if (!r.ok) return pluginError(r);
   return r.json();
@@ -537,25 +540,28 @@ export async function applyUpdate(): Promise<UpdateStatus & { restarting: boolea
  */
 export async function runUpdate(): Promise<boolean> {
   const result = await applyUpdate();
-  if (!result.restarting) return false;
-  await waitForDaemon();
+  if (!result.restarting || !result.boot_id) return false;
+  await waitForDaemon(result.boot_id);
   window.location.reload();
   return true;
 }
 
-/** Resolve once /api/status answers again, or reject after `timeoutMs`. */
-export async function waitForDaemon(timeoutMs = 90000): Promise<void> {
+/**
+ * Resolve once a daemon other than `bootId` answers, or reject after
+ * `timeoutMs`. The old daemon keeps answering for a few seconds, and while
+ * it's down a proxy (`tailscale serve`) replies 502 rather than failing the
+ * request, so neither "a reply" nor "an error" alone says anything — only a
+ * new boot id does.
+ */
+export async function waitForDaemon(bootId: string, timeoutMs = 120000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  // The old daemon is still answering for a few seconds, so ignore early
-  // successes: only a reply after a confirmed outage means the new one is up.
-  let sawOutage = false;
   while (Date.now() < deadline) {
     await new Promise((res) => setTimeout(res, 2000));
     try {
-      const r = await fetch("/api/status", { cache: "no-store" });
-      if (r.ok && sawOutage) return;
+      const r = await fetch("/api/daemon", { cache: "no-store" });
+      if (r.ok && (await r.json()).boot_id !== bootId) return;
     } catch {
-      sawOutage = true;
+      // Down or mid-restart; keep polling.
     }
   }
   throw new Error("Daemon did not come back within the timeout");

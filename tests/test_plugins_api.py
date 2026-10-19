@@ -107,6 +107,9 @@ def test_restart_spawns_detached_and_clears_flag(client):
     assert resp.status_code == 202
     spawn.assert_called_once_with()
     assert client.get("/api/plugins").json()["restart_required"] is False
+    # The frontend waits for /api/daemon to report a different boot id.
+    boot_id = resp.json()["boot_id"]
+    assert boot_id and client.get("/api/daemon").json() == {"boot_id": boot_id}
 
 
 def test_restart_failure_is_reported(client):

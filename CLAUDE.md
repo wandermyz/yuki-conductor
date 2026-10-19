@@ -134,7 +134,10 @@ runs *inside* the daemon. `daemon.spawn_detached_restart()` dispatches to
 `daemon_windows` (schedule `os._exit(0)` a few seconds out and let yuki-watcher
 relaunch), `daemon_macos` (`setsid` + `launchctl kickstart -k`), or
 `daemon_linux` (delayed `systemctl --user restart --no-block`), returns 202 at
-once, and the frontend polls `/api/status` until the socket comes back.
+once with the daemon's `boot_id`, and the frontend polls `/api/daemon` until it
+reports a different one. Neither a reply nor an error alone means anything: the
+old daemon answers for a few seconds, and while it's down `tailscale serve`
+returns 502 instead of failing the request.
 
 ### Self-update
 
