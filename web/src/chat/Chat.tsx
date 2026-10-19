@@ -37,7 +37,7 @@ import SidebarResizer from "../SidebarResizer";
 import { useSidebarWidth } from "../sidebarWidth";
 import "./chat.css";
 import { HARNESS_ICONS } from "./harnessIcons";
-import { HarnessIcon, StepList } from "./shared";
+import { HarnessIcon, NewSessionPicker, StepList } from "./shared";
 /** Marks the agent a conversation runs on: its icon, or its name if it has none. */
 function HarnessMarker({ name }: { name: string }) {
   if (!HARNESS_ICONS[name]) return <span className="chat-list-harness">{name}</span>;
@@ -956,11 +956,10 @@ export default function Chat({
   const sidebar = useSidebarWidth("chat-sidebar-width", 280);
   const [usage, setUsage] = useState<Record<string, ConversationUsage>>({});
   const [projects, setProjects] = useState<Project[]>([]);
-  // New-conversation picker: the user always picks a harness, then a project.
-  const [pickerStep, setPickerStep] = useState<"harness" | "project" | null>(null);
-  // Harnesses a new conversation can use, and the one picked in the first step.
+  // New-conversation picker: an agent (when there's a choice), then a project.
+  const [picking, setPicking] = useState(false);
+  // Harnesses a new conversation can use.
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
-  const [newHarness, setNewHarness] = useState<string | null>(null);
 
   // Keep a ref to `selected` so the WS handler can read the latest value
   const selectedRef = useRef(selected);
@@ -1111,27 +1110,19 @@ export default function Chat({
     });
   }, [selected, messagesByConv]);
 
-  const newChat = async (projectName?: string) => {
+  const newChat = async (harness: string | null, projectName: string | null) => {
     try {
-      const c = await createConversation(undefined, projectName, newHarness ?? undefined);
+      const c = await createConversation(undefined, projectName ?? undefined, harness ?? undefined);
       setConversations((prev) => [c, ...prev]);
       setMessagesByConv((prev) => ({ ...prev, [c.id]: [] }));
       setSelected(c.id);
-      setPickerStep(null);
+      setPicking(false);
     } catch (e) {
       console.error(e);
     }
   };
 
-  const handleNewChat = () => {
-    setNewHarness(null);
-    setPickerStep("harness");
-  };
-
-  const pickHarness = (name: string) => {
-    setNewHarness(name);
-    setPickerStep("project");
-  };
+  const handleNewChat = () => setPicking(true);
 
   const dropFromView = (id: string) => {
     setConversations((prev) => prev.filter((c) => c.id !== id));
@@ -1264,62 +1255,14 @@ export default function Chat({
           onClose={() => setRenaming(null)}
         />
       )}
-      {pickerStep && (
-        <div className="modal-overlay" onClick={() => setPickerStep(null)}>
-          <div className="modal-content project-picker" onClick={(e) => e.stopPropagation()}>
-            {pickerStep === "harness" ? (
-              <>
-                <h3 className="modal-title">Select Agent</h3>
-                <ul className="project-picker-list">
-                  {harnesses.map((h) => (
-                    <li key={h.name}>
-                      <button className="project-picker-item harness-picker-item" onClick={() => pickHarness(h.name)}>
-                        <HarnessIcon name={h.name} />
-                        <span className="harness-picker-text">
-                          <span className="project-picker-name">{h.label}</span>
-                          <span className="project-picker-path">{h.name}</span>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <div className="modal-actions">
-                  <button className="modal-close-btn" onClick={() => setPickerStep(null)}>Cancel</button>
-                </div>
-              </>
-            ) : (
-              <>
-                <h3 className="modal-title">
-                  Select Project
-                  <span className="picker-step-context">
-                    <HarnessIcon name={newHarness} />
-                    {harnesses.find((h) => h.name === newHarness)?.label ?? newHarness}
-                  </span>
-                </h3>
-                <ul className="project-picker-list">
-                  <li>
-                    <button className="project-picker-item" onClick={() => newChat()}>
-                      <span className="project-picker-name">No project</span>
-                      <span className="project-picker-path">Default working directory</span>
-                    </button>
-                  </li>
-                  {projects.map((p) => (
-                    <li key={p.name}>
-                      <button className="project-picker-item" onClick={() => newChat(p.name)}>
-                        <span className="project-picker-name">{p.name}</span>
-                        <span className="project-picker-path">{p.path}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <div className="modal-actions">
-                  <button className="modal-close-btn" onClick={() => setPickerStep("harness")}>Back</button>
-                  <button className="modal-close-btn" onClick={() => setPickerStep(null)}>Cancel</button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+      {picking && (
+        <NewSessionPicker
+          harnesses={harnesses}
+          projects={projects}
+          allowNoProject
+          onPick={newChat}
+          onCancel={() => setPicking(false)}
+        />
       )}
       <aside className="chat-sidebar">
         <div className="chat-sidebar-header">

@@ -17,9 +17,9 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { fetchProcessing, subscribeChatSocket } from "../chat/api";
-import type { StreamStep } from "../chat/api";
-import { HarnessIcon } from "../chat/shared";
+import { fetchProcessing, listHarnesses, listProjects, subscribeChatSocket } from "../chat/api";
+import type { HarnessInfo, Project, StreamStep } from "../chat/api";
+import { HarnessIcon, NewSessionPicker } from "../chat/shared";
 import SidebarResizer from "../SidebarResizer";
 import { useSidebarWidth } from "../sidebarWidth";
 import {
@@ -35,6 +35,7 @@ import type { BoardState, Task, TaskDetail as Detail, TaskStatus } from "./api";
 import { StatusBadge } from "./common";
 import { formatWhen } from "./format";
 import TaskDetail from "./TaskDetail";
+import { loadDraft } from "./draft";
 import TaskForm from "./TaskForm";
 import "./tasks.css";
 
@@ -135,7 +136,23 @@ export default function TasksView({
     steps: [],
     running: false,
   });
-  const [form, setForm] = useState<"new" | "edit" | null>(null);
+  // A new task starts with the agent + project picker, then the form; a saved
+  // draft already has both, so it reopens straight into the form.
+  const [form, setForm] = useState<
+    "pick" | { harness: string | null; project: string } | "edit" | null
+  >(null);
+  const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  useEffect(() => {
+    listProjects().then(setProjects).catch(console.error);
+    listHarnesses()
+      .then((h) => setHarnesses(h.harnesses.filter((x) => x.available)))
+      .catch(console.error);
+  }, []);
+  const newTask = () => {
+    const draft = loadDraft();
+    setForm(draft ? { harness: draft.input.harness, project: draft.input.project } : "pick");
+  };
   const selectedRef = useRef(selectedId);
   useEffect(() => {
     selectedRef.current = selectedId;
@@ -290,7 +307,7 @@ export default function TasksView({
       <aside className="sidebar task-sidebar">
         <div className="sidebar-header task-sidebar-header">
           <h2>Tasks</h2>
-          <button className="primary" onClick={() => setForm("new")}>
+          <button className="primary" onClick={newTask}>
             + New
           </button>
         </div>
@@ -382,9 +399,21 @@ export default function TasksView({
         )}
       </main>
 
-      {form && (
+      {form === "pick" && (
+        <NewSessionPicker
+          harnesses={harnesses}
+          projects={projects}
+          allowNoProject={false}
+          onPick={(harness, project) => project && setForm({ harness, project })}
+          onCancel={() => setForm(null)}
+        />
+      )}
+      {form && form !== "pick" && (
         <TaskForm
           task={form === "edit" && shownDetail ? shownDetail : undefined}
+          picked={form === "edit" ? undefined : form}
+          harnesses={harnesses}
+          projects={projects}
           onCancel={() => setForm(null)}
           onSaved={(t) => {
             setForm(null);
