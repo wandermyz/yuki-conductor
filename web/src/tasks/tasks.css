@@ -751,34 +751,21 @@ a.pr-marker:hover {
   overflow-y: auto;
 }
 
-.task-form-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
+.task-form .task-form-repick {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
 }
 
-.task-form-harnesses {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.task-form .task-form-harnesses button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.task-form .task-form-harnesses button.active {
-  background: var(--accent-bg);
+.task-form .task-form-repick:hover {
   border-color: var(--accent-border);
-  color: var(--accent);
 }
 
-.task-form-harnesses .harness-icon {
-  width: 18px;
-  height: 18px;
+.task-form-repick-hint {
+  margin-left: 4px;
+  color: var(--accent);
 }
 
 .task-form-check {

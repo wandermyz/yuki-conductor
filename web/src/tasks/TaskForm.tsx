@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { uploadFile } from "../chat/api";
 import type { AttachmentRef, HarnessInfo, Project } from "../chat/api";
-import { HarnessIcon } from "../chat/shared";
+import { HarnessIcon, NewSessionPicker } from "../chat/shared";
 import Markdown from "../Markdown";
 import { createTask, editTask } from "./api";
 import type { Task, TaskInput } from "./api";
@@ -9,8 +9,8 @@ import { DRAFT_KEY, loadDraft } from "./draft";
 
 /**
  * Create a task, or edit one nobody has picked up yet. A new task's agent and
- * project were chosen in the picker (`picked`) or come from its saved draft,
- * so only an edit can change them here.
+ * project were chosen in the picker (`picked`) or come from its saved draft;
+ * either way the title shows them, and clicking it reopens the same picker.
  */
 export default function TaskForm({
   task,
@@ -41,6 +41,7 @@ export default function TaskForm({
   );
   const [uploads, setUploads] = useState<AttachmentRef[]>(draft?.uploads ?? []);
   const [preview, setPreview] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,18 +92,21 @@ export default function TaskForm({
       <div className="modal-content task-form">
         <h3 className="modal-title">
           {task ? `Edit task #${task.id}` : "New task"}
-          {!task && (
-            <span className="picker-step-context">
-              {harnesses.length > 1 && (
-                <>
-                  <HarnessIcon name={input.harness} />
-                  {harnesses.find((h) => h.name === input.harness)?.label ?? input.harness}
-                  {" · "}
-                </>
-              )}
-              {input.project}
-            </span>
-          )}
+          <button
+            className="picker-step-context task-form-repick"
+            title="Change agent or project"
+            onClick={() => setPicking(true)}
+          >
+            {harnesses.length > 1 && (
+              <>
+                <HarnessIcon name={input.harness} />
+                {harnesses.find((h) => h.name === input.harness)?.label ?? input.harness}
+                {" · "}
+              </>
+            )}
+            {input.project || "No project"}
+            <span className="task-form-repick-hint">Change</span>
+          </button>
         </h3>
 
         <input
@@ -133,40 +137,6 @@ export default function TaskForm({
             rows={8}
             onChange={(e) => set("body", e.target.value)}
           />
-        )}
-
-        {task && (
-          <>
-            <label className="task-form-field">
-              <span>Project</span>
-              <select value={input.project} onChange={(e) => set("project", e.target.value)}>
-                {projects.length === 0 && <option value="">No projects — add one in Projects</option>}
-                {projects.map((p) => (
-                  <option key={p.name} value={p.name}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {harnesses.length > 1 && (
-              <div className="task-form-field">
-                <span>Agent</span>
-                <div className="task-form-harnesses">
-                  {harnesses.map((h) => (
-                    <button
-                      key={h.name}
-                      className={input.harness === h.name ? "active" : ""}
-                      onClick={() => set("harness", h.name)}
-                    >
-                      <HarnessIcon name={h.name} />
-                      {h.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
         )}
 
         <label className="task-form-check">
@@ -214,6 +184,19 @@ export default function TaskForm({
           </button>
         </div>
       </div>
+      {picking && (
+        <NewSessionPicker
+          harnesses={harnesses}
+          projects={projects}
+          allowNoProject={false}
+          onPick={(harness, project) => {
+            // `harness` is null only without a harness list: keep the current one.
+            setInput((cur) => ({ ...cur, harness: harness ?? cur.harness, project: project ?? cur.project }));
+            setPicking(false);
+          }}
+          onCancel={() => setPicking(false)}
+        />
+      )}
     </div>
   );
 }
