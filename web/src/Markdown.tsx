@@ -19,11 +19,7 @@ function Mermaid({ source }: { source: string }) {
     let mounted: { destroy(): void } | null = null;
     let cancelled = false;
     import("pele/lazy")
-      .then(({ mountAsync }) =>
-        mountAsync(el, source, {
-          onError: (e) => setError(e instanceof Error ? e.message : String(e)),
-        }),
-      )
+      .then(({ mountAsync }) => mountAsync(el, source))
       .then((m) => {
         if (cancelled) m.destroy();
         else mounted = m;
