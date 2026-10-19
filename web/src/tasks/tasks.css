@@ -119,6 +119,7 @@
   display: none;
 }
 
+.tasks-view .task-pause,
 .tasks-view .task-filters button {
   white-space: nowrap;
   border-radius: 999px;
@@ -853,6 +854,7 @@ a.pr-marker:hover {
     min-height: 0;
   }
 
+  .tasks-view .task-pause,
   .tasks-view .task-filters button {
     min-height: 36px;
   }
