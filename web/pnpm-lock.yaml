@@ -24,8 +24,8 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0
       pele:
-        specifier: ^1.6.0
-        version: 1.6.0
+        specifier: 1.3.0
+        version: 1.3.0
       react:
         specifier: ^19.2.4
         version: 19.2.4
@@ -1101,8 +1101,8 @@ packages:
     resolution: {integrity: sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q==}
     engines: {node: '>=8'}
 
-  pele@1.6.0:
-    resolution: {integrity: sha512-VfAiVItsOGlGhvnBfphdT28VCG7mXMZxQNOwAGsCtxI2ztbUsT39MraEOYjsapLxVETkdUZscm0DdotYDQMLdw==}
+  pele@1.3.0:
+    resolution: {integrity: sha512-Jz3SW2OYo4yLkrrNuQwfg93el1SEGsFVTd7c/XVvZEry6UfR8ncvxoZqAefEpXOFpJRwhmXwWq17aGHg8W0vuA==}
     engines: {node: '>=20'}
 
   picocolors@1.1.1:
@@ -2571,7 +2571,7 @@ snapshots:
 
   path-key@3.1.1: {}
 
-  pele@1.6.0: {}
+  pele@1.3.0: {}
 
   picocolors@1.1.1: {}
 
