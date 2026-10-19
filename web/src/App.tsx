@@ -6,6 +6,7 @@ import ProjectsView from "./ProjectsView";
 import StatusView from "./StatusView";
 import TasksView from "./tasks/TasksView";
 import Terminal from "./Terminal";
+import UpdatePrompt from "./UpdatePrompt";
 import "./App.css";
 
 type Tab =
@@ -703,6 +704,7 @@ function App() {
           </button>
         ))}
       </nav>
+      <UpdatePrompt />
     </div>
   );
 }

@@ -4,12 +4,14 @@ import {
   listPlugins,
   removePlugin,
   restartDaemon,
+  runUpdate,
   setPluginEnabled,
   waitForDaemon,
 } from "./chat/api";
 import type { Plugin, PluginList } from "./chat/api";
 
 type RestartState = "idle" | "restarting" | "done" | "failed";
+type UpdateState = "idle" | "updating" | "current" | "failed";
 
 /** Dot colour + tooltip for a plugin's health, which is not the same as enabled. */
 function statusOf(p: Plugin): { cls: string; text: string } {
@@ -176,6 +178,8 @@ export default function PluginsView() {
   const [selected, setSelected] = useState<string | null>(null);
   const [restart, setRestart] = useState<RestartState>("idle");
   const [restartError, setRestartError] = useState<string | null>(null);
+  const [update, setUpdate] = useState<UpdateState>("idle");
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     listPlugins()
@@ -200,6 +204,21 @@ export default function PluginsView() {
       });
   };
 
+  // On success the page reloads once the daemon is back, so only "already
+  // current" and failures need showing here.
+  const doUpdate = () => {
+    setUpdate("updating");
+    setUpdateError(null);
+    runUpdate()
+      .then((restarted) => {
+        if (!restarted) setUpdate("current");
+      })
+      .catch((e: Error) => {
+        setUpdate("failed");
+        setUpdateError(e.message);
+      });
+  };
+
   const plugins = data?.plugins ?? [];
   const active = plugins.find((p) => p.name === selected) ?? null;
 
@@ -212,12 +231,26 @@ export default function PluginsView() {
 
         <div className="plugin-toolbar">
           <button
+            className="action-btn update-btn"
+            onClick={doUpdate}
+            disabled={update === "updating" || restart === "restarting"}
+            title="Fetch origin, rebase onto it, and restart the daemon"
+          >
+            {update === "updating" ? "Updating…" : "Update"}
+          </button>
+          <button
             className="action-btn restart-btn"
             onClick={doRestart}
-            disabled={restart === "restarting"}
+            disabled={restart === "restarting" || update === "updating"}
           >
             {restart === "restarting" ? "Restarting…" : "Restart daemon"}
           </button>
+          {update === "current" && (
+            <div className="plugin-banner ok">Already up to date.</div>
+          )}
+          {update === "failed" && (
+            <div className="plugin-banner error">Update failed: {updateError}</div>
+          )}
           {data?.restart_required && restart !== "restarting" && (
             <div className="plugin-banner">
               Changes take effect after a restart.
