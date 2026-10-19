@@ -259,3 +259,21 @@ def test_steps_replay(client, monkeypatch):
     monkeypatch.setattr(live, "steps", lambda tid: [{"kind": "text", "label": "hi", "seq": 0}])
     assert client.get(f"/api/tasks/{task['id']}/steps").json()[0]["label"] == "hi"
     assert client.get("/api/tasks/999/steps").status_code == 404
+
+
+def test_retry_cleanup(client, monkeypatch):
+    from yuki_conductor.taskboard import cleanup
+
+    task = _create(client)
+    assert client.post(f"/api/tasks/{task['id']}/cleanup").status_code == 409
+    transition(task["id"], NEEDS_INPUT, reason="x")
+    transition(task["id"], "done", reason="x")
+    monkeypatch.setattr(cleanup, "run", lambda tid: True)
+    assert client.post(f"/api/tasks/{task['id']}/cleanup").status_code == 200
+    def failed(tid):
+        taskboard.store.update_fields(tid, cleanup_error="git broke")
+        return False
+
+    monkeypatch.setattr(cleanup, "run", failed)
+    r = client.post(f"/api/tasks/{task['id']}/cleanup")
+    assert r.status_code == 500 and "git broke" in r.json()["detail"]

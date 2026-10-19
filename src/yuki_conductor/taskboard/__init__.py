@@ -25,18 +25,24 @@ def start_taskboard(platforms_by_name: dict | None = None, ws_manager=None) -> t
     to. Returns an event that stops the loop when set.
     """
     global active_harvester
-    from yuki_conductor.taskboard import live, transitions
+    from yuki_conductor.taskboard import cleanup, live, notify, pr_watcher, transitions
     from yuki_conductor.taskboard.harvester import Harvester
 
     live.attach(ws_manager)
+    notify.set_platforms(platforms_by_name or {})
     active_harvester = Harvester()
     transitions.add_listener(lambda event: live.task_changed(event.task.id))
     transitions.add_listener(active_harvester.on_transition)
+    transitions.add_listener(notify.on_transition)
+    transitions.add_listener(cleanup.on_transition)
     active_harvester.recover()
 
     stop = threading.Event()
     threading.Thread(
         target=active_harvester.loop, args=(stop,), name="taskboard-harvester", daemon=True
+    ).start()
+    threading.Thread(
+        target=pr_watcher.loop, args=(stop,), name="taskboard-pr-watcher", daemon=True
     ).start()
     return stop
 

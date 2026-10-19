@@ -87,5 +87,6 @@ def no_stray_harvester():
     import threading
 
     yield
-    leaked = [t.name for t in threading.enumerate() if t.name == "taskboard-harvester"]
+    loops = ("taskboard-harvester", "taskboard-pr-watcher")
+    leaked = [t.name for t in threading.enumerate() if t.name in loops]
     assert not leaked, "a test started the real taskboard loop; patch start_taskboard"

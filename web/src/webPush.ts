@@ -20,8 +20,8 @@ export function initServiceWorker(): void {
   if (!pushSupported()) return;
   navigator.serviceWorker.register("/sw.js").catch(console.error);
   navigator.serviceWorker.addEventListener("message", (e) => {
-    if (e.data?.type === "open-conversation") {
-      window.location.hash = `chat/${e.data.conversation_id}`;
+    if (e.data?.type === "open-hash" && typeof e.data.hash === "string") {
+      window.location.hash = e.data.hash;
     }
   });
   // Re-send an existing subscription so the daemon still has it even if its

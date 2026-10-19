@@ -19,6 +19,9 @@ src/yuki_conductor/
     live.py            — live steps + change broadcasts to the web UI
     actions.py         — create/edit/comment/cancel/done: what the API and CLI call
     routes.py          — /api/tasks + /api/taskboard HTTP routes
+    notify.py          — web push + Slack when a task needs the user
+    pr_watcher.py      — 5-minute `gh` poll of Ready for Review PRs
+    cleanup.py         — removes a Done task's worktree + branches
   cli_task.py       — `yuki-conductor task …` (show/list/comment/ask/pr/create)
   cli_http.py       — CLI → daemon HTTP helper (shared with `send`)
   harness/          — the agent CLIs a turn can run on (see Harnesses)

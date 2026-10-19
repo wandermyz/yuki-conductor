@@ -131,3 +131,27 @@ def _create(task: Task, repo: str) -> tuple[str, str]:
         _git(repo, "worktree", "add", str(path), "-b", branch, f"origin/{base}")
     logger.info("Task #%s: worktree %s on %s from origin/%s", task.id, path, branch, base)
     return str(path), branch
+
+
+def cleanup(task: Task, repo: str) -> None:
+    """Remove a finished task's worktree, local branch and remote branch.
+
+    Each step tolerates the thing already being gone. Only `task/` branches
+    are ever deleted. Raises WorktreeError on any other failure.
+    """
+    with _repo_lock(repo):
+        if task.worktree_path and Path(task.worktree_path).exists():
+            _git(repo, "worktree", "remove", "--force", task.worktree_path)
+        _git(repo, "worktree", "prune")
+        branch = task.branch
+        if not branch or not branch.startswith("task/"):
+            return
+        if _ref_exists(repo, f"refs/heads/{branch}"):
+            _git(repo, "branch", "-D", branch)
+        try:
+            _git(repo, "push", "origin", "--delete", branch)
+        except WorktreeError as exc:
+            # GitHub deletes merged branches itself when the repo says so.
+            if "remote ref does not exist" not in str(exc):
+                raise
+    logger.info("Task #%s: removed worktree and branch %s", task.id, branch)

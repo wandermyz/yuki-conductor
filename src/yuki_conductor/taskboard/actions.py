@@ -194,6 +194,16 @@ def mark_done(task_id: int) -> Task:
         raise BoardError(409, str(exc)) from exc
 
 
+def retry_cleanup(task_id: int) -> Task:
+    from yuki_conductor.taskboard import cleanup
+
+    if get(task_id).status != DONE:
+        raise BoardError(409, "Only a Done task is cleaned up")
+    if not cleanup.run(task_id):
+        raise BoardError(500, get(task_id).cleanup_error or "Cleanup failed")
+    return get(task_id)
+
+
 def reorder(ids: list[int]) -> None:
     try:
         taskboard.store.reorder(ids)
