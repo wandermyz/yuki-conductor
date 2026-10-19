@@ -307,6 +307,61 @@ export async function copyText(text: string): Promise<void> {
 
 /* ---------- Session ID Modal ---------- */
 
+const SIDEBAR_WIDTH_KEY = "chat-sidebar-width";
+const SIDEBAR_DEFAULT_WIDTH = 280;
+const SIDEBAR_MIN_WIDTH = 200;
+const SIDEBAR_MAX_WIDTH = 640;
+
+function clampSidebarWidth(w: number): number {
+  return Math.round(Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, w)));
+}
+
+// Desktop-only drag handle on the sidebar's right edge. The width lives in a
+// CSS variable, so the mobile layout's full-width sidebar simply ignores it.
+function SidebarResizer({ width, onResize }: { width: number; onResize: (w: number) => void }) {
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startWidth = width;
+    document.body.classList.add("chat-resizing");
+    const move = (ev: PointerEvent) => onResize(clampSidebarWidth(startWidth + ev.clientX - startX));
+    const up = () => {
+      document.body.classList.remove("chat-resizing");
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  };
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const step = e.shiftKey ? 40 : 10;
+    if (e.key === "ArrowLeft") onResize(clampSidebarWidth(width - step));
+    else if (e.key === "ArrowRight") onResize(clampSidebarWidth(width + step));
+    else return;
+    e.preventDefault();
+  };
+  return (
+    <div
+      className="chat-sidebar-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar"
+      aria-valuenow={width}
+      aria-valuemin={SIDEBAR_MIN_WIDTH}
+      aria-valuemax={SIDEBAR_MAX_WIDTH}
+      tabIndex={0}
+      title="Drag to resize, double-click to reset"
+      onPointerDown={onPointerDown}
+      onKeyDown={onKeyDown}
+      onDoubleClick={() => onResize(SIDEBAR_DEFAULT_WIDTH)}
+    />
+  );
+}
+
 function SessionIdModal({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -1001,6 +1056,13 @@ export default function Chat({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    return saved ? clampSidebarWidth(saved) : SIDEBAR_DEFAULT_WIDTH;
+  });
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+  }, [sidebarWidth]);
   const [usage, setUsage] = useState<Record<string, ConversationUsage>>({});
   const [projects, setProjects] = useState<Project[]>([]);
   // New-conversation picker: the user always picks a harness, then a project.
@@ -1294,7 +1356,10 @@ export default function Chat({
   const active = conversations.find((c) => c.id === selected);
 
   return (
-    <div className={`chat ${selected ? "chat-detail-open" : ""}`}>
+    <div
+      className={`chat ${selected ? "chat-detail-open" : ""}`}
+      style={{ "--chat-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
+    >
       {sessionIdModal && (
         <SessionIdModal sessionId={sessionIdModal} onClose={() => setSessionIdModal(null)} />
       )}
@@ -1449,6 +1514,7 @@ export default function Chat({
           })}
         </ul>
       </aside>
+      <SidebarResizer width={sidebarWidth} onResize={setSidebarWidth} />
       <main className="chat-main">
         {active ? (
           <ChatThread
