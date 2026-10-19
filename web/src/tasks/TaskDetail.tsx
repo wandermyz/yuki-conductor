@@ -329,8 +329,12 @@ export default function TaskDetail({
           <button
             className="task-quote-float"
             style={{ top: quoteTarget.top, left: quoteTarget.left }}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => quote(quoteTarget.text, quoteTarget.commentId)}
+            // Act on press, not click: by the time a tap's click fires, iOS
+            // has already cleared the selection and hidden this button.
+            onPointerDown={(e) => {
+              e.preventDefault();
+              quote(quoteTarget.text, quoteTarget.commentId);
+            }}
           >
             ❝ Quote
           </button>

@@ -60,7 +60,9 @@ const components: Components = {
   code: (allProps) => {
     const { className, children, ...props } = withoutNode(allProps);
     if (/\blanguage-mermaid\b/.test(className ?? "")) {
-      return <Mermaid source={String(children).replace(/\n$/, "")} />;
+      const source = String(children).replace(/\n$/, "");
+      // Keyed by source: an edited diagram starts over, error state included.
+      return <Mermaid key={source} source={source} />;
     }
     return (
       <code className={className} {...props}>

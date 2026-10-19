@@ -17,7 +17,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { subscribeChatSocket } from "../chat/api";
+import { fetchProcessing, subscribeChatSocket } from "../chat/api";
 import type { StreamStep } from "../chat/api";
 import { HarnessIcon } from "../chat/shared";
 import {
@@ -153,7 +153,22 @@ export default function TasksView({
       .then((t) => {
         if (selectedRef.current === t.id) setDetail(t);
       })
-      .catch(() => setDetail(null));
+      .catch(() => {
+        if (selectedRef.current === id) setDetail(null);
+      });
+  }, []);
+
+  /** Replay the open task's buffered steps, and whether its turn is running.
+   *  The buffer outlives a turn, so "running" comes from the processing map. */
+  const refreshLive = useCallback(() => {
+    const id = selectedRef.current;
+    if (id === null) return;
+    Promise.all([fetchTaskSteps(id), fetchProcessing()])
+      .then(([steps, processing]) => {
+        if (selectedRef.current !== id) return; // switched away meanwhile
+        setLive({ id, steps, running: stepsKey(id) in processing });
+      })
+      .catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -164,22 +179,25 @@ export default function TasksView({
   useEffect(() => {
     if (selectedId === null) return;
     refreshDetail();
-    fetchTaskSteps(selectedId)
-      .then((steps) => setLive({ id: selectedId, steps, running: steps.length > 0 }))
-      .catch(console.error);
-  }, [selectedId, refreshDetail]);
+    refreshLive();
+  }, [selectedId, refreshDetail, refreshLive]);
 
   // Live updates: task changes refetch; steps stream for the open task.
   useEffect(() => {
     let pending: ReturnType<typeof setTimeout> | null = null;
-    return subscribeChatSocket({
+    const changed = new Set<number>();
+    const unsubscribe = subscribeChatSocket({
       onEvent: (e) => {
         if (e.type === "task") {
-          // Coalesce bursts (a turn's end writes several changes at once).
+          // Coalesce bursts (a turn's end writes several changes at once),
+          // remembering every task they touched.
+          changed.add(e.id);
           if (pending) clearTimeout(pending);
           pending = setTimeout(() => {
+            pending = null;
             refreshList();
-            if (e.id === selectedRef.current) refreshDetail();
+            if (selectedRef.current !== null && changed.has(selectedRef.current)) refreshDetail();
+            changed.clear();
           }, 150);
           return;
         }
@@ -199,9 +217,18 @@ export default function TasksView({
           }));
         }
       },
-      onOpen: () => refreshList(),
+      // Anything may have happened while disconnected: catch up fully.
+      onOpen: () => {
+        refreshList();
+        refreshDetail();
+        refreshLive();
+      },
     });
-  }, [refreshList, refreshDetail]);
+    return () => {
+      if (pending) clearTimeout(pending);
+      unsubscribe();
+    };
+  }, [refreshList, refreshDetail, refreshLive]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { active: 0 };
@@ -330,6 +357,8 @@ export default function TasksView({
       <main className="content task-content">
         {shownDetail ? (
           <TaskDetail
+            // Fresh composer state (draft, quote, uploads) per task.
+            key={shownDetail.id}
             task={shownDetail}
             steps={live.id === selectedId ? live.steps : []}
             running={live.id === selectedId && live.running}
