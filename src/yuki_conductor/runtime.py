@@ -153,11 +153,18 @@ def start() -> None:
         platforms_by_name[rec.platform.name] = rec.platform
 
     from yuki_conductor.cron_scheduler import start_cron_scheduler
-    from yuki_conductor.web_server import mount_static, set_receivers, start_web_server
+    from yuki_conductor.taskboard import start_taskboard
+    from yuki_conductor.web_server import (
+        mount_static,
+        set_receivers,
+        start_web_server,
+        ws_manager,
+    )
 
     set_receivers(receivers)
     web_app = start_web_server()
     start_cron_scheduler(platforms_by_name=platforms_by_name)
+    start_taskboard(platforms_by_name=platforms_by_name, ws_manager=ws_manager)
 
     for rec in receivers:
         if hasattr(rec, "register_api_routes"):

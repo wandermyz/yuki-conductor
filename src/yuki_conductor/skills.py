@@ -343,10 +343,46 @@ def _conversation_section(conversation_key: str | None) -> list[str]:
     ]
 
 
+# Must match what `taskboard.pr_watcher` filters on: the agent may post to
+# GitHub as the user's own account, so authorship can't tell its comments apart.
+GITHUB_AGENT_MARKER = "<!-- yuki-conductor:agent -->"
+
+
+def _taskboard_section(task_id: int | None) -> list[str]:
+    """Tell a taskboard run what it's working on and how to report back."""
+    if task_id is None:
+        return []
+    return [
+        "",
+        "## Taskboard",
+        "",
+        f"You are working on taskboard task #{task_id}, unattended: nobody is "
+        "watching this turn, and nobody can answer a question mid-turn. Use the "
+        "`yuki-conductor-task` skill to work with the board; `yuki-conductor task "
+        "show` prints your task and its full comment timeline.",
+        "",
+        "- If you are blocked or need a decision, run `yuki-conductor task ask "
+        "\"<question>\"` and then end your turn. Do not wait for an answer; the "
+        "user's reply starts your next turn.",
+        "- If you open a pull request, register it with `yuki-conductor task pr "
+        "<url>`. The board follows it: review comments come back to you as a new "
+        "turn, and merging it finishes the task.",
+        "- Post progress worth keeping with `yuki-conductor task comment`.",
+        "- Your final response is posted to the task as a comment, so make it a "
+        "summary of what you did and what is left.",
+        "- Everything you post to GitHub (PR description, PR comments, review "
+        "replies) must end with this footer, exactly:",
+        "",
+        f"  _🤖 Posted by yuki-conductor agent (task #{task_id})_",
+        f"  {GITHUB_AGENT_MARKER}",
+    ]
+
+
 def system_prompt(
     plugin_dirs: list[str] | None = None,
     cwd: Path | str | None = None,
     conversation_key: str | None = None,
+    task_id: int | None = None,
 ) -> str:
     """Build the ``--append-system-prompt`` text for a spawned session.
 
@@ -360,11 +396,12 @@ def system_prompt(
         f"{_INTRO}\n\n{_SKILLS_INTRO}\n\n{_ATTACHMENTS}",
         *_render_skills(resolved, cwd),
         *_conversation_section(conversation_key),
+        *_taskboard_section(task_id),
     ]
     return _with_workspace_prompt("\n".join(lines))
 
 
-def core_prompt(conversation_key: str | None = None) -> str:
+def core_prompt(conversation_key: str | None = None, task_id: int | None = None) -> str:
     """The part of the system prompt every harness needs, without skills.
 
     Harnesses that list skills natively (pi) get only this: the attachment tag
@@ -374,6 +411,7 @@ def core_prompt(conversation_key: str | None = None) -> str:
     lines = [
         f"{_INTRO}\n\n{_ATTACHMENTS}",
         *_conversation_section(conversation_key),
+        *_taskboard_section(task_id),
     ]
     return _with_workspace_prompt("\n".join(lines))
 

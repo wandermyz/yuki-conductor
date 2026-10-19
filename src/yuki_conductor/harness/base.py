@@ -38,6 +38,11 @@ class RunResult:
     # big that window is. Both None when the harness reported neither.
     context_tokens: int | None = None
     context_window: int | None = None
+    # The resumed session no longer exists (the harness said so). The caller
+    # can retry with a fresh session that carries the history in the prompt.
+    session_missing: bool = False
+    # Stopped through `cancel_process` rather than finishing on its own.
+    cancelled: bool = False
 
 
 @dataclass
@@ -49,6 +54,7 @@ class RunRequest:
     model: str | None  # None: the harness's own default
     cwd: str
     conversation_key: str | None  # named in the system prompt for `yuki-conductor send`
+    task_id: int | None = None  # taskboard task this turn works on, if any
 
 
 @dataclass
@@ -72,10 +78,17 @@ class Harness(Protocol):
     name: str  # stored per conversation: "claude-code" | "pi"
     label: str  # shown in the UI
     bin: str  # executable, for error messages and availability checks
+    # Text the CLI prints when asked to resume a session it doesn't have, or
+    # None if it never fails that way (pi silently starts a new one).
+    missing_session_marker: str | None
 
     def launch(self, req: RunRequest) -> Launch: ...
 
     def new_parser(self) -> StreamParser: ...
+
+    def session_exists(self, session_id: str, cwd: str) -> bool:
+        """Whether `session_id` can still be resumed from `cwd`."""
+        ...
 
 
 def truncate(text: str, limit: int) -> str:

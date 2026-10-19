@@ -261,7 +261,11 @@ class WebPlatform:
     def _notify(self, conversation_key: str, text: str) -> None:
         """Browser push for a new assistant message (see `web_push`)."""
         conv = self._store.get_conversation(conversation_key)
-        web_push.notify(conversation_key, (conv.title if conv else None) or "", text)
+        web_push.notify(
+            web_push.conversation_target(conversation_key),
+            (conv.title if conv else None) or "",
+            text,
+        )
 
     def reserve_thread(self, title: str | None = None, harness: str = "claude-code") -> str:
         """Create an empty conversation and return its id.

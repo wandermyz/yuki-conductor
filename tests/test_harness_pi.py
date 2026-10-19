@@ -6,6 +6,7 @@ fake server returning Strata's exact 503 body and a scripted bash call.
 """
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -292,3 +293,32 @@ def test_failed_run_reports_no_context(tmp_path, monkeypatch):
     assert result.is_error
     assert result.context_tokens is None
     assert result.context_window is None
+
+
+# --------------------------------------------------------------------------
+# taskboard
+# --------------------------------------------------------------------------
+
+
+def test_task_prompt_section():
+    launch = _launch(task_id=5)
+    path = launch.argv[launch.argv.index("--append-system-prompt") + 1]
+    try:
+        assert "task #5" in open(path, encoding="utf-8").read()
+    finally:
+        os.unlink(path)
+
+
+def test_session_exists_searches_the_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("PI_CODING_AGENT_SESSION_DIR", str(tmp_path / "sessions"))
+    pi = PiHarness()
+    assert not pi.session_exists("sess-1", "/work")  # no store at all
+    group = tmp_path / "sessions" / "--work--"
+    group.mkdir(parents=True)
+    (group / "2026-10-18T10-00-00_sess-1.jsonl").write_text("{}\n")
+    assert pi.session_exists("sess-1", "/work")
+    assert not pi.session_exists("sess-2", "/work")
+
+
+def test_pi_never_reports_a_missing_session():
+    assert PiHarness().missing_session_marker is None

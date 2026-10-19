@@ -98,6 +98,37 @@ def parse_harnesses(raw: str | None) -> list[str]:
 
 ENABLED_HARNESSES = parse_harnesses(os.environ.get("HARNESSES"))
 
+# How many taskboard tasks each harness may run at once, e.g.
+# `TASKBOARD_CONCURRENCY=claude-code:10,pi:1`. Harnesses not named fall back
+# to `TASKBOARD_DEFAULT_LIMITS`, then to 1. pi defaults to 1 because it
+# usually runs on a single local GPU.
+TASKBOARD_DEFAULT_LIMITS = {"claude-code": 10, "pi": 1}
+
+
+def parse_taskboard_concurrency(raw: str | None) -> dict[str, int]:
+    limits: dict[str, int] = {}
+    for entry in (raw or "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        name, sep, value = entry.partition(":")
+        name = name.strip()
+        if not sep or not name or not value.strip().isdigit() or int(value) < 1:
+            raise RuntimeError(
+                f"TASKBOARD_CONCURRENCY entry {entry!r} isn't usable: use "
+                "<harness>:<positive integer>, e.g. 'claude-code:10,pi:1'"
+            )
+        limits[name] = int(value)
+    return limits
+
+
+TASKBOARD_CONCURRENCY = parse_taskboard_concurrency(os.environ.get("TASKBOARD_CONCURRENCY"))
+
+
+def taskboard_limit(harness: str) -> int:
+    """Max concurrent taskboard tasks for `harness`."""
+    return TASKBOARD_CONCURRENCY.get(harness, TASKBOARD_DEFAULT_LIMITS.get(harness, 1))
+
 # pi (https://github.com/earendil-works/pi). Its providers live in
 # ~/.pi/agent/models.json, which is personal machine config: yuki-conductor
 # only names the model, as `provider/id`.

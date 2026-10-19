@@ -348,3 +348,72 @@ def test_context_is_the_last_call_of_the_turn():
 
     assert result.context_tokens == 6 + 30100
     assert result.context_window == 200000
+
+
+def test_task_id_reaches_env_and_prompt():
+    output = _stream(_result_record("ok", "s1"))
+    mock_proc = _mock_popen(stdout=output)
+    prompts = []
+
+    def capture(*args, **kwargs):
+        cmd = args[0]
+        path = cmd[cmd.index("--append-system-prompt-file") + 1]
+        prompts.append(open(path, encoding="utf-8").read())
+        return mock_proc
+
+    with patch("subprocess.Popen", side_effect=capture) as mock_cls:
+        run_agent(CLAUDE, "go", task_id=12)
+
+    assert mock_cls.call_args.kwargs["env"]["YUKI_TASK_ID"] == "12"
+    assert "## Taskboard" in prompts[0]
+    assert "task #12" in prompts[0]
+
+
+def test_no_task_env_outside_the_taskboard():
+    mock_proc = _mock_popen(stdout=_stream(_result_record()))
+    with patch("subprocess.Popen", return_value=mock_proc) as mock_cls:
+        run_agent(CLAUDE, "go")
+    assert "YUKI_TASK_ID" not in mock_cls.call_args.kwargs["env"]
+
+
+def test_missing_session_is_flagged():
+    mock_proc = _mock_popen(
+        returncode=1, stderr="No conversation found with session ID: abc"
+    )
+    with patch("subprocess.Popen", return_value=mock_proc):
+        result = run_agent(CLAUDE, "go", session_id="abc")
+    assert result.is_error
+    assert result.session_missing
+
+
+def test_other_errors_are_not_missing_sessions():
+    mock_proc = _mock_popen(returncode=1, stderr="Some error")
+    with patch("subprocess.Popen", return_value=mock_proc):
+        result = run_agent(CLAUDE, "go", session_id="abc")
+    assert not result.session_missing
+
+
+def test_session_exists(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    cwd = tmp_path / "my.repo" / ".claude" / "worktrees" / "task-1"
+    cwd.mkdir(parents=True)
+    encoded = "".join(c if c.isalnum() else "-" for c in str(cwd.resolve()))
+    session_dir = tmp_path / "claude" / "projects" / encoded
+    session_dir.mkdir(parents=True)
+    (session_dir / "sess-1.jsonl").write_text("{}\n")
+
+    assert CLAUDE.session_exists("sess-1", str(cwd))
+    assert not CLAUDE.session_exists("sess-2", str(cwd))
+    assert not CLAUDE.session_exists("sess-1", str(tmp_path))
+
+
+def test_cancelled_run_is_flagged():
+    from yuki_conductor.harness import process
+
+    mock_proc = _mock_popen(returncode=-15)
+    with (
+        patch("subprocess.Popen", return_value=mock_proc),
+        patch.object(process, "was_cancelled", return_value=True),
+    ):
+        result = run_agent(CLAUDE, "go", conversation_key="task:1")
+    assert result.cancelled and not result.is_error

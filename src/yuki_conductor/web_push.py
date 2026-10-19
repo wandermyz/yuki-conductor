@@ -161,17 +161,27 @@ def _send_all(payload: str) -> None:
             logger.warning("Web push failed", exc_info=True)
 
 
-def notify(conversation_id: str, title: str, text: str) -> None:
-    """Push a notification for a new assistant message to every subscriber.
+def conversation_target(conversation_id: str) -> dict:
+    return {"kind": "conversation", "id": conversation_id}
 
-    Sends on a background thread: push services can be slow, and the caller is
-    usually delivering a reply that shouldn't wait on them.
+
+def task_target(task_id: int) -> dict:
+    return {"kind": "task", "id": task_id}
+
+
+def notify(target: dict, title: str, text: str) -> None:
+    """Push a notification to every subscriber.
+
+    `target` is what a click opens: `conversation_target(id)` or
+    `task_target(id)`. Sends on a background thread: push services can be
+    slow, and the caller is usually delivering something that shouldn't wait
+    on them.
     """
     if not subscriptions.list_all():
         return
     payload = json.dumps(
         {
-            "conversation_id": conversation_id,
+            "target": target,
             "title": title or "yuki-conductor",
             "body": _excerpt(text) or "New message",
         }

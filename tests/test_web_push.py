@@ -72,8 +72,8 @@ def test_web_reply_and_push_notify_subscribers(tmp_path, isolated_push_subscript
     platform.send(conv.id, OutgoingMessage(text="interim", pushed=True))
 
     assert [c["data"] for c in sent] == [
-        {"conversation_id": conv.id, "title": "Weekly report", "body": "All done here."},
-        {"conversation_id": conv.id, "title": "Weekly report", "body": "interim"},
+        {"target": {"kind": "conversation", "id": conv.id}, "title": "Weekly report", "body": "All done here."},
+        {"target": {"kind": "conversation", "id": conv.id}, "title": "Weekly report", "body": "interim"},
     ]
     assert sent[0]["sub"] == SUB
 
@@ -85,7 +85,7 @@ def test_start_thread_notifies_and_body_is_truncated(tmp_path, isolated_push_sub
     conv_id = platform.start_thread("x" * 500, title="Cron")
 
     (call,) = sent
-    assert call["data"]["conversation_id"] == conv_id
+    assert call["data"]["target"] == {"kind": "conversation", "id": conv_id}
     assert len(call["data"]["body"]) == web_push.MAX_BODY_CHARS
 
 
@@ -104,5 +104,5 @@ def test_gone_subscription_is_dropped(isolated_push_subscriptions, monkeypatch, 
 
     isolated_push_subscriptions.add(SUB["endpoint"], "pk", "au")
     monkeypatch.setattr(web_push, "webpush", gone)
-    web_push.notify("c1", "t", "body")
+    web_push.notify(web_push.conversation_target("c1"), "t", "body")
     assert isolated_push_subscriptions.list_all() == []

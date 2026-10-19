@@ -8,8 +8,10 @@ status line. `parse_stream_line` turns a raw line into zero or more
 
 import json
 import os
+import re
 import shutil
 import tempfile
+from pathlib import Path
 
 from yuki_conductor.config import CLAUDE_BIN, CLAUDE_DEFAULT_MODEL
 from yuki_conductor.harness.base import (
@@ -283,6 +285,7 @@ class ClaudeCodeHarness:
     name = "claude-code"
     label = "Claude Code"
     bin = CLAUDE_BIN
+    missing_session_marker = "No conversation found with session ID"
 
     def launch(self, req: RunRequest) -> Launch:
         plugin_dirs = skill_plugin_dirs()
@@ -290,7 +293,12 @@ class ClaudeCodeHarness:
         # projects. Passing it inline blows Windows' 32767-char command-line
         # limit, so it goes through a temp file instead.
         prompt_file = write_temp_prompt(
-            system_prompt(plugin_dirs, cwd=req.cwd, conversation_key=req.conversation_key)
+            system_prompt(
+                plugin_dirs,
+                cwd=req.cwd,
+                conversation_key=req.conversation_key,
+                task_id=req.task_id,
+            )
         )
         args = [
             "-p",
@@ -323,3 +331,10 @@ class ClaudeCodeHarness:
 
     def new_parser(self) -> ClaudeStreamParser:
         return ClaudeStreamParser()
+
+    def session_exists(self, session_id: str, cwd: str) -> bool:
+        """Claude Code keeps each session as `<config>/projects/<cwd>/<id>.jsonl`,
+        the cwd with every non-alphanumeric character turned into `-`."""
+        config = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
+        project = re.sub(r"[^A-Za-z0-9]", "-", str(Path(cwd).resolve()))
+        return (config / "projects" / project / f"{session_id}.jsonl").is_file()

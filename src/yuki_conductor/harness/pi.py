@@ -296,10 +296,15 @@ class PiHarness:
     name = "pi"
     label = "pi"
     bin = PI_BIN
+    # `--session-id` creates a session it doesn't have, so a resume never
+    # fails; `session_exists` is the only way to notice the history is gone.
+    missing_session_marker = None
 
     def launch(self, req: RunRequest) -> Launch:
         # pi lists skills natively, so it gets only the harness-neutral part.
-        prompt_file = write_temp_prompt(core_prompt(conversation_key=req.conversation_key))
+        prompt_file = write_temp_prompt(
+            core_prompt(conversation_key=req.conversation_key, task_id=req.task_id)
+        )
         argv = [
             self.bin,
             "--mode", "json",
@@ -319,3 +324,17 @@ class PiHarness:
 
     def new_parser(self) -> PiStreamParser:
         return PiStreamParser()
+
+    def session_exists(self, session_id: str, cwd: str) -> bool:
+        """Look for a session file named with `session_id` in pi's store.
+
+        pi groups sessions by cwd under `<agent-dir>/sessions/` (or
+        `PI_CODING_AGENT_SESSION_DIR`) but doesn't document the file naming, so
+        this searches the whole store. A miss only costs a fresh session that
+        is handed the full history, never lost context.
+        """
+        override = os.environ.get("PI_CODING_AGENT_SESSION_DIR")
+        root = Path(override).expanduser() if override else _agent_dir() / "sessions"
+        if not root.is_dir():
+            return False
+        return any(root.rglob(f"*{session_id}*"))
