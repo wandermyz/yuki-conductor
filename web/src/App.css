@@ -4,6 +4,12 @@
   height: 100dvh;
   max-height: 100dvh;
   overflow: hidden;
+  /* viewport-fit=cover (index.html) lets the page run under the notch and the
+     home indicator, and makes iOS report the safe-area insets: without it they
+     read 0 and the tab bar sits on the home indicator in a home-screen web
+     app. In Safari's own UI the insets are 0 and none of this costs a pixel. */
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) 0
+    env(safe-area-inset-left, 0);
 }
 
 .tabbar {
