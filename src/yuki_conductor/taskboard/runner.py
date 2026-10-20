@@ -120,7 +120,9 @@ def _run(task: Task, cwd: str) -> _Turn:
     comments = taskboard.store.comments(task.id)
     pending = [c for c in comments if not c.delivered]
     if task.session_id and harness.session_exists(task.session_id, cwd):
-        prompt, session_id = prompts.follow_up(pending), task.session_id
+        prompt, session_id = prompts.follow_up(
+            pending, reopened=prompts.was_reopened(comments), cwd=cwd
+        ), task.session_id
     elif task.session_id:
         logger.info("Task #%s: session %s is gone, starting fresh", task.id, task.session_id)
         prompt, session_id = prompts.full_context(task, comments, cwd), None

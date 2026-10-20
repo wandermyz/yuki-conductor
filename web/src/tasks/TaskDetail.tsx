@@ -9,6 +9,7 @@ import {
   cancelTask,
   commentOnTask,
   markTaskDone,
+  reopenTask,
   moveTaskToTop,
   retryCleanup,
 } from "./api";
@@ -233,7 +234,7 @@ export default function TaskDetail({
     task.status === "in_progress"
       ? "The agent is working. Your comment will reach it when this turn ends."
       : task.status === "done"
-        ? "This task is done. Comments are kept but won't reopen it."
+        ? "This task is done. Comments are kept but won't reopen it; use Reopen for that."
         : task.status === "todo"
           ? "Your comment will be included when the task is picked up."
           : "Commenting puts the task back in the queue.";
@@ -258,6 +259,9 @@ export default function TaskDetail({
           )}
           {(task.status === "needs_input" || task.status === "ready_for_review") && (
             <button onClick={() => act(() => markTaskDone(task.id))}>Mark done</button>
+          )}
+          {task.status === "done" && (
+            <button onClick={() => act(() => reopenTask(task.id))}>Reopen</button>
           )}
           {task.status !== "in_progress" && (
             <button disabled={busy} onClick={archive}>

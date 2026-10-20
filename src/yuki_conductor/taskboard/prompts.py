@@ -63,13 +63,39 @@ def first_turn(task: Task, comments: list[TaskComment], cwd: str) -> str:
     return "\n\n".join(parts)
 
 
-def follow_up(comments: list[TaskComment]) -> str:
+# The system comment `transitions` leaves when a Done task is reopened.
+REOPENED = "Done → To Do: reopened"
+
+
+def was_reopened(comments: list[TaskComment]) -> bool:
+    """Whether the task was reopened since the agent last spoke."""
+    for c in reversed(comments):
+        if c.author == "agent":
+            return False
+        if c.author == "system" and c.body.startswith(REOPENED):
+            return True
+    return False
+
+
+def follow_up(comments: list[TaskComment], *, reopened: bool = False, cwd: str = "") -> str:
     """Only the comments that arrived since the agent's last turn.
 
     With none (a turn interrupted by a daemon restart, or a task re-queued
-    without a comment), the agent is told to carry on instead.
+    without a comment), the agent is told to carry on instead. A reopened
+    task says so first: its old worktree is gone and it runs in a new one.
     """
     shown = [c for c in comments if c.author != "system"]
+    if reopened:
+        preface = (
+            "The user reopened this task after it was marked Done. Your previous "
+            f"worktree and branch were removed; you're now working in {cwd}, a fresh "
+            "checkout of the default branch, so anything merged is already there. "
+            "Run `yuki-conductor task show` if you need to re-read the timeline."
+        )
+        if not shown:
+            return preface
+        body = "\n\n".join(render_comment(c) for c in shown)
+        return f"{preface}\n\nNew comments since your last turn:\n\n{body}"
     if not shown:
         return (
             "Continue working on your task. There are no new comments: your "

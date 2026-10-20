@@ -242,3 +242,37 @@ def test_archive_removes_the_worktree_first(repo, monkeypatch):
     assert stored.archived_at is not None and stored.worktree_path is None
     assert not Path(task.worktree_path).exists()
     assert git(repo, "ls-remote", "--heads", "origin", task.branch) == ""
+
+
+@pytest.mark.parametrize("pr_state", ["MERGED", "OPEN"])
+def test_reopen_starts_a_new_worktree(repo, monkeypatch, pr_state):
+    from yuki_conductor.task_store import NEEDS_INPUT, TODO
+    from yuki_conductor.taskboard import actions, cleanup
+    from yuki_conductor.taskboard.transitions import transition
+
+    class Projects:
+        def get_path(self, name):
+            return str(repo)
+
+    monkeypatch.setattr(cleanup, "ProjectStore", Projects)
+    monkeypatch.setattr(cleanup.pr_watcher, "pr_state", lambda url, cwd: pr_state)
+    task = _pushed_task(repo)
+    taskboard.store.update_fields(task.id, pr_url="https://github.com/o/r/pull/1", session_id="s1")
+    transition(task.id, NEEDS_INPUT, reason="x")
+    transition(task.id, "done", reason="marked done")
+    with pytest.raises(actions.BoardError):
+        actions.reopen(task.id + 1000)
+    reopened = actions.reopen(task.id)
+    assert reopened.status == TODO and reopened.session_id == "s1"
+    assert reopened.worktree_path is None
+    assert not Path(task.worktree_path).exists()
+    if pr_state == "MERGED":
+        assert reopened.pr_url is None and reopened.branch is None
+        assert any("Previous pull request" in c.body for c in taskboard.store.comments(task.id))
+    else:
+        # Still open: back on the PR's branch, from what was pushed.
+        assert reopened.pr_url and reopened.branch == task.branch
+        path, branch = ensure_worktree(reopened, str(repo))
+        assert git(path, "rev-parse", "HEAD") == git(repo, "rev-parse", f"origin/{branch}")
+    with pytest.raises(actions.BoardError):
+        actions.reopen(task.id)  # not Done any more

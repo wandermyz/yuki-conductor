@@ -70,7 +70,7 @@ def test_requeue_goes_to_end_or_top():
     [
         ([], DONE),                       # To Do can only be cancelled
         ([], READY_FOR_REVIEW),
-        ([NEEDS_INPUT, DONE], TODO),      # Done is terminal
+        ([NEEDS_INPUT, DONE], NEEDS_INPUT),  # Done only reopens to To Do
         ([NEEDS_INPUT], READY_FOR_REVIEW),
     ],
 )
