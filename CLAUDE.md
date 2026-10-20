@@ -171,10 +171,16 @@ directly (`SELECT … FROM conversations WHERE archived_at IS NOT NULL`).
 
 The search box at the top of the chat sidebar calls `GET /api/search?q=`,
 which is `ConversationStore.search()`: keyword search over web messages
-through `messages_fts`, an FTS5 external-content table kept in step with
-`messages` by triggers (created, and backfilled, by `_init_search_index`).
-Each whitespace-separated term becomes a quoted prefix match, ANDed together
-(`fts_query`), so FTS syntax in the box is just text. You get one hit per
+through `messages_fts`, a regular FTS5 table of each message's text, keyed by
+`messages.rowid`. The store's own writes keep it in step from Python (no
+triggers), and `_init_search_index` drops and rebuilds it at every start, so a
+raw SQL write is picked up on the next restart. Chinese, Japanese and Korean have no
+spaces, so `cjk_split` surrounds every CJK character with U+200B, which the
+tokenizer treats as a separator: each character is a token. Only the index
+holds the split text; `messages` is never touched. Each whitespace-separated
+query term is split the same way and becomes a quoted prefix phrase, ANDed
+together (`fts_query`), so 认证 matches inside 认证方式 like a substring and FTS
+syntax in the box is just text. Snippets are `cjk_unsplit` back. You get one hit per
 conversation (its best message), and archived conversations are excluded.
 The snippet wraps matched terms in `\x02…\x03` (`SNIPPET_MARK`), which the
 sidebar renders as `<mark>`. Clicking a hit opens `#chat/<id>` and scrolls to
@@ -190,8 +196,7 @@ UI (`#chat/<id>`, `#tasks/<id>`); `conversation show <id>` prints a
 conversation's messages, and `task show` a link too. Links are built on
 `WEB_PUBLIC_URL` (`.env`, e.g. the `tailscale serve` URL; defaults to
 `http://127.0.0.1:<WEB_PORT>`). The bundled `yuki-conductor-search` skill
-documents it for agents. The default `unicode61` tokenizer doesn't split
-unspaced Chinese, so searching it means adding spaces. Semantic search is
+documents it for agents. Semantic search is
 planned behind the same `search()`: see
 `docs/plans/2026-10-19-conversation-semantic-search.md`.
 

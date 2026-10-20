@@ -6,6 +6,7 @@ that needs scrollback.
 """
 
 import json
+import re
 import sqlite3
 import threading
 import time
@@ -297,6 +298,11 @@ class ConversationStore:
             con = self._connect()
             try:
                 con.execute("DELETE FROM message_usage WHERE conversation_id = ?", (conv_id,))
+                con.execute(
+                    "DELETE FROM messages_fts WHERE rowid IN "
+                    "(SELECT rowid FROM messages WHERE conversation_id = ?)",
+                    (conv_id,),
+                )
                 con.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
                 cur = con.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
                 con.commit()
@@ -357,11 +363,15 @@ class ConversationStore:
         with self._lock:
             con = self._connect()
             try:
-                con.execute(
+                cur = con.execute(
                     "INSERT INTO messages "
                     "(id, conversation_id, role, text, attachments_json, created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
                     (msg.id, conv_id, role, text, attachments_json, msg.created_at),
+                )
+                con.execute(
+                    "INSERT INTO messages_fts(rowid, text) VALUES (?, ?)",
+                    (cur.lastrowid, cjk_split(text)),
                 )
                 con.execute(
                     "UPDATE conversations SET updated_at = ? WHERE id = ?",
@@ -486,7 +496,7 @@ class ConversationStore:
                     """
                     WITH hits AS MATERIALIZED (
                         SELECT rowid,
-                               snippet(messages_fts, 0, ?, ?, '…', 16) AS snippet,
+                               snippet(messages_fts, 0, ?, ?, '…', ?) AS snippet,
                                bm25(messages_fts) AS rank
                         FROM messages_fts WHERE messages_fts MATCH ?
                     )
@@ -506,14 +516,15 @@ class ConversationStore:
                     ORDER BY rank
                     LIMIT ?
                     """,
-                    (start, end, match, limit),
+                    (start, end, SNIPPET_TOKENS, match, limit),
                 ).fetchall()
             finally:
                 con.close()
         # bm25() is negative, lower is better; flip it so a score reads naturally.
         return [
             SearchHit(
-                conversation_id=r[0], title=r[1], message_id=r[2], snippet=r[3], score=-r[4]
+                conversation_id=r[0], title=r[1], message_id=r[2], snippet=cjk_unsplit(r[3]),
+                score=-r[4],
             )
             for r in rows
         ]
@@ -565,55 +576,83 @@ class ConversationStore:
 
 
 def _init_search_index(con: sqlite3.Connection) -> None:
-    """Create `messages_fts`, the keyword index over `messages.text`.
+    """Rebuild `messages_fts`, the keyword index over `messages.text`, from scratch.
 
-    An external-content FTS5 table: it stores only the index and reads text
-    back from `messages` by rowid, so triggers keep the two in step. `messages`
-    has a TEXT primary key, so its rowid is implicit — a VACUUM could renumber
-    it, and would need a `rebuild` after. Nothing here vacuums.
-
-    The default `unicode61` tokenizer splits on whitespace and punctuation, so
-    an unspaced run of Chinese is one token; searching it means adding spaces.
+    A regular FTS5 table holding `cjk_split` text under the message's rowid.
+    `add_message` and `delete_conversation` keep it in step from Python, since
+    splitting can't be done by a trigger without a UDF that a raw `sqlite3`
+    write wouldn't have. Rebuilding on every start is cheap and heals whatever
+    drifted meanwhile: a raw write, or a VACUUM renumbering `messages`'
+    implicit rowids.
     """
-    exists = con.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'"
-    ).fetchone()
-    con.execute(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts "
-        "USING fts5(text, content='messages', content_rowid='rowid')"
+    drop_search_index(con, "messages_fts")
+    con.execute(f"CREATE VIRTUAL TABLE messages_fts USING fts5(text, {FTS_TOKENIZE})")
+    rows = con.execute("SELECT rowid, text FROM messages").fetchall()
+    con.executemany(
+        "INSERT INTO messages_fts(rowid, text) VALUES (?, ?)",
+        [(rowid, cjk_split(text)) for rowid, text in rows],
     )
-    con.execute(
-        "CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN "
-        "INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text); END"
-    )
-    con.execute(
-        "CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN "
-        "INSERT INTO messages_fts(messages_fts, rowid, text) "
-        "VALUES ('delete', old.rowid, old.text); END"
-    )
-    con.execute(
-        "CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF text ON messages BEGIN "
-        "INSERT INTO messages_fts(messages_fts, rowid, text) "
-        "VALUES ('delete', old.rowid, old.text); "
-        "INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text); END"
-    )
-    if not exists:
-        # Index the history written before this table existed.
-        con.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+
+
+def drop_search_index(con: sqlite3.Connection, fts: str) -> None:
+    """Drop an FTS table, and the sync triggers the old external-content
+    index had on its source table."""
+    for suffix in ("ai", "ad", "au"):
+        con.execute(f"DROP TRIGGER IF EXISTS {fts}_{suffix}")
+    con.execute(f"DROP TABLE IF EXISTS {fts}")
+
+
+# CJK has no spaces between words, so `unicode61` would index a whole run as
+# one token and 认证 would never find 认证方式. Every CJK character is made its
+# own token instead, by surrounding it with a zero-width space the tokenizer
+# treats as a separator; a query is a phrase of those characters, so it
+# matches like a substring. U+200B rather than a space, so snippets can strip
+# exactly what was inserted and keep every space the user typed.
+CJK_BREAK = "\u200b"
+FTS_TOKENIZE = f"tokenize=\"unicode61 separators '{CJK_BREAK}'\""
+_CJK_CHAR = re.compile(
+    "["
+    "\u1100-\u11ff"  # Hangul Jamo
+    "\u3040-\u30ff"  # Hiragana, Katakana
+    "\u3130-\u318f"  # Hangul Compatibility Jamo
+    "\u31f0-\u31ff"  # Katakana Phonetic Extensions
+    "\u3400-\u4dbf"  # CJK Extension A
+    "\u4e00-\u9fff"  # CJK Unified Ideographs
+    "\uac00-\ud7af"  # Hangul Syllables
+    "\uf900-\ufaff"  # CJK Compatibility Ideographs
+    "\U00020000-\U0003ffff"  # CJK Extension B onwards, Compatibility Supplement
+    "]"
+)
+
+# Tokens in a snippet. Each CJK character is a token now, so this is what
+# keeps a Chinese snippet from being a handful of characters.
+SNIPPET_TOKENS = 48
+
+
+def cjk_split(text: str) -> str:
+    """`text` with every CJK character made its own FTS token (see `CJK_BREAK`)."""
+    return _CJK_CHAR.sub(lambda m: f"{CJK_BREAK}{m[0]}{CJK_BREAK}", text)
+
+
+def cjk_unsplit(text: str) -> str:
+    """Undo `cjk_split`, e.g. in a snippet read back from an index."""
+    return text.replace(CJK_BREAK, "")
 
 
 def fts_query(query: str) -> str | None:
     """Turn what the user typed into an FTS5 query that can't be a syntax error.
 
     Every whitespace-separated term becomes a quoted prefix match (`"term"*`),
-    ANDed together, so operators, quotes and parentheses are just text. None
-    means there's nothing to search for.
+    ANDed together, so operators, quotes and parentheses are just text. A term
+    is split like the indexed text, so 认证 is the phrase 认 证 and matches
+    inside 认证方式. None means there's nothing to search for.
     """
-    terms = [t.replace('"', '""') for t in query.split()]
-    terms = [t for t in terms if any(ch.isalnum() for ch in t)]
+    terms = [t for t in query.split() if any(ch.isalnum() for ch in t)]
     if not terms:
         return None
-    return " ".join(f'"{t}"*' for t in terms)
+    return " ".join(
+        '"' + cjk_split(t).strip(CJK_BREAK).replace('"', '""') + '"*' for t in terms
+    )
 
 
 def _row_to_message(r: tuple) -> StoredMessage:

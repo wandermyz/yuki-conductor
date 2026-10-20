@@ -12,7 +12,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from yuki_conductor.config import DB_FILE
-from yuki_conductor.conversation_store import SNIPPET_MARK, fts_query
+from yuki_conductor.conversation_store import (
+    FTS_TOKENIZE,
+    SNIPPET_MARK,
+    SNIPPET_TOKENS,
+    cjk_split,
+    cjk_unsplit,
+    drop_search_index,
+    fts_query,
+)
 from yuki_conductor.store import _SqliteKVStore
 
 TODO = "todo"
@@ -237,8 +245,9 @@ class TaskStore:
                         int(use_worktree), TODO, parent_task_id, now, now,
                     ),
                 )
-                con.commit()
                 task_id = cur.lastrowid
+                _index_task(con, task_id)
+                con.commit()
             finally:
                 con.close()
         return self.get(task_id)
@@ -319,6 +328,8 @@ class TaskStore:
                     f"UPDATE tasks SET {assignments} WHERE id = ?",
                     (*fields.values(), task_id),
                 )
+                if fields.keys() & {"title", "body"}:
+                    _index_task(con, task_id)
                 con.commit()
             finally:
                 con.close()
@@ -345,6 +356,8 @@ class TaskStore:
                     "AND started_at IS NULL",
                     (*fields.values(), task_id, TODO),
                 )
+                if cur.rowcount == 1 and fields.keys() & {"title", "body"}:
+                    _index_task(con, task_id)
                 con.commit()
                 return cur.rowcount == 1
             finally:
@@ -505,13 +518,13 @@ class TaskStore:
                     """
                     WITH task_hits AS MATERIALIZED (
                         SELECT rowid AS task_id, NULL AS comment_id,
-                               snippet(tasks_fts, -1, ?, ?, '…', 16) AS snippet,
+                               snippet(tasks_fts, -1, ?, ?, '…', ?) AS snippet,
                                bm25(tasks_fts, 5.0, 1.0) AS rank
                         FROM tasks_fts WHERE tasks_fts MATCH ?
                     ),
                     comment_hits AS MATERIALIZED (
                         SELECT rowid AS comment_id,
-                               snippet(task_comments_fts, 0, ?, ?, '…', 16) AS snippet,
+                               snippet(task_comments_fts, 0, ?, ?, '…', ?) AS snippet,
                                bm25(task_comments_fts) AS rank
                         FROM task_comments_fts WHERE task_comments_fts MATCH ?
                     ),
@@ -520,7 +533,6 @@ class TaskStore:
                         UNION ALL
                         SELECT c.task_id, h.comment_id, h.snippet, h.rank
                         FROM comment_hits h JOIN task_comments c ON c.id = h.comment_id
-                        WHERE c.author != 'system'
                     )
                     SELECT task_id, title, status, comment_id, snippet, rank FROM (
                         SELECT h.*, t.title, t.status,
@@ -536,14 +548,14 @@ class TaskStore:
                     ORDER BY comment_id IS NOT NULL, rank
                     LIMIT ?
                     """,
-                    (start, end, match, start, end, match, limit),
+                    (start, end, SNIPPET_TOKENS, match, start, end, SNIPPET_TOKENS, match, limit),
                 ).fetchall()
             finally:
                 con.close()
         # bm25() is negative, lower is better; flip it so a score reads naturally.
         return [
             TaskSearchHit(
-                task_id=r[0], title=r[1], status=r[2], comment_id=r[3], snippet=r[4],
+                task_id=r[0], title=r[1], status=r[2], comment_id=r[3], snippet=cjk_unsplit(r[4]),
                 score=-r[5],
             )
             for r in rows
@@ -587,9 +599,14 @@ class TaskStore:
                         external_author, now,
                     ),
                 )
+                comment_id = cur.lastrowid
+                if author != "system":
+                    con.execute(
+                        "INSERT INTO task_comments_fts(rowid, body) VALUES (?, ?)",
+                        (comment_id, cjk_split(body)),
+                    )
                 con.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", (now, task_id))
                 con.commit()
-                comment_id = cur.lastrowid
             finally:
                 con.close()
         return TaskComment(
@@ -649,43 +666,41 @@ class TaskStore:
 
 
 def _init_search_index(con: sqlite3.Connection) -> None:
-    """Create `tasks_fts` and `task_comments_fts`, the keyword indexes.
+    """Rebuild `tasks_fts` and `task_comments_fts`, the keyword indexes, from scratch.
 
-    External-content FTS5 tables kept in step by triggers, like
-    `conversation_store._init_search_index`; both content tables have
-    INTEGER PRIMARY KEYs, so the rowids are stable.
+    Regular FTS5 tables of `cjk_split` text keyed by the row's id, kept in
+    step from Python and rebuilt at every start, like
+    `conversation_store._init_search_index`. System comments are never
+    indexed.
     """
-    indexes = {
-        "tasks_fts": ("tasks", ("title", "body")),
-        "task_comments_fts": ("task_comments", ("body",)),
-    }
-    for fts, (table, cols) in indexes.items():
-        exists = con.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (fts,)
-        ).fetchone()
-        names = ", ".join(cols)
-        new = ", ".join(f"new.{c}" for c in cols)
-        old = ", ".join(f"old.{c}" for c in cols)
-        con.execute(
-            f"CREATE VIRTUAL TABLE IF NOT EXISTS {fts} "
-            f"USING fts5({names}, content='{table}', content_rowid='id')"
-        )
-        con.execute(
-            f"CREATE TRIGGER IF NOT EXISTS {fts}_ai AFTER INSERT ON {table} BEGIN "
-            f"INSERT INTO {fts}(rowid, {names}) VALUES (new.id, {new}); END"
-        )
-        con.execute(
-            f"CREATE TRIGGER IF NOT EXISTS {fts}_ad AFTER DELETE ON {table} BEGIN "
-            f"INSERT INTO {fts}({fts}, rowid, {names}) VALUES ('delete', old.id, {old}); END"
-        )
-        con.execute(
-            f"CREATE TRIGGER IF NOT EXISTS {fts}_au AFTER UPDATE OF {names} ON {table} BEGIN "
-            f"INSERT INTO {fts}({fts}, rowid, {names}) VALUES ('delete', old.id, {old}); "
-            f"INSERT INTO {fts}(rowid, {names}) VALUES (new.id, {new}); END"
-        )
-        if not exists:
-            # Index the history written before this table existed.
-            con.execute(f"INSERT INTO {fts}({fts}) VALUES ('rebuild')")
+    drop_search_index(con, "tasks_fts")
+    drop_search_index(con, "task_comments_fts")
+    con.execute(f"CREATE VIRTUAL TABLE tasks_fts USING fts5(title, body, {FTS_TOKENIZE})")
+    con.execute(f"CREATE VIRTUAL TABLE task_comments_fts USING fts5(body, {FTS_TOKENIZE})")
+    tasks = con.execute("SELECT id, title, body FROM tasks").fetchall()
+    con.executemany(
+        "INSERT INTO tasks_fts(rowid, title, body) VALUES (?, ?, ?)",
+        [(i, cjk_split(title), cjk_split(body)) for i, title, body in tasks],
+    )
+    comments = con.execute(
+        "SELECT id, body FROM task_comments WHERE author != 'system'"
+    ).fetchall()
+    con.executemany(
+        "INSERT INTO task_comments_fts(rowid, body) VALUES (?, ?)",
+        [(i, cjk_split(body)) for i, body in comments],
+    )
+
+
+def _index_task(con: sqlite3.Connection, task_id: int) -> None:
+    """Bring a task's `tasks_fts` row up to date with its title and body."""
+    con.execute("DELETE FROM tasks_fts WHERE rowid = ?", (task_id,))
+    title, body = con.execute(
+        "SELECT title, body FROM tasks WHERE id = ?", (task_id,)
+    ).fetchone()
+    con.execute(
+        "INSERT INTO tasks_fts(rowid, title, body) VALUES (?, ?, ?)",
+        (task_id, cjk_split(title), cjk_split(body)),
+    )
 
 
 class TaskboardStateStore(_SqliteKVStore):
