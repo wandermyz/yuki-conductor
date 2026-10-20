@@ -166,6 +166,22 @@ from `/api/conversations`, and `GET /api/conversations/{id}` and its
 `/messages` 404. There's no unarchive and no UI to browse them — query the DB
 directly (`SELECT … FROM conversations WHERE archived_at IS NOT NULL`).
 
+### Conversation search
+
+The search box at the top of the chat sidebar calls `GET /api/search?q=`,
+which is `ConversationStore.search()`: keyword search over web messages
+through `messages_fts`, an FTS5 external-content table kept in step with
+`messages` by triggers (created, and backfilled, by `_init_search_index`).
+Each whitespace-separated term becomes a quoted prefix match, ANDed together
+(`fts_query`), so FTS syntax in the box is just text. You get one hit per
+conversation (its best message), and archived conversations are excluded.
+The snippet wraps matched terms in `\x02…\x03` (`SNIPPET_MARK`), which the
+sidebar renders as `<mark>`. Clicking a hit opens `#chat/<id>` and scrolls to
+and flashes that message. The default `unicode61` tokenizer doesn't split
+unspaced Chinese, so searching it means adding spaces. Semantic search is
+planned behind the same `search()`: see
+`docs/plans/2026-10-19-conversation-semantic-search.md`.
+
 ### Web tabs
 
 The tab bar holds four: Chat, Tasks, Automations, and a `⋯` overflow.

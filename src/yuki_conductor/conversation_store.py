@@ -51,6 +51,20 @@ class StoredConversation:
     archived_at: float | None = None  # set: hidden from the web UI, only reachable via SQL
 
 
+# Wraps each matched term in a search snippet. Control characters, so they
+# can't collide with message text and the UI never has to parse HTML.
+SNIPPET_MARK = ("\x02", "\x03")
+
+
+@dataclass
+class SearchHit:
+    conversation_id: str
+    title: str | None
+    message_id: str
+    snippet: str
+    score: float
+
+
 class ConversationStore:
     """Web-platform conversations + their message scrollback."""
 
@@ -99,6 +113,7 @@ class ConversationStore:
                     "CREATE INDEX IF NOT EXISTS idx_messages_conv_created "
                     "ON messages(conversation_id, created_at)"
                 )
+                _init_search_index(con)
                 con.execute(
                     """
                     CREATE TABLE IF NOT EXISTS message_usage (
@@ -451,6 +466,58 @@ class ConversationStore:
             finally:
                 con.close()
 
+    def search(self, query: str, limit: int = 20) -> list[SearchHit]:
+        """Keyword search over unarchived conversations' messages.
+
+        One hit per conversation — its best-ranked message, whose snippet
+        wraps matched terms in `SNIPPET_MARK`. Best conversation first;
+        `score` is higher for a better match.
+        """
+        match = fts_query(query)
+        if match is None:
+            return []
+        start, end = SNIPPET_MARK
+        with self._lock:
+            con = self._connect()
+            try:
+                # snippet() and bm25() only work straight off the FTS cursor,
+                # not under a window function, so materialize them first.
+                rows = con.execute(
+                    """
+                    WITH hits AS MATERIALIZED (
+                        SELECT rowid,
+                               snippet(messages_fts, 0, ?, ?, '…', 16) AS snippet,
+                               bm25(messages_fts) AS rank
+                        FROM messages_fts WHERE messages_fts MATCH ?
+                    )
+                    SELECT conversation_id, title, message_id, snippet, rank FROM (
+                        SELECT m.conversation_id, c.title, m.id AS message_id,
+                               h.snippet, h.rank,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY m.conversation_id
+                                   ORDER BY h.rank, m.created_at DESC
+                               ) AS n
+                        FROM hits h
+                        JOIN messages m ON m.rowid = h.rowid
+                        JOIN conversations c ON c.id = m.conversation_id
+                        WHERE c.archived_at IS NULL
+                    )
+                    WHERE n = 1
+                    ORDER BY rank
+                    LIMIT ?
+                    """,
+                    (start, end, match, limit),
+                ).fetchall()
+            finally:
+                con.close()
+        # bm25() is negative, lower is better; flip it so a score reads naturally.
+        return [
+            SearchHit(
+                conversation_id=r[0], title=r[1], message_id=r[2], snippet=r[3], score=-r[4]
+            )
+            for r in rows
+        ]
+
     def get_conversation_usage(self, conv_id: str) -> dict:
         """Return aggregated usage for a conversation."""
         with self._lock:
@@ -495,6 +562,58 @@ class ConversationStore:
                 }
             finally:
                 con.close()
+
+
+def _init_search_index(con: sqlite3.Connection) -> None:
+    """Create `messages_fts`, the keyword index over `messages.text`.
+
+    An external-content FTS5 table: it stores only the index and reads text
+    back from `messages` by rowid, so triggers keep the two in step. `messages`
+    has a TEXT primary key, so its rowid is implicit — a VACUUM could renumber
+    it, and would need a `rebuild` after. Nothing here vacuums.
+
+    The default `unicode61` tokenizer splits on whitespace and punctuation, so
+    an unspaced run of Chinese is one token; searching it means adding spaces.
+    """
+    exists = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'"
+    ).fetchone()
+    con.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts "
+        "USING fts5(text, content='messages', content_rowid='rowid')"
+    )
+    con.execute(
+        "CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN "
+        "INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text); END"
+    )
+    con.execute(
+        "CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN "
+        "INSERT INTO messages_fts(messages_fts, rowid, text) "
+        "VALUES ('delete', old.rowid, old.text); END"
+    )
+    con.execute(
+        "CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF text ON messages BEGIN "
+        "INSERT INTO messages_fts(messages_fts, rowid, text) "
+        "VALUES ('delete', old.rowid, old.text); "
+        "INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text); END"
+    )
+    if not exists:
+        # Index the history written before this table existed.
+        con.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+
+
+def fts_query(query: str) -> str | None:
+    """Turn what the user typed into an FTS5 query that can't be a syntax error.
+
+    Every whitespace-separated term becomes a quoted prefix match (`"term"*`),
+    ANDed together, so operators, quotes and parentheses are just text. None
+    means there's nothing to search for.
+    """
+    terms = [t.replace('"', '""') for t in query.split()]
+    terms = [t for t in terms if any(ch.isalnum() for ch in t)]
+    if not terms:
+        return None
+    return " ".join(f'"{t}"*' for t in terms)
 
 
 def _row_to_message(r: tuple) -> StoredMessage:

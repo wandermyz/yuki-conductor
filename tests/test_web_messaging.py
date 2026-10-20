@@ -303,3 +303,24 @@ def test_archive_conversation_hides_it_everywhere(client):
     assert client.get(f"/api/conversations/{conv['id']}").status_code == 404
     assert client.get(f"/api/conversations/{conv['id']}/messages").status_code == 404
     assert client.post(f"/api/conversations/{conv['id']}/archive").status_code == 404
+
+
+def test_search_api(client):
+    from yuki_conductor import web_server
+
+    conv = client.post("/api/conversations", json={"title": "flaky ci"}).json()
+    msg = web_server.conv_store.add_message(conv["id"], "assistant", "the runner timed out")
+    r = client.get("/api/search", params={"q": "timed"})
+    assert r.status_code == 200
+    [hit] = r.json()
+    assert hit["conversation_id"] == conv["id"]
+    assert hit["title"] == "flaky ci"
+    assert hit["message_id"] == msg.id
+    assert "\x02timed\x03" in hit["snippet"]
+    assert isinstance(hit["score"], float)
+
+    assert client.get("/api/search", params={"q": '"( AND'}).status_code == 200
+    assert client.get("/api/search").json() == []
+
+    client.post(f"/api/conversations/{conv['id']}/archive")
+    assert client.get("/api/search", params={"q": "timed"}).json() == []
