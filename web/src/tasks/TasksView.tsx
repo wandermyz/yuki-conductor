@@ -411,6 +411,22 @@ export default function TasksView({
               if (e.key === "Escape") setQuery("");
             }}
           />
+          {query && (
+            <button
+              type="button"
+              className="task-search-clear"
+              aria-label="Clear search"
+              title="Clear search"
+              // Keep focus off the input, so the keyboard closes on mobile.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setQuery("");
+                (document.activeElement as HTMLElement | null)?.blur();
+              }}
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         {q ? (
