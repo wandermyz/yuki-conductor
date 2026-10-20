@@ -173,8 +173,11 @@ The search box at the top of the chat sidebar calls `GET /api/search?q=`,
 which is `ConversationStore.search()`: keyword search over web messages
 through `messages_fts`, a regular FTS5 table of each message's text, keyed by
 `messages.rowid`. The store's own writes keep it in step from Python (no
-triggers), and `_init_search_index` drops and rebuilds it at every start, so a
-raw SQL write is picked up on the next restart. Chinese, Japanese and Korean have no
+triggers), so a raw SQL write isn't indexed. `search_indexes` records each
+index's `SEARCH_INDEX_VERSION`; `_init_search_index` rebuilds an index only
+when that differs, in one `BEGIN IMMEDIATE` transaction, so CLI processes that
+open the store don't redo it. Bump the version whenever what an index holds
+changes (columns, tokenizer, `cjk_split`). Chinese, Japanese and Korean have no
 spaces, so `cjk_split` surrounds every CJK character with U+200B, which the
 tokenizer treats as a separator: each character is a token. Only the index
 holds the split text; `messages` is never touched. Each whitespace-separated

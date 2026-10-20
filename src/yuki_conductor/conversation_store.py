@@ -576,16 +576,17 @@ class ConversationStore:
 
 
 def _init_search_index(con: sqlite3.Connection) -> None:
-    """Rebuild `messages_fts`, the keyword index over `messages.text`, from scratch.
+    """Create `messages_fts`, the keyword index over `messages.text`, if it's stale.
 
     A regular FTS5 table holding `cjk_split` text under the message's rowid.
     `add_message` and `delete_conversation` keep it in step from Python, since
     splitting can't be done by a trigger without a UDF that a raw `sqlite3`
-    write wouldn't have. Rebuilding on every start is cheap and heals whatever
-    drifted meanwhile: a raw write, or a VACUUM renumbering `messages`'
-    implicit rowids.
+    write wouldn't have; a raw write therefore isn't indexed until the next
+    rebuild. `messages` has a TEXT primary key, so its rowid is implicit and a
+    VACUUM could renumber it; nothing here vacuums.
     """
-    drop_search_index(con, "messages_fts")
+    if not begin_index_rebuild(con, "messages_fts"):
+        return
     con.execute(f"CREATE VIRTUAL TABLE messages_fts USING fts5(text, {FTS_TOKENIZE})")
     rows = con.execute("SELECT rowid, text FROM messages").fetchall()
     con.executemany(
@@ -594,12 +595,41 @@ def _init_search_index(con: sqlite3.Connection) -> None:
     )
 
 
-def drop_search_index(con: sqlite3.Connection, fts: str) -> None:
-    """Drop an FTS table, and the sync triggers the old external-content
-    index had on its source table."""
+# What every search index holds. Bump it whenever that changes (columns, the
+# tokenizer, `cjk_split`), and each index is rebuilt once, by the first store
+# to open the DB afterwards. To force a rebuild by hand, delete the index's
+# row from `search_indexes`.
+SEARCH_INDEX_VERSION = 1
+
+
+def begin_index_rebuild(con: sqlite3.Connection, fts: str) -> bool:
+    """Start rebuilding the FTS table `fts` unless it's already current.
+
+    Its version lives in `search_indexes`. A stale index (older version, or
+    none: the external-content index with its sync triggers that came before)
+    is dropped and marked current, and True returned with the write
+    transaction still open, so the caller creates and fills it before the
+    commit and no writer ever sees it missing. Every short-lived CLI process
+    opens a store too, so a current index is left alone.
+    """
+    con.commit()
+    con.execute("BEGIN IMMEDIATE")  # one process rebuilds; the rest wait, then skip
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS search_indexes "
+        "(name TEXT PRIMARY KEY, version INTEGER NOT NULL)"
+    )
+    row = con.execute("SELECT version FROM search_indexes WHERE name = ?", (fts,)).fetchone()
+    if row == (SEARCH_INDEX_VERSION,):
+        con.commit()
+        return False
     for suffix in ("ai", "ad", "au"):
         con.execute(f"DROP TRIGGER IF EXISTS {fts}_{suffix}")
     con.execute(f"DROP TABLE IF EXISTS {fts}")
+    con.execute(
+        "INSERT OR REPLACE INTO search_indexes (name, version) VALUES (?, ?)",
+        (fts, SEARCH_INDEX_VERSION),
+    )
+    return True
 
 
 # CJK has no spaces between words, so `unicode61` would index a whole run as

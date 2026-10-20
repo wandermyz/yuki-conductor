@@ -16,9 +16,9 @@ from yuki_conductor.conversation_store import (
     FTS_TOKENIZE,
     SNIPPET_MARK,
     SNIPPET_TOKENS,
+    begin_index_rebuild,
     cjk_split,
     cjk_unsplit,
-    drop_search_index,
     fts_query,
 )
 from yuki_conductor.store import _SqliteKVStore
@@ -666,29 +666,28 @@ class TaskStore:
 
 
 def _init_search_index(con: sqlite3.Connection) -> None:
-    """Rebuild `tasks_fts` and `task_comments_fts`, the keyword indexes, from scratch.
+    """Create `tasks_fts` and `task_comments_fts`, the keyword indexes, if stale.
 
     Regular FTS5 tables of `cjk_split` text keyed by the row's id, kept in
-    step from Python and rebuilt at every start, like
-    `conversation_store._init_search_index`. System comments are never
-    indexed.
+    step from Python and versioned like `conversation_store._init_search_index`.
+    System comments are never indexed.
     """
-    drop_search_index(con, "tasks_fts")
-    drop_search_index(con, "task_comments_fts")
-    con.execute(f"CREATE VIRTUAL TABLE tasks_fts USING fts5(title, body, {FTS_TOKENIZE})")
-    con.execute(f"CREATE VIRTUAL TABLE task_comments_fts USING fts5(body, {FTS_TOKENIZE})")
-    tasks = con.execute("SELECT id, title, body FROM tasks").fetchall()
-    con.executemany(
-        "INSERT INTO tasks_fts(rowid, title, body) VALUES (?, ?, ?)",
-        [(i, cjk_split(title), cjk_split(body)) for i, title, body in tasks],
-    )
-    comments = con.execute(
-        "SELECT id, body FROM task_comments WHERE author != 'system'"
-    ).fetchall()
-    con.executemany(
-        "INSERT INTO task_comments_fts(rowid, body) VALUES (?, ?)",
-        [(i, cjk_split(body)) for i, body in comments],
-    )
+    if begin_index_rebuild(con, "tasks_fts"):
+        con.execute(f"CREATE VIRTUAL TABLE tasks_fts USING fts5(title, body, {FTS_TOKENIZE})")
+        tasks = con.execute("SELECT id, title, body FROM tasks").fetchall()
+        con.executemany(
+            "INSERT INTO tasks_fts(rowid, title, body) VALUES (?, ?, ?)",
+            [(i, cjk_split(title), cjk_split(body)) for i, title, body in tasks],
+        )
+    if begin_index_rebuild(con, "task_comments_fts"):
+        con.execute(f"CREATE VIRTUAL TABLE task_comments_fts USING fts5(body, {FTS_TOKENIZE})")
+        comments = con.execute(
+            "SELECT id, body FROM task_comments WHERE author != 'system'"
+        ).fetchall()
+        con.executemany(
+            "INSERT INTO task_comments_fts(rowid, body) VALUES (?, ?)",
+            [(i, cjk_split(body)) for i, body in comments],
+        )
 
 
 def _index_task(con: sqlite3.Connection, task_id: int) -> None:
