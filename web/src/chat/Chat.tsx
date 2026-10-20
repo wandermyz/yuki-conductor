@@ -37,6 +37,7 @@ import { pastedFiles } from "../paste";
 import { disablePush, enablePush, getPushState } from "../webPush";
 import type { PushState } from "../webPush";
 import SidebarResizer from "../SidebarResizer";
+import Snippet from "../Snippet";
 import { useSidebarWidth } from "../sidebarWidth";
 import "./chat.css";
 import { HARNESS_ICONS } from "./harnessIcons";
@@ -851,27 +852,6 @@ function Composer({
 interface Highlight {
   messageId: string;
   n: number;
-}
-
-/** Render a search snippet, turning its \x02…\x03 markers into <mark>. */
-function Snippet({ text }: { text: string }) {
-  // "a\x02b\x03c" splits on \x02 into ["a", "b\x03c"]: every piece after the
-  // first opens with a matched term, ending at its \x03.
-  const [head, ...rest] = text.split("\x02");
-  return (
-    <>
-      {head}
-      {rest.map((p, i) => {
-        const [term, tail] = p.split("\x03");
-        return (
-          <span key={i}>
-            <mark>{term}</mark>
-            {tail}
-          </span>
-        );
-      })}
-    </>
-  );
 }
 
 function SearchResults({

@@ -180,7 +180,9 @@ The snippet wraps matched terms in `\x02…\x03` (`SNIPPET_MARK`), which the
 sidebar renders as `<mark>`. Clicking a hit opens `#chat/<id>` and scrolls to
 and flashes that message. Tasks have the same search over title, description
 and non-system comments (`TaskStore.search`, `tasks_fts` + `task_comments_fts`,
-`GET /api/tasks/search`), one hit per task, a title match ranked higher.
+`GET /api/tasks/search`), one hit per task; a match in the task itself
+ranks above any comment match, title over description. The Tasks sidebar has
+the same search box: a hit opens the task and scrolls to the matching comment.
 
 `yuki-conductor search [--conversations|--tasks] TERMS` (`cli_search.py`)
 runs both over HTTP and prints Markdown hits, each with a link into the web

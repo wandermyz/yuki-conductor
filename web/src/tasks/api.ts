@@ -108,6 +108,20 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
 /** `old`: include tasks done over 30 days ago. Archived tasks never come back. */
 export const listTasks = (old = false) => call<Task[]>("GET", `/api/tasks${old ? "?old=true" : ""}`);
 
+/** One task matching a search: its best match. `comment_id` null means the
+ *  title or description matched. `snippet` marks terms with \x02…\x03. */
+export interface TaskSearchHit {
+  task_id: number;
+  title: string;
+  status: TaskStatus;
+  comment_id: number | null;
+  snippet: string;
+  score: number;
+}
+
+export const searchTasks = (q: string) =>
+  call<TaskSearchHit[]>("GET", `/api/tasks/search?q=${encodeURIComponent(q)}`);
+
 export const getTask = (id: number) => call<TaskDetail>("GET", `/api/tasks/${id}`);
 
 export const createTask = (input: TaskInput & { attachment_ids: string[] }) =>

@@ -487,8 +487,10 @@ class TaskStore:
 
         Same query syntax as `ConversationStore.search` (`fts_query`). One hit
         per task — its best match, whose snippet wraps matched terms in
-        `SNIPPET_MARK`. A title match outranks the same words in a body or
-        comment. System comments aren't searched. Best task first.
+        `SNIPPET_MARK`. System comments aren't searched. A match in the task
+        itself (title over description) beats any comment match, both when
+        picking a task's hit and when ordering tasks: bm25 scores from two
+        indexes aren't comparable. Best task first.
         """
         match = fts_query(query)
         if match is None:
@@ -524,13 +526,14 @@ class TaskStore:
                         SELECT h.*, t.title, t.status,
                                ROW_NUMBER() OVER (
                                    PARTITION BY h.task_id
-                                   ORDER BY h.rank, h.comment_id DESC
+                                   ORDER BY h.comment_id IS NOT NULL, h.rank,
+                                            h.comment_id DESC
                                ) AS n
                         FROM hits h JOIN tasks t ON t.id = h.task_id
                         WHERE t.archived_at IS NULL
                     )
                     WHERE n = 1
-                    ORDER BY rank
+                    ORDER BY comment_id IS NOT NULL, rank
                     LIMIT ?
                     """,
                     (start, end, match, start, end, match, limit),

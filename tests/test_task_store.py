@@ -271,6 +271,7 @@ def test_search_title_body_and_comments(tmp_path):
     by_id = {h.task_id: h for h in hits}
     assert by_id[commented.id].comment_id == c.id
     assert by_id[bodied.id].comment_id is None
+    assert hits[-1].task_id == commented.id  # comment-only matches come last
     start, end = SNIPPET_MARK
     assert f"{start}flickers{end}" in store.search("flicker")[0].snippet
     assert store.search('"( AND') == []
@@ -300,3 +301,11 @@ def test_search_index_backfills_existing_rows(tmp_path):
     store = TaskStore(db_path=db)
     assert [h.task_id for h in store.search("gadget")] == [task.id]
     assert store.search("sprocket")[0].comment_id is not None
+
+
+def test_search_prefers_the_task_itself_over_its_comments(tmp_path):
+    store = TaskStore(db_path=tmp_path / "t.db")
+    task = _new(store, title="Search CLI " + "padding " * 20)
+    store.add_comment(task.id, "user", "search")
+    [hit] = store.search("search")
+    assert hit.comment_id is None

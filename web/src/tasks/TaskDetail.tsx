@@ -120,10 +120,19 @@ function useQuoteSelection(container: React.RefObject<HTMLDivElement | null>) {
   return [target, () => setTarget(null)] as const;
 }
 
+/** A search hit to scroll to and flash: a comment, or (null) the description.
+ *  `n` makes each click a new request, so clicking the same hit scrolls again. */
+export interface Highlight {
+  taskId: number;
+  commentId: number | null;
+  n: number;
+}
+
 export default function TaskDetail({
   task,
   steps,
   running,
+  highlight,
   onBack,
   onEdit,
   onOpenTask,
@@ -133,6 +142,7 @@ export default function TaskDetail({
   task: Detail;
   steps: StreamStep[];
   running: boolean;
+  highlight: Highlight | null;
   onBack: () => void;
   onEdit: () => void;
   onOpenTask: (id: number) => void;
@@ -159,6 +169,23 @@ export default function TaskDetail({
     const el = timelineRef.current;
     if (el && followRef.current) el.scrollTop = el.scrollHeight;
   }, [task.id, task.comments.length, steps.length, running]);
+  const scrollToComment = useCallback((id: number | "body") => {
+    const el = timelineRef.current?.querySelector<HTMLElement>(`[data-quote-id="${id}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("task-comment-flash");
+    setTimeout(() => el.classList.remove("task-comment-flash"), 1500);
+  }, []);
+
+  // Scroll a search hit into view. Declared after the follow-the-bottom
+  // effect above, so it wins when the task has just opened.
+  const scrolledFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (!highlight || scrolledFor.current === highlight.n) return;
+    scrolledFor.current = highlight.n;
+    followRef.current = false;
+    scrollToComment(highlight.commentId ?? "body");
+  }, [highlight, scrollToComment]);
   const onTimelineScroll = () => {
     const el = timelineRef.current;
     if (el) followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
@@ -224,13 +251,6 @@ export default function TaskDetail({
     }
   };
 
-  const scrollToComment = (id: number) => {
-    const el = timelineRef.current?.querySelector<HTMLElement>(`[data-quote-id="${id}"]`);
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.add("task-comment-flash");
-    setTimeout(() => el.classList.remove("task-comment-flash"), 1500);
-  };
 
   const composerHint =
     task.status === "in_progress"
