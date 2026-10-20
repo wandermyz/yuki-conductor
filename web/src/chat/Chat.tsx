@@ -298,7 +298,7 @@ export async function copyText(text: string): Promise<void> {
 
 /* ---------- Session ID Modal ---------- */
 
-function SessionIdModal({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
+export function SessionIdModal({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
     copyText(sessionId)

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { uploadFile } from "../chat/api";
 import type { AttachmentRef, StreamStep } from "../chat/api";
+import { SessionIdModal } from "../chat/Chat";
 import { HarnessIcon, StepList } from "../chat/shared";
 import Markdown from "../Markdown";
 import { imageMarkers, insertAt, pastedFiles, withoutMarker } from "../paste";
@@ -143,6 +144,7 @@ export default function TaskDetail({
   const [uploads, setUploads] = useState<AttachmentRef[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSession, setShowSession] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const [quoteTarget, clearQuote] = useQuoteSelection(timelineRef);
@@ -241,6 +243,12 @@ export default function TaskDetail({
 
   return (
     <div className="task-detail">
+      {showSession && (
+        <SessionIdModal
+          sessionId={task.session_id || "(no session yet)"}
+          onClose={() => setShowSession(false)}
+        />
+      )}
       {/* One line, like the chat's thread header, so the tabs line up. */}
       <div className="task-detail-bar">
         <button className="task-back" onClick={onBack} aria-label="Back to tasks">
@@ -251,6 +259,7 @@ export default function TaskDetail({
         </h2>
         <div className="task-actions">
           {task.editable && <button onClick={onEdit}>Edit</button>}
+          <button onClick={() => setShowSession(true)}>Session ID</button>
           {task.status === "todo" && (
             <button onClick={() => act(() => moveTaskToTop(task.id))}>Move to top</button>
           )}
