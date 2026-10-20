@@ -1441,6 +1441,22 @@ export default function Chat({
               if (e.key === "Escape") setQuery("");
             }}
           />
+          {query && (
+            <button
+              type="button"
+              className="chat-search-clear"
+              aria-label="Clear search"
+              title="Clear search"
+              // Keep focus off the input, so the keyboard closes on mobile.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setQuery("");
+                (document.activeElement as HTMLElement | null)?.blur();
+              }}
+            >
+              ✕
+            </button>
+          )}
         </div>
         {query.trim() ? (
           <SearchResults hits={hits} loading={searching} selected={selected} onPick={openHit} />
