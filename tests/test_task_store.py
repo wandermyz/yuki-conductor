@@ -303,6 +303,63 @@ def test_search_index_backfills_existing_rows(tmp_path):
     assert store.search("sprocket")[0].comment_id is not None
 
 
+def test_search_index_is_rebuilt_from_old_format(tmp_path):
+    db = tmp_path / "t.db"
+    store = TaskStore(db_path=db)
+    task = _new(store, title="旧的任务")
+    con = sqlite3.connect(db)
+    con.execute("DROP TABLE tasks_fts")
+    con.execute(
+        "CREATE VIRTUAL TABLE tasks_fts USING fts5(title, body, content='tasks', "
+        "content_rowid='id')"
+    )
+    con.execute(
+        "CREATE TRIGGER tasks_fts_ai AFTER INSERT ON tasks BEGIN "
+        "INSERT INTO tasks_fts(rowid, title, body) VALUES (new.id, new.title, new.body); END"
+    )
+    con.commit()
+    con.close()
+
+    store = TaskStore(db_path=db)
+    assert [h.task_id for h in store.search("任务")] == [task.id]
+    other = _new(store, title="新的任务")
+    assert {h.task_id for h in store.search("任务")} == {task.id, other.id}
+
+
+def test_search_chinese_title_body_and_comments(tmp_path):
+    store = TaskStore(db_path=tmp_path / "t.db")
+    titled = _new(store, title="修复认证方式")
+    bodied = _new(store, title="Other", body="后端的认证流程要改")
+    commented = _new(store, title="Third")
+    c = store.add_comment(commented.id, "user", "这里也有认证的问题")
+    store.add_comment(_new(store, title="Fourth").id, "system", "认证 moved")
+
+    hits = store.search("认证")
+    assert {h.task_id for h in hits} == {titled.id, bodied.id, commented.id}
+    assert hits[0].task_id == titled.id
+    by_id = {h.task_id: h for h in hits}
+    assert by_id[commented.id].comment_id == c.id
+    start, end = SNIPPET_MARK
+    assert by_id[bodied.id].snippet == f"后端的{start}认证{end}流程要改"
+    assert by_id[commented.id].snippet == f"这里也有{start}认证{end}的问题"
+    assert [h.task_id for h in store.search("证")] != []
+    assert [h.task_id for h in store.search("后端 流程")] == [bodied.id]
+
+
+def test_search_chinese_follows_edits(tmp_path):
+    store = TaskStore(db_path=tmp_path / "t.db")
+    task = _new(store, title="t", body="旧描述")
+    assert store.edit_if_untouched(task.id, title="新标题", body="新描述")
+    assert store.search("旧描述") == []
+    assert [h.task_id for h in store.search("标题")] == [task.id]
+    store.update_fields(task.id, body="再改一次")
+    assert store.search("新描述") == []
+    assert [h.task_id for h in store.search("改一")] == [task.id]
+    # Fields other than title/body don't disturb the index.
+    store.update_fields(task.id, branch="b")
+    assert [h.task_id for h in store.search("改一")] == [task.id]
+
+
 def test_search_prefers_the_task_itself_over_its_comments(tmp_path):
     store = TaskStore(db_path=tmp_path / "t.db")
     task = _new(store, title="Search CLI " + "padding " * 20)

@@ -26,7 +26,7 @@ yuki-conductor search -n 25 <terms>            # hits per kind (default 10)
 Every term is a **prefix match** and **all terms must match** (in the same
 message, or the same task field / comment). Quotes and operators are plain text.
 Fewer, distinctive terms find more: `search deploy timeout` beats a sentence.
-Unspaced Chinese is one token, so split it into words with spaces.
+Chinese, Japanese and Korean match like a substring, so `认证` finds `认证方式`.
 
 Output is Markdown, best match first, one hit per conversation or task:
 
