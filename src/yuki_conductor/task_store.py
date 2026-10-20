@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from yuki_conductor.config import DB_FILE
+from yuki_conductor.conversation_store import SNIPPET_MARK, fts_query
 from yuki_conductor.store import _SqliteKVStore
 
 TODO = "todo"
@@ -101,6 +102,16 @@ class TaskComment:
     external_url: str | None = None
     external_author: str | None = None
     created_at: float = 0.0
+
+
+@dataclass
+class TaskSearchHit:
+    task_id: int
+    title: str
+    status: str
+    comment_id: int | None  # None: the match is in the title or description
+    snippet: str
+    score: float
 
 
 def _task(row: tuple) -> Task:
@@ -194,6 +205,7 @@ class TaskStore:
                     "CREATE INDEX IF NOT EXISTS idx_task_comments_task "
                     "ON task_comments (task_id, id)"
                 )
+                _init_search_index(con)
                 con.commit()
             finally:
                 con.close()
@@ -470,6 +482,70 @@ class TaskStore:
                 con.close()
         return dict(rows)
 
+    def search(self, query: str, limit: int = 20) -> list[TaskSearchHit]:
+        """Keyword search over unarchived tasks: title, description, comments.
+
+        Same query syntax as `ConversationStore.search` (`fts_query`). One hit
+        per task — its best match, whose snippet wraps matched terms in
+        `SNIPPET_MARK`. A title match outranks the same words in a body or
+        comment. System comments aren't searched. Best task first.
+        """
+        match = fts_query(query)
+        if match is None:
+            return []
+        start, end = SNIPPET_MARK
+        with self._lock:
+            con = self._connect()
+            try:
+                # snippet() and bm25() only work straight off an FTS cursor,
+                # so each index is materialized before anything is joined.
+                rows = con.execute(
+                    """
+                    WITH task_hits AS MATERIALIZED (
+                        SELECT rowid AS task_id, NULL AS comment_id,
+                               snippet(tasks_fts, -1, ?, ?, '…', 16) AS snippet,
+                               bm25(tasks_fts, 5.0, 1.0) AS rank
+                        FROM tasks_fts WHERE tasks_fts MATCH ?
+                    ),
+                    comment_hits AS MATERIALIZED (
+                        SELECT rowid AS comment_id,
+                               snippet(task_comments_fts, 0, ?, ?, '…', 16) AS snippet,
+                               bm25(task_comments_fts) AS rank
+                        FROM task_comments_fts WHERE task_comments_fts MATCH ?
+                    ),
+                    hits AS (
+                        SELECT task_id, comment_id, snippet, rank FROM task_hits
+                        UNION ALL
+                        SELECT c.task_id, h.comment_id, h.snippet, h.rank
+                        FROM comment_hits h JOIN task_comments c ON c.id = h.comment_id
+                        WHERE c.author != 'system'
+                    )
+                    SELECT task_id, title, status, comment_id, snippet, rank FROM (
+                        SELECT h.*, t.title, t.status,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY h.task_id
+                                   ORDER BY h.rank, h.comment_id DESC
+                               ) AS n
+                        FROM hits h JOIN tasks t ON t.id = h.task_id
+                        WHERE t.archived_at IS NULL
+                    )
+                    WHERE n = 1
+                    ORDER BY rank
+                    LIMIT ?
+                    """,
+                    (start, end, match, start, end, match, limit),
+                ).fetchall()
+            finally:
+                con.close()
+        # bm25() is negative, lower is better; flip it so a score reads naturally.
+        return [
+            TaskSearchHit(
+                task_id=r[0], title=r[1], status=r[2], comment_id=r[3], snippet=r[4],
+                score=-r[5],
+            )
+            for r in rows
+        ]
+
     # -- comments ----------------------------------------------------------
 
     def add_comment(
@@ -567,6 +643,46 @@ class TaskStore:
                 con.commit()
             finally:
                 con.close()
+
+
+def _init_search_index(con: sqlite3.Connection) -> None:
+    """Create `tasks_fts` and `task_comments_fts`, the keyword indexes.
+
+    External-content FTS5 tables kept in step by triggers, like
+    `conversation_store._init_search_index`; both content tables have
+    INTEGER PRIMARY KEYs, so the rowids are stable.
+    """
+    indexes = {
+        "tasks_fts": ("tasks", ("title", "body")),
+        "task_comments_fts": ("task_comments", ("body",)),
+    }
+    for fts, (table, cols) in indexes.items():
+        exists = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (fts,)
+        ).fetchone()
+        names = ", ".join(cols)
+        new = ", ".join(f"new.{c}" for c in cols)
+        old = ", ".join(f"old.{c}" for c in cols)
+        con.execute(
+            f"CREATE VIRTUAL TABLE IF NOT EXISTS {fts} "
+            f"USING fts5({names}, content='{table}', content_rowid='id')"
+        )
+        con.execute(
+            f"CREATE TRIGGER IF NOT EXISTS {fts}_ai AFTER INSERT ON {table} BEGIN "
+            f"INSERT INTO {fts}(rowid, {names}) VALUES (new.id, {new}); END"
+        )
+        con.execute(
+            f"CREATE TRIGGER IF NOT EXISTS {fts}_ad AFTER DELETE ON {table} BEGIN "
+            f"INSERT INTO {fts}({fts}, rowid, {names}) VALUES ('delete', old.id, {old}); END"
+        )
+        con.execute(
+            f"CREATE TRIGGER IF NOT EXISTS {fts}_au AFTER UPDATE OF {names} ON {table} BEGIN "
+            f"INSERT INTO {fts}({fts}, rowid, {names}) VALUES ('delete', old.id, {old}); "
+            f"INSERT INTO {fts}(rowid, {names}) VALUES (new.id, {new}); END"
+        )
+        if not exists:
+            # Index the history written before this table existed.
+            con.execute(f"INSERT INTO {fts}({fts}) VALUES ('rebuild')")
 
 
 class TaskboardStateStore(_SqliteKVStore):

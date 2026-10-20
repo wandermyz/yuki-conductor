@@ -71,9 +71,10 @@ def main(argv: list[str] | None = None) -> None:
         help="Title for the new conversation (only used without --conversation)",
     )
 
-    from yuki_conductor import cli_task
+    from yuki_conductor import cli_search, cli_task
 
     cli_task.register(sub)
+    cli_search.register(sub)
 
     # CLI subcommands contributed by enabled plugins. A broken plugin must not
     # make the whole CLI unusable, so failures are reported and skipped.
@@ -170,6 +171,10 @@ def main(argv: list[str] | None = None) -> None:
         from yuki_conductor import cli_task
 
         cli_task.handle(args)
+    elif args.command == "search":
+        cli_search.handle_search(args)
+    elif args.command == "conversation":
+        cli_search.handle_conversation(args)
     elif args.command == "web":
         if args.web_command is None:
             web_parser.print_help()

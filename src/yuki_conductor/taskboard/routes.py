@@ -1,9 +1,10 @@
 """HTTP API for the taskboard, mounted by `web_server.create_api`."""
 
+from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -163,6 +164,18 @@ def create_task(body: TaskCreate):
         parent_task_id=body.parent_task_id,
     )
     return serialize_task(task, comment_count=0)
+
+
+@router.get("/api/tasks/search")
+def search_tasks(q: str = "", limit: int = Query(default=20, ge=1, le=100)):
+    """Keyword search over tasks, one hit per task; see `TaskStore.search`.
+
+    Registered before `/api/tasks/{task_id}`, which would otherwise claim it.
+    """
+    return [
+        asdict(hit) | {"status_label": STATUS_LABELS[hit.status]}
+        for hit in taskboard.store.search(q, limit=limit)
+    ]
 
 
 @router.put("/api/tasks/order")

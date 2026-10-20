@@ -23,6 +23,7 @@ src/yuki_conductor/
     pr_watcher.py      — 5-minute `gh` poll of Ready for Review PRs
     cleanup.py         — removes a Done task's worktree + branches
   cli_task.py       — `yuki-conductor task …` (show/list/comment/ask/pr/create)
+  cli_search.py     — `yuki-conductor search` + `conversation show`, with web UI links
   cli_http.py       — CLI → daemon HTTP helper (shared with `send`)
   harness/          — the agent CLIs a turn can run on (see Harnesses)
     base.py            — StreamEvent, RunResult, Harness / StreamParser protocols
@@ -177,7 +178,17 @@ Each whitespace-separated term becomes a quoted prefix match, ANDed together
 conversation (its best message), and archived conversations are excluded.
 The snippet wraps matched terms in `\x02…\x03` (`SNIPPET_MARK`), which the
 sidebar renders as `<mark>`. Clicking a hit opens `#chat/<id>` and scrolls to
-and flashes that message. The default `unicode61` tokenizer doesn't split
+and flashes that message. Tasks have the same search over title, description
+and non-system comments (`TaskStore.search`, `tasks_fts` + `task_comments_fts`,
+`GET /api/tasks/search`), one hit per task, a title match ranked higher.
+
+`yuki-conductor search [--conversations|--tasks] TERMS` (`cli_search.py`)
+runs both over HTTP and prints Markdown hits, each with a link into the web
+UI (`#chat/<id>`, `#tasks/<id>`); `conversation show <id>` prints a
+conversation's messages, and `task show` a link too. Links are built on
+`WEB_PUBLIC_URL` (`.env`, e.g. the `tailscale serve` URL; defaults to
+`http://127.0.0.1:<WEB_PORT>`). The bundled `yuki-conductor-search` skill
+documents it for agents. The default `unicode61` tokenizer doesn't split
 unspaced Chinese, so searching it means adding spaces. Semantic search is
 planned behind the same `search()`: see
 `docs/plans/2026-10-19-conversation-semantic-search.md`.
@@ -411,6 +422,7 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
 - `uv run yuki-conductor simulate message "test"` — test without Slack
 - `uv run yuki-conductor send -c <conv-id> "text"` — push a message (and `--attach` files) into a web or Slack conversation (see Outbound Messages)
 - `uv run yuki-conductor task show|list|comment|ask|pr|create` — the taskboard from a shell (see Taskboard)
+- `uv run yuki-conductor search [--conversations|--tasks] TERMS` / `conversation show <id>` — find and read past work (see Conversation search)
 - `uv run yuki-conductor web rebuild` — rebuild frontend + auto-reload connected browsers
 - `cd web && pnpm dev` — start frontend dev server (proxies /api to port 2333)
 - `cd web && pnpm build` — build frontend for production (output: web/dist/)
