@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   addPlugin,
+  confirmRestartIfBusy,
   listPlugins,
   removePlugin,
   restartDaemon,
@@ -189,7 +190,8 @@ export default function PluginsView() {
 
   useEffect(refresh, [refresh]);
 
-  const doRestart = () => {
+  const doRestart = async () => {
+    if (!(await confirmRestartIfBusy("Restarting"))) return;
     setRestart("restarting");
     setRestartError(null);
     restartDaemon()
@@ -206,7 +208,8 @@ export default function PluginsView() {
 
   // On success the page reloads once the daemon is back, so only "already
   // current" and failures need showing here.
-  const doUpdate = () => {
+  const doUpdate = async () => {
+    if (!(await confirmRestartIfBusy("Updating"))) return;
     setUpdate("updating");
     setUpdateError(null);
     runUpdate()
