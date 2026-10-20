@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from yuki_conductor.conversation_store import SNIPPET_MARK
 from yuki_conductor.task_store import (
     DONE,
     HIDE_DONE_AFTER_SECONDS,
@@ -254,3 +255,57 @@ def test_pr_state_column_is_added_and_backfilled(tmp_path):
     assert [store.get(t.id).pr_state for t in (merged, closed, open_)] == [
         "MERGED", "CLOSED", None,
     ]
+
+
+def test_search_title_body_and_comments(tmp_path):
+    store = TaskStore(db_path=tmp_path / "t.db")
+    titled = _new(store, title="Widget renderer crash")
+    bodied = _new(store, title="Other", body="the widget flickers")
+    commented = _new(store, title="Third")
+    c = store.add_comment(commented.id, "user", "widgets everywhere")
+    store.add_comment(_new(store, title="Fourth").id, "system", "widget moved")
+
+    hits = store.search("widg")
+    assert {h.task_id for h in hits} == {titled.id, bodied.id, commented.id}
+    assert hits[0].task_id == titled.id  # a title match ranks first
+    by_id = {h.task_id: h for h in hits}
+    assert by_id[commented.id].comment_id == c.id
+    assert by_id[bodied.id].comment_id is None
+    assert hits[-1].task_id == commented.id  # comment-only matches come last
+    start, end = SNIPPET_MARK
+    assert f"{start}flickers{end}" in store.search("flicker")[0].snippet
+    assert store.search('"( AND') == []
+
+
+def test_search_follows_edits_and_hides_archived(tmp_path):
+    store = TaskStore(db_path=tmp_path / "t.db")
+    task = _new(store, title="t", body="alpha")
+    store.update_fields(task.id, body="beta")
+    assert store.search("alpha") == []
+    assert [h.task_id for h in store.search("beta")] == [task.id]
+    store.archive(task.id, expected=task.status)
+    assert store.search("beta") == []
+
+
+def test_search_index_backfills_existing_rows(tmp_path):
+    db = tmp_path / "t.db"
+    store = TaskStore(db_path=db)
+    task = _new(store, title="legacy gadget")
+    store.add_comment(task.id, "agent", "fixed the sprocket")
+    con = sqlite3.connect(db)
+    con.execute("DROP TABLE tasks_fts")
+    con.execute("DROP TABLE task_comments_fts")
+    con.commit()
+    con.close()
+
+    store = TaskStore(db_path=db)
+    assert [h.task_id for h in store.search("gadget")] == [task.id]
+    assert store.search("sprocket")[0].comment_id is not None
+
+
+def test_search_prefers_the_task_itself_over_its_comments(tmp_path):
+    store = TaskStore(db_path=tmp_path / "t.db")
+    task = _new(store, title="Search CLI " + "padding " * 20)
+    store.add_comment(task.id, "user", "search")
+    [hit] = store.search("search")
+    assert hit.comment_id is None

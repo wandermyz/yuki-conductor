@@ -63,6 +63,9 @@ def set_receivers(receivers: list) -> None:
 
 WEB_PORT = int(os.environ.get("WEB_PORT", "2333"))
 WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
+# Where the user opens the web UI (e.g. a `tailscale serve` URL). Only used to
+# print links from the CLI, so it falls back to the local address.
+WEB_PUBLIC_URL = os.environ.get("WEB_PUBLIC_URL") or f"http://127.0.0.1:{WEB_PORT}"
 SLACK_WORKSPACE = os.environ.get("SLACK_WORKSPACE", "wandermyz")
 # Optional path to a personal favicon image. It lives outside the repo (set it
 # in ~/.yuki-conductor/.env) so a private avatar never ends up in git.

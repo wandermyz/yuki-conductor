@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from yuki_conductor.cli_http import api_request
+from yuki_conductor.cli_search import link
 
 
 def register(sub) -> argparse.ArgumentParser:
@@ -102,6 +103,7 @@ def format_task(task: dict) -> str:
         f"- Project: {task['project']} · harness: {task['harness']}"
         + (f" · branch: `{task['branch']}`" if task.get("branch") else "")
         + (" · worktree" if task["use_worktree"] else ""),
+        f"- Link: {link('tasks/' + str(task['id']))}",
     ]
     if task.get("pr_url"):
         state = f" ({task['pr_state'].lower()})" if task.get("pr_state") else ""

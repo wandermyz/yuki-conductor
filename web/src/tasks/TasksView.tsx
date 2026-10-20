@@ -21,6 +21,7 @@ import { fetchProcessing, listHarnesses, listProjects, subscribeChatSocket } fro
 import type { HarnessInfo, Project, StreamStep } from "../chat/api";
 import { HarnessIcon, NewSessionPicker } from "../chat/shared";
 import SidebarResizer from "../SidebarResizer";
+import Snippet from "../Snippet";
 import { useSidebarWidth } from "../sidebarWidth";
 import {
   fetchTaskSteps,
@@ -28,13 +29,15 @@ import {
   getTask,
   listTasks,
   reorderTasks,
+  searchTasks,
   setBoardPaused,
   stepsKey,
 } from "./api";
-import type { BoardState, Task, TaskDetail as Detail, TaskStatus } from "./api";
+import type { BoardState, Task, TaskDetail as Detail, TaskSearchHit, TaskStatus } from "./api";
 import { PrMarker, StatusBadge } from "./common";
 import { formatWhen } from "./format";
 import TaskDetail from "./TaskDetail";
+import type { Highlight } from "./TaskDetail";
 import { loadDraft } from "./draft";
 import TaskForm from "./TaskForm";
 import "./tasks.css";
@@ -115,6 +118,45 @@ function TaskRow({
   );
 }
 
+function SearchResults({
+  hits,
+  loading,
+  selectedId,
+  onPick,
+}: {
+  hits: TaskSearchHit[] | null;
+  loading: boolean;
+  selectedId: number | null;
+  onPick: (hit: TaskSearchHit) => void;
+}) {
+  if (hits === null) return loading ? <p className="placeholder task-list-empty">Searching…</p> : null;
+  if (hits.length === 0) return <p className="placeholder task-list-empty">No matches.</p>;
+  return (
+    <ul className="task-list task-search-results">
+      {hits.map((h) => (
+        <li
+          key={h.task_id}
+          className={`task-row ${h.task_id === selectedId ? "active" : ""}`}
+          onClick={() => onPick(h)}
+        >
+          <div className="task-row-main">
+            <span className="task-row-title">
+              <span className="task-id">#{h.task_id}</span> {h.title}
+            </span>
+            <span className="task-row-meta">
+              <StatusBadge status={h.status} />
+              {h.comment_id !== null && <span>💬 #{h.comment_id}</span>}
+            </span>
+            <span className="task-search-snippet">
+              <Snippet text={h.snippet} />
+            </span>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function TasksView({
   selectedId,
   onSelectId,
@@ -129,6 +171,11 @@ export default function TasksView({
   const [filter, setFilter] = useState<Filter>("active");
   const [showOld, setShowOld] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
+  // Sidebar search: while the box has text, results replace the list.
+  const [query, setQuery] = useState("");
+  // The last answer and the query it answers; kept while a newer one loads.
+  const [results, setResults] = useState<{ q: string; hits: TaskSearchHit[] } | null>(null);
+  const [highlight, setHighlight] = useState<Highlight | null>(null);
   // Live steps of a task's turn, tagged with the task they belong to so a
   // switch of selection never shows another task's stream.
   const [live, setLive] = useState<{ id: number | null; steps: StreamStep[]; running: boolean }>({
@@ -250,6 +297,30 @@ export default function TasksView({
     };
   }, [refreshList, refreshDetail, refreshLive]);
 
+  // Debounced search, rerun when the board changes so statuses stay current;
+  // a stale response never overwrites a newer query's.
+  const q = query.trim();
+  useEffect(() => {
+    if (!q) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchTasks(q)
+        .then((hits) => {
+          if (!cancelled) setResults({ q, hits });
+        })
+        .catch(console.error);
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [q, tasks]);
+
+  const openHit = (hit: TaskSearchHit) => {
+    setHighlight((prev) => ({ taskId: hit.task_id, commentId: hit.comment_id, n: (prev?.n ?? 0) + 1 }));
+    onSelectId(hit.task_id);
+  };
+
   const counts = useMemo(() => {
     const c: Record<string, number> = { active: 0 };
     for (const t of tasks) {
@@ -328,6 +399,45 @@ export default function TasksView({
         )}
         {board?.paused && <div className="task-paused-banner">Paused — no new tasks will start</div>}
 
+        <div className="task-search">
+          <input
+            type="search"
+            className="task-search-input"
+            placeholder="Search tasks"
+            aria-label="Search tasks"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setQuery("");
+            }}
+          />
+          {query && (
+            <button
+              type="button"
+              className="task-search-clear"
+              aria-label="Clear search"
+              title="Clear search"
+              // Keep focus off the input, so the keyboard closes on mobile.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setQuery("");
+                (document.activeElement as HTMLElement | null)?.blur();
+              }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {q ? (
+          <SearchResults
+            hits={results?.hits ?? null}
+            loading={results?.q !== q}
+            selectedId={selectedId}
+            onPick={openHit}
+          />
+        ) : (
+        <>
         <div className="task-filters" role="tablist">
           {FILTERS.map((f) => (
             <button
@@ -371,6 +481,8 @@ export default function TasksView({
             Show done over 30 days ago
           </label>
         ) : null}
+        </>
+        )}
       </aside>
       <SidebarResizer sidebar={sidebar} />
 
@@ -382,6 +494,7 @@ export default function TasksView({
             task={shownDetail}
             steps={live.id === selectedId ? live.steps : []}
             running={live.id === selectedId && live.running}
+            highlight={highlight?.taskId === shownDetail.id ? highlight : null}
             onBack={() => onSelectId(null)}
             onEdit={() => setForm("edit")}
             onOpenTask={onSelectId}
