@@ -528,6 +528,28 @@ export async function checkForUpdate(): Promise<UpdateCheck> {
   return r.json();
 }
 
+/**
+ * Ask before an action that restarts the daemon while agent runs are in
+ * flight, since the restart kills them. Proceeds without asking when idle or
+ * when the check itself fails (e.g. no upstream).
+ */
+export async function confirmRestartIfBusy(action: string): Promise<boolean> {
+  let running: Record<string, number>;
+  try {
+    running = (await checkForUpdate()).running;
+  } catch {
+    return true;
+  }
+  const parts = Object.entries(running)
+    .filter(([, n]) => n > 0)
+    .map(([kind, n]) => `${n} ${kind} run${n === 1 ? "" : "s"}`);
+  if (parts.length === 0) return true;
+  return window.confirm(
+    `Agent work in progress: ${parts.join(", ")}.\n\n` +
+      `${action} restarts the daemon and will interrupt it. Continue?`,
+  );
+}
+
 /** Rebase onto upstream and restart. `restarting` is false when already current. */
 export async function applyUpdate(): Promise<
   UpdateStatus & { restarting: boolean; boot_id?: string }
