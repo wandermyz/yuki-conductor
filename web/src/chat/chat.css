@@ -47,18 +47,47 @@
 }
 
 .chat-search {
+  position: relative;
   padding: 8px 16px 0;
 }
 
 .chat-search-input {
   width: 100%;
   box-sizing: border-box;
-  padding: 6px 10px;
-  font-size: 13px;
+  padding: 6px 30px 6px 10px;
+  /* 16px keeps iOS Safari from auto-zooming on focus. */
+  font-size: 16px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
   color: var(--text-h);
+}
+
+/* The clear button below replaces WebKit's own. */
+.chat-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.chat-search-clear {
+  position: absolute;
+  right: 20px;
+  top: calc(50% + 4px);
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-h);
+  font-size: 11px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.chat-search-clear:hover {
+  background: var(--accent-bg);
 }
 
 .chat-search-input:focus {
