@@ -46,6 +46,65 @@
   background-color: #ef4444;
 }
 
+.chat-search {
+  padding: 8px 16px 0;
+}
+
+.chat-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+.chat-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.chat-search-results {
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+
+.chat-search-snippet {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.chat-search-snippet mark {
+  background: var(--accent-bg);
+  color: var(--text-h);
+  font-weight: 600;
+  border-radius: 2px;
+}
+
+.bubble-highlight {
+  animation: bubble-flash 2.4s ease-out;
+}
+
+@keyframes bubble-flash {
+  /* A ring of page background first, so it shows on accent-coloured bubbles too. */
+  0%,
+  40% {
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 5px var(--accent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent, 0 0 0 5px transparent;
+  }
+}
+
 .chat-filter-bar {
   display: flex;
   gap: 4px;

@@ -14,6 +14,7 @@ import {
   listHarnesses,
   listMessages,
   listProjects,
+  searchConversations,
   subscribeChatSocket,
   sendMessage,
   setConvStatus,
@@ -28,6 +29,7 @@ import type {
   ConvStatus,
   HarnessInfo,
   Project,
+  SearchHit,
   StreamStep,
   WSEvent,
 } from "./api";
@@ -582,10 +584,21 @@ function MessageActions({
   );
 }
 
-function MessageBubble({ msg, onRetry }: { msg: ChatMessage; onRetry: (msg: ChatMessage) => void }) {
+function MessageBubble({
+  msg,
+  highlighted,
+  onRetry,
+}: {
+  msg: ChatMessage;
+  highlighted?: boolean;
+  onRetry: (msg: ChatMessage) => void;
+}) {
   const use = contextOf(msg);
   return (
-    <div className={`bubble ${msg.role} ${msg.status ? `msg-${msg.status}` : ""}`}>
+    <div
+      id={`msg-${msg.id}`}
+      className={`bubble ${msg.role} ${msg.status ? `msg-${msg.status}` : ""} ${highlighted ? "bubble-highlight" : ""}`}
+    >
       {msg.text && (
         <div className="bubble-text markdown">
           <ReactMarkdown
@@ -831,12 +844,76 @@ function Composer({
   );
 }
 
+/* ---------- Search ---------- */
+
+/** A message to scroll to and flash, from a search hit. `n` makes each click
+ *  a new request, so clicking the same hit twice scrolls again. */
+interface Highlight {
+  messageId: string;
+  n: number;
+}
+
+/** Render a search snippet, turning its \x02…\x03 markers into <mark>. */
+function Snippet({ text }: { text: string }) {
+  // "a\x02b\x03c" splits on \x02 into ["a", "b\x03c"]: every piece after the
+  // first opens with a matched term, ending at its \x03.
+  const [head, ...rest] = text.split("\x02");
+  return (
+    <>
+      {head}
+      {rest.map((p, i) => {
+        const [term, tail] = p.split("\x03");
+        return (
+          <span key={i}>
+            <mark>{term}</mark>
+            {tail}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+function SearchResults({
+  hits,
+  loading,
+  selected,
+  onPick,
+}: {
+  hits: SearchHit[] | null;
+  loading: boolean;
+  selected: string | null;
+  onPick: (hit: SearchHit) => void;
+}) {
+  return (
+    <ul className="chat-list chat-search-results">
+      {hits === null && loading && <li className="chat-empty-list">Searching…</li>}
+      {hits?.length === 0 && <li className="chat-empty-list">No matches.</li>}
+      {hits?.map((h) => (
+        <li
+          key={h.conversation_id}
+          className={h.conversation_id === selected ? "active" : ""}
+          onClick={() => onPick(h)}
+        >
+          <div className="chat-list-title-row">
+            <span className="chat-list-title">{h.title || "New chat"}</span>
+          </div>
+          <div className="chat-search-snippet">
+            <Snippet text={h.snippet} />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function ChatThread({
   conv,
   messages,
   processing,
   steps,
   status,
+  highlight,
   onBack,
   onSend,
   onRetry,
@@ -852,6 +929,7 @@ function ChatThread({
   processing: boolean;
   steps: StreamStep[];
   status: ConvStatus;
+  highlight: Highlight | null;
   onBack: () => void;
   onSend: (text: string, files: AttachmentRef[]) => void;
   onRetry: (msg: ChatMessage) => void;
@@ -891,6 +969,19 @@ function ChatThread({
     if (el && isNearBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, processing, steps]);
 
+  // Scroll a search hit into view once its message has loaded. Runs after the
+  // stick-to-bottom effect above, so it wins on the first load. A hit older
+  // than the loaded page of messages isn't found and the thread stays put.
+  const scrolledFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (!highlight || scrolledFor.current === highlight.n) return;
+    const target = document.getElementById(`msg-${highlight.messageId}`);
+    if (!target) return;
+    scrolledFor.current = highlight.n;
+    isNearBottomRef.current = false;
+    target.scrollIntoView({ block: "center" });
+  }, [highlight, messages]);
+
   return (
     <div className="chat-thread">
       <header className="chat-thread-header">
@@ -927,12 +1018,24 @@ function ChatThread({
           <p className="chat-empty">Send a message to start the conversation.</p>
         )}
         {headMessages.map((m) => (
-          <MessageBubble key={m.id} msg={m} onRetry={onRetry} />
+          <MessageBubble
+            key={m.id}
+            msg={m}
+            highlighted={highlight?.messageId === m.id}
+            onRetry={onRetry}
+          />
         ))}
         {(processing || steps.length > 0) && (
           <StepList steps={steps} running={processing} agent={agentName(conv)} />
         )}
-        {finalMessage && <MessageBubble key={finalMessage.id} msg={finalMessage} onRetry={onRetry} />}
+        {finalMessage && (
+          <MessageBubble
+            key={finalMessage.id}
+            msg={finalMessage}
+            highlighted={highlight?.messageId === finalMessage.id}
+            onRetry={onRetry}
+          />
+        )}
       </div>
       <Composer
         conversationId={conv.id}
@@ -971,6 +1074,11 @@ export default function Chat({
   const [picking, setPicking] = useState(false);
   // Harnesses a new conversation can use.
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
+  // Sidebar search: while the box has text, results replace the chat list.
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [highlight, setHighlight] = useState<Highlight | null>(null);
 
   // Keep a ref to `selected` so the WS handler can read the latest value
   const selectedRef = useRef(selected);
@@ -1112,6 +1220,32 @@ export default function Chat({
     fetchSteps().then(setStepsByConv).catch(console.error);
   }, []);
 
+  // Debounced search; a stale response never overwrites a newer query's.
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setHits(null);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(() => {
+      searchConversations(q)
+        .then((h) => {
+          if (!cancelled) setHits(h);
+        })
+        .catch(console.error)
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query]);
+
   // Load messages when selecting a conversation
   useEffect(() => {
     if (!selected) return;
@@ -1249,6 +1383,11 @@ export default function Chat({
     });
   };
 
+  const openHit = (hit: SearchHit) => {
+    setHighlight((prev) => ({ messageId: hit.message_id, n: (prev?.n ?? 0) + 1 }));
+    selectConv(hit.conversation_id);
+  };
+
   const active = conversations.find((c) => c.id === selected);
 
   return (
@@ -1290,6 +1429,23 @@ export default function Chat({
             </button>
           </div>
         </div>
+        <div className="chat-search">
+          <input
+            type="search"
+            className="chat-search-input"
+            placeholder="Search chats"
+            aria-label="Search chats"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setQuery("");
+            }}
+          />
+        </div>
+        {query.trim() ? (
+          <SearchResults hits={hits} loading={searching} selected={selected} onPick={openHit} />
+        ) : (
+        <>
         <div className="chat-filter-bar">
           <button
             className={`chat-filter-btn ${!showDone ? "active" : ""}`}
@@ -1314,7 +1470,10 @@ export default function Chat({
               <li
                 key={c.id}
                 className={c.id === selected ? "active" : ""}
-                onClick={() => selectConv(c.id)}
+                onClick={() => {
+                  setHighlight(null);
+                  selectConv(c.id);
+                }}
               >
                 <div className="chat-list-title-row">
                   {st === "unread" && <span className="status-dot" title="Unread" />}
@@ -1361,6 +1520,8 @@ export default function Chat({
             );
           })}
         </ul>
+        </>
+        )}
       </aside>
       <SidebarResizer sidebar={sidebar} />
       <main className="chat-main">
@@ -1372,6 +1533,7 @@ export default function Chat({
             processing={processingConvs.has(active.id)}
             steps={stepsByConv[active.id] || []}
             status={getStatus(statuses, active.id)}
+            highlight={highlight}
             onBack={() => setSelected(null)}
             onSend={(text, files) => handleSend(active.id, text, files)}
             onRetry={(msg) => handleRetry(active.id, msg)}

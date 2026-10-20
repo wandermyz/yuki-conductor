@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import uuid
+from dataclasses import asdict
 from pathlib import Path
 
 import uvicorn
@@ -333,6 +334,17 @@ def create_api() -> FastAPI:
     @api.get("/api/conversations")
     def list_conversations(platform: str | None = Query(default="web")):
         return [_conv_to_dict(c) for c in conv_store.list_conversations(platform=platform)]
+
+    @api.get("/api/search")
+    def search_conversations(
+        q: str = Query(default=""),
+        limit: int = Query(default=20, ge=1, le=100),
+    ):
+        """Keyword search over web conversations, one hit per conversation.
+
+        `snippet` marks each matched term with `\\x02`…`\\x03`.
+        """
+        return [asdict(hit) for hit in conv_store.search(q, limit=limit)]
 
     @api.get("/api/harnesses")
     def list_harnesses():

@@ -80,6 +80,22 @@ export async function listConversations(): Promise<Conversation[]> {
   return r.json();
 }
 
+/** One conversation matching a search: its best-matching message. */
+export interface SearchHit {
+  conversation_id: string;
+  title: string | null;
+  message_id: string;
+  /** Excerpt of that message; each matched term is wrapped in \x02…\x03. */
+  snippet: string;
+  score: number;
+}
+
+export async function searchConversations(q: string): Promise<SearchHit[]> {
+  const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+  if (!r.ok) throw new Error("Search failed");
+  return r.json();
+}
+
 export async function createConversation(
   title?: string,
   project?: string,
