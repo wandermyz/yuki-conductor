@@ -67,3 +67,17 @@ def test_pasted_file_markers_point_at_the_file_on_disk(monkeypatch, tmp_path):
     assert f"![pasted.png]({shot})" in text
     assert f"![x]({shot})" in text
     assert "![gone](/api/files/fff)" in text
+
+
+def test_reopened_follow_up_names_the_new_worktree():
+    task = _task()
+    taskboard.store.add_comment(task.id, "agent", "done")
+    assert not prompts.was_reopened(taskboard.store.comments(task.id))
+    taskboard.store.add_comment(task.id, "system", "Done → To Do: reopened")
+    note = taskboard.store.add_comment(task.id, "user", "one more thing")
+    comments = taskboard.store.comments(task.id)
+    assert prompts.was_reopened(comments)
+    text = prompts.follow_up([note], reopened=True, cwd="/wt2")
+    assert "reopened" in text and "/wt2" in text and "one more thing" in text
+    taskboard.store.add_comment(task.id, "agent", "on it")
+    assert not prompts.was_reopened(taskboard.store.comments(task.id))

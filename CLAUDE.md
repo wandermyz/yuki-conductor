@@ -330,9 +330,19 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
   Input; agent ran `task ask` → Needs Input; else Ready for Review.
 - **Comments** requeue: a user comment on Needs Input / Ready for Review sends
   the task to the end of To Do; on In Progress it waits for the turn's end;
-  Done never reopens. Comments are stored before the status is read, and the
+  Done never reopens on a comment; only Reopen does. Comments are stored before the status is read, and the
   runner re-checks after its own move, so one racing the end of a turn is
   never stranded. `delivered` marks what the agent has been sent.
+- **Reopen** (`POST /api/tasks/{id}/reopen`, `actions.reopen`, the Reopen
+  button) is the only way out of Done: it runs `cleanup.run` first (so the
+  old worktree is gone), clears `worktree_path`, and sends the task to the
+  end of To Do with its session kept. The next turn gets a new worktree and
+  resumes the session with a "you were reopened" preface
+  (`prompts.was_reopened`), or starts fresh with the full timeline if the
+  session is gone. A merged/closed PR is dropped (noted on the timeline) along
+  with the branch, so the PR watcher can't re-close the task and the worktree
+  starts from the default branch; a still-open PR keeps its branch, which
+  `ensure_worktree` checks out from `origin/<branch>`.
 - **Agents** get a "Taskboard" system-prompt section and `YUKI_TASK_ID`
   (`run_agent(task_id=...)`), and the bundled `yuki-conductor-task` skill
   documents `yuki-conductor task show|list|comment|ask|pr|create`

@@ -127,6 +127,9 @@ def _create(task: Task, repo: str) -> tuple[str, str]:
         # removed by hand: the branch holds the work, so check it out again.
         _git(repo, "worktree", "prune")
         _git(repo, "worktree", "add", str(path), branch)
+    elif _ref_exists(repo, f"refs/remotes/origin/{branch}"):
+        # A reopened task whose PR is still open: carry on from the pushed work.
+        _git(repo, "worktree", "add", str(path), "-b", branch, f"origin/{branch}")
     else:
         _git(repo, "worktree", "add", str(path), "-b", branch, f"origin/{base}")
     logger.info("Task #%s: worktree %s on %s from origin/%s", task.id, path, branch, base)

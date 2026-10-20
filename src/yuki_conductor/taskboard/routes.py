@@ -238,6 +238,11 @@ def finish_task(task_id: int):
     return serialize_task(_call(actions.mark_done, task_id))
 
 
+@router.post("/api/tasks/{task_id}/reopen")
+def reopen_task(task_id: int):
+    return serialize_task(_call(actions.reopen, task_id))
+
+
 @router.post("/api/tasks/{task_id}/cleanup")
 def retry_task_cleanup(task_id: int):
     return serialize_task(_call(actions.retry_cleanup, task_id))

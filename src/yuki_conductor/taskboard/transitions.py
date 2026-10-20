@@ -32,7 +32,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     IN_PROGRESS: frozenset({TODO, NEEDS_INPUT, READY_FOR_REVIEW}),
     NEEDS_INPUT: frozenset({TODO, DONE}),
     READY_FOR_REVIEW: frozenset({TODO, DONE}),
-    DONE: frozenset(),
+    DONE: frozenset({TODO}),  # reopened
 }
 
 

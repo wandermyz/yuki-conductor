@@ -130,6 +130,7 @@ export const commentOnTask = (
 
 export const cancelTask = (id: number) => call<Task>("POST", `/api/tasks/${id}/cancel`);
 export const markTaskDone = (id: number) => call<Task>("POST", `/api/tasks/${id}/done`);
+export const reopenTask = (id: number) => call<Task>("POST", `/api/tasks/${id}/reopen`);
 export const retryCleanup = (id: number) => call<Task>("POST", `/api/tasks/${id}/cleanup`);
 export const archiveTask = (id: number) => call<{ ok: boolean }>("POST", `/api/tasks/${id}/archive`);
 export const moveTaskToTop = (id: number) => call<Task>("POST", `/api/tasks/${id}/top`);

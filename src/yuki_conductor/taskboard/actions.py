@@ -198,6 +198,36 @@ def mark_done(task_id: int) -> Task:
         raise BoardError(409, str(exc)) from exc
 
 
+def reopen(task_id: int) -> Task:
+    """Send a Done task back to the queue.
+
+    Its worktree is removed first (Done cleanup may still be running), so the
+    next turn starts in a new one from the default branch. The session is
+    kept: the runner resumes it, or starts fresh with the whole timeline if
+    it's gone. A merged or closed PR is forgotten, so the PR watcher doesn't
+    mark the task Done again; a still-open one stays registered.
+    """
+    from yuki_conductor.taskboard import cleanup
+
+    task = get(task_id)
+    if task.status != DONE:
+        raise BoardError(409, "Only a Done task can be reopened")
+    if not cleanup.run(task_id):
+        raise BoardError(500, f"Couldn't clean up the old worktree: {get(task_id).cleanup_error}")
+    task = get(task_id)  # cleanup refreshed pr_state
+    fields = dict(worktree_path=None, cleanup_error=None, asked_input=False)
+    if task.pr_state not in ("OPEN", "DRAFT"):
+        # A finished PR would mark the task Done again at the next poll.
+        fields.update(branch=None, pr_url=None, pr_state=None, pr_checked_at=None)
+        if task.pr_url:
+            taskboard.store.add_comment(task_id, "system", f"Previous pull request: {task.pr_url}")
+    taskboard.store.update_fields(task_id, **fields)
+    try:
+        return transition(task_id, TODO, reason="reopened")
+    except InvalidTransition as exc:
+        raise BoardError(409, str(exc)) from exc
+
+
 def retry_cleanup(task_id: int) -> Task:
     from yuki_conductor.taskboard import cleanup
 
