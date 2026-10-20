@@ -294,6 +294,7 @@ def test_search_index_backfills_existing_rows(tmp_path):
     store.add_comment(task.id, "agent", "fixed the sprocket")
     con = sqlite3.connect(db)
     con.execute("DROP TABLE tasks_fts")
+    con.execute("DROP TABLE search_indexes")  # as before versioning
     con.execute("DROP TABLE task_comments_fts")
     con.commit()
     con.close()
@@ -309,6 +310,7 @@ def test_search_index_is_rebuilt_from_old_format(tmp_path):
     task = _new(store, title="旧的任务")
     con = sqlite3.connect(db)
     con.execute("DROP TABLE tasks_fts")
+    con.execute("DROP TABLE search_indexes")  # as before versioning
     con.execute(
         "CREATE VIRTUAL TABLE tasks_fts USING fts5(title, body, content='tasks', "
         "content_rowid='id')"

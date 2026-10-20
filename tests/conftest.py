@@ -1,8 +1,17 @@
 """Shared test fixtures."""
 
-import pytest
+import os
+import tempfile
 
-from yuki_conductor.store import CronRunStore
+# Before anything imports `config`: modules that build a store at import time
+# (`web_server`, `taskboard`) would otherwise open the real workspace DB, and
+# a store's startup work, like converting a search index to a new format,
+# would land on the database the running daemon uses.
+os.environ["YUKI_CONDUCTOR_DATA_DIR"] = tempfile.mkdtemp(prefix="yuki-conductor-tests-")
+
+import pytest  # noqa: E402
+
+from yuki_conductor.store import CronRunStore  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

@@ -273,9 +273,10 @@ def test_fts_follows_insert_and_delete(tmp_path: Path):
     assert s.search("zeppelin") == []
 
 
-def test_fts_rebuilds_at_startup(tmp_path: Path):
-    """A raw write the store didn't make is picked up when it next opens."""
+def test_fts_is_rebuilt_only_when_its_version_changes(tmp_path: Path, monkeypatch):
     import sqlite3
+
+    from yuki_conductor import conversation_store
 
     db = tmp_path / "t.db"
     s = ConversationStore(db_path=db)
@@ -285,13 +286,19 @@ def test_fts_rebuilds_at_startup(tmp_path: Path):
     con.execute("UPDATE messages SET text = '修改之后' WHERE id = ?", (m.id,))
     con.commit()
     con.close()
+    # A current index is left alone: reopening doesn't see the raw write.
     s2 = ConversationStore(db_path=db)
-    assert s2.search("before") == []
-    assert [h.message_id for h in s2.search("之后")] == [m.id]
-    # Reopening again doesn't index anything twice.
+    assert [h.message_id for h in s2.search("before")] == [m.id]
+    assert s2.search("之后") == []
+
+    monkeypatch.setattr(
+        conversation_store, "SEARCH_INDEX_VERSION", conversation_store.SEARCH_INDEX_VERSION + 1
+    )
     s3 = ConversationStore(db_path=db)
-    assert len(_fts_rowids(s3, "before")) == 0
-    assert len(s3.search("修改")) == 1
+    assert s3.search("before") == []
+    assert [h.message_id for h in s3.search("之后")] == [m.id]
+    s4 = ConversationStore(db_path=db)
+    assert len(s4.search("修改")) == 1
 
 
 def test_fts_replaces_old_external_content_index(tmp_path: Path):
@@ -304,6 +311,7 @@ def test_fts_replaces_old_external_content_index(tmp_path: Path):
     s.add_message(c.id, role="user", text="历史记录 history")
     con = sqlite3.connect(str(db))
     con.execute("DROP TABLE messages_fts")
+    con.execute("DROP TABLE search_indexes")  # as before versioning
     con.execute("CREATE VIRTUAL TABLE messages_fts USING fts5(text, content='messages')")
     con.execute(
         "CREATE TRIGGER messages_fts_ai AFTER INSERT ON messages BEGIN "
