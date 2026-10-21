@@ -146,6 +146,8 @@ export const commentOnTask = (
 export const deleteTaskComment = (id: number, commentId: number) =>
   call<{ ok: boolean }>("DELETE", `/api/tasks/${id}/comments/${commentId}`);
 
+/** Ask GitHub for this task's PR state now; waits for the answer. */
+export const refreshTaskPr = (id: number) => call<Task>("POST", `/api/tasks/${id}/pr-refresh`);
 export const cancelTask = (id: number) => call<Task>("POST", `/api/tasks/${id}/cancel`);
 export const markTaskDone = (id: number) => call<Task>("POST", `/api/tasks/${id}/done`);
 export const reopenTask = (id: number) => call<Task>("POST", `/api/tasks/${id}/reopen`);

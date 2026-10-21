@@ -413,3 +413,23 @@ def test_retry_cleanup(client, monkeypatch):
     monkeypatch.setattr(cleanup, "run", failed)
     r = client.post(f"/api/tasks/{task['id']}/cleanup")
     assert r.status_code == 500 and "git broke" in r.json()["detail"]
+
+
+def test_refresh_one_pr(client, monkeypatch):
+    from yuki_conductor.taskboard import pr_watcher
+
+    task = _create(client)
+    assert client.post(f"/api/tasks/{task['id']}/pr-refresh").status_code == 409
+    client.post(f"/api/tasks/{task['id']}/pr", json={"url": "https://github.com/o/r/pull/9"})
+    monkeypatch.setattr(pr_watcher, "ProjectStore", FakeProjects)
+    monkeypatch.setattr(pr_watcher, "pr_state", lambda url, cwd: "DRAFT")
+    r = client.post(f"/api/tasks/{task['id']}/pr-refresh")
+    assert r.status_code == 200 and r.json()["pr_state"] == "DRAFT"
+    assert r.json()["status"] == TODO  # only Ready for Review is acted on
+
+    def fail(url, cwd):
+        raise pr_watcher.GhError("offline")
+
+    monkeypatch.setattr(pr_watcher, "pr_state", fail)
+    r = client.post(f"/api/tasks/{task['id']}/pr-refresh")
+    assert r.status_code == 502 and "offline" in r.json()["detail"]

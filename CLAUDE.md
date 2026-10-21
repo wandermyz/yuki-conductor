@@ -387,7 +387,10 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
 - **PRs** (`pr_watcher.py`): nothing polls on a timer. Each time the Tasks
   tab loads (page load, refresh, switching to the tab) it calls
   `POST /api/taskboard/pr-refresh`, which starts one background check
-  (`pr_watcher.refresh`; skipped while one is already running). Each Ready for
+  (`pr_watcher.refresh`; skipped while one is already running). The ↻ beside
+  a task's PR calls `POST /api/tasks/{id}/pr-refresh` (`actions.refresh_pr`),
+  which checks just that PR and waits: the full check in Ready for Review,
+  only `pr_state` otherwise. Each Ready for
   Review task's PR is read over the GitHub REST API via `gh api` (not
   `gh pr view`: its GraphQL authors can't tell bots apart). Merged or closed →
   Done; new comments → imported as `github` comments (once each, by URL) and

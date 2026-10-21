@@ -247,6 +247,11 @@ def set_task_pr(task_id: int, body: PrBody):
     return serialize_task(_call(actions.set_pr, task_id, body.url))
 
 
+@router.post("/api/tasks/{task_id}/pr-refresh")
+def refresh_task_pr(task_id: int):
+    return serialize_task(_call(actions.refresh_pr, task_id))
+
+
 @router.post("/api/tasks/{task_id}/cancel")
 def cancel_task(task_id: int):
     return serialize_task(_call(actions.cancel, task_id))

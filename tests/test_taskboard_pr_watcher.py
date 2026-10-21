@@ -203,3 +203,20 @@ def test_refresh_runs_once_at_a_time(monkeypatch):
     assert pr_watcher.refresh() is True
     assert entered.wait(5)
     assert runs == [1, 1]
+
+
+def test_refresh_one_runs_the_full_check_in_review(gh):
+    task = _in_review()
+    gh.pr = {"state": "closed", "merged": True}
+    pr_watcher.refresh_one(taskboard.store.get(task.id))
+    assert _status(task) == DONE
+    assert taskboard.store.get(task.id).pr_state == "MERGED"
+
+
+def test_check_skips_a_task_that_left_review(gh):
+    task = _in_review()
+    stale = taskboard.store.get(task.id)
+    transition(task.id, TODO, reason="comment")
+    gh.pr = {"state": "closed", "merged": True}
+    pr_watcher.check(stale)
+    assert _status(task) == TODO and gh.calls == []
