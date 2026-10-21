@@ -616,6 +616,37 @@ class TaskStore:
             external_author=external_author, created_at=now,
         )
 
+    def delete_pending_comment(self, task_id: int, comment_id: int) -> bool:
+        """Delete a user comment the agent hasn't been sent yet.
+
+        Compare-and-set on `delivered`: False when the comment isn't the
+        task's, isn't the user's, or a turn already picked it up. Comments
+        quoting it lose the quote.
+        """
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    "DELETE FROM task_comments WHERE id = ? AND task_id = ? "
+                    "AND author = 'user' AND delivered = 0",
+                    (comment_id, task_id),
+                )
+                if not cur.rowcount:
+                    return False
+                con.execute("DELETE FROM task_comments_fts WHERE rowid = ?", (comment_id,))
+                con.execute(
+                    "UPDATE task_comments SET quote_comment_id = NULL "
+                    "WHERE quote_comment_id = ?",
+                    (comment_id,),
+                )
+                con.execute(
+                    "UPDATE tasks SET updated_at = ? WHERE id = ?", (time.time(), task_id)
+                )
+                con.commit()
+            finally:
+                con.close()
+        return True
+
     def comments(self, task_id: int) -> list[TaskComment]:
         return self._comments("WHERE task_id = ?", (task_id,))
 

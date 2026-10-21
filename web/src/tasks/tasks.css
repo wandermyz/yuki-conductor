@@ -586,8 +586,13 @@ a.pr-marker:hover {
   border: 1px dashed var(--border);
 }
 
-.tasks-view .task-comment-quote {
+.task-comment-buttons {
   margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.tasks-view .task-comment-button {
   font-size: 12px;
   padding: 2px 8px;
   min-height: 28px;
@@ -941,7 +946,7 @@ a.pr-marker:hover {
     min-height: 36px;
   }
 
-  .tasks-view .task-comment-quote {
+  .tasks-view .task-comment-button {
     opacity: 1;
   }
 

@@ -9,6 +9,7 @@ import {
   archiveTask,
   cancelTask,
   commentOnTask,
+  deleteTaskComment,
   markTaskDone,
   reopenTask,
   moveTaskToTop,
@@ -220,6 +221,14 @@ export default function TaskDetail({
     setBusy(false);
   };
 
+  // Only a comment of yours the agent hasn't been sent yet; the server
+  // refuses once a turn has picked it up.
+  const deleteComment = (commentId: number) => {
+    if (!confirm("Delete this pending comment?")) return;
+    if (quoteId === commentId) setQuoteId(null);
+    act(() => deleteTaskComment(task.id, commentId));
+  };
+
   const quote = (text: string, commentId: number | null) => {
     setDraft((cur) => (cur && !cur.endsWith("\n") ? `${cur}\n\n` : cur) + quoteBlock(text));
     setQuoteId(commentId);
@@ -374,9 +383,16 @@ export default function TaskDetail({
                 <span className="task-comment-author">{authorLabel(c, task.harness)}</span>
                 <span className="task-comment-time">{formatWhen(c.created_at)}</span>
                 {!c.delivered && <span className="task-pending">pending</span>}
-                <button className="task-comment-quote" onClick={() => quote(c.body, c.id)}>
-                  Quote
-                </button>
+                <span className="task-comment-buttons">
+                  {!c.delivered && c.author === "user" && (
+                    <button className="task-comment-button" onClick={() => deleteComment(c.id)}>
+                      Delete
+                    </button>
+                  )}
+                  <button className="task-comment-button" onClick={() => quote(c.body, c.id)}>
+                    Quote
+                  </button>
+                </span>
               </div>
               {c.quote_comment_id !== null && (
                 <button className="task-quote-link" onClick={() => scrollToComment(c.quote_comment_id!)}>
