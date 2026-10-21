@@ -171,7 +171,7 @@ def start() -> None:
     set_receivers(receivers)
     web_app = start_web_server()
     start_cron_scheduler(platforms_by_name=platforms_by_name)
-    start_taskboard(platforms_by_name=platforms_by_name, ws_manager=ws_manager)
+    start_taskboard(ws_manager=ws_manager)
 
     for rec in receivers:
         if hasattr(rec, "register_api_routes"):

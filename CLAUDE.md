@@ -19,7 +19,7 @@ src/yuki_conductor/
     live.py            — live steps + change broadcasts to the web UI
     actions.py         — create/edit/comment/cancel/done: what the API and CLI call
     routes.py          — /api/tasks + /api/taskboard HTTP routes
-    notify.py          — web push + Slack when a task needs the user
+    notify.py          — web push when a task needs the user
     pr_watcher.py      — `gh` check of Ready for Review PRs, run when the Tasks tab opens
     cleanup.py         — removes a Done task's worktree + branches
   cli_task.py       — `yuki-conductor task …` (show/list/comment/ask/pr/create)
@@ -406,7 +406,8 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
 - **Notifications** (`notify.py`): only moves flagged `notify` (into Needs
   Input or Ready for Review, including failed runs) and comments posted with
   `notify` (an agent's `yuki-conductor send`) — a web push targeting
-  `#tasks/<id>`, plus Slack `send_notification` when Slack is enabled.
+  `#tasks/<id>`. Never Slack: Slack only carries replies to Slack-started
+  conversations, cron results and the daemon restart message.
 - **Live steps** go through the same `ConnectionManager` as chat, keyed
   `task:<id>`; Chat ignores those keys. `live.py` is the only link from the
   board to the web layer.
@@ -494,7 +495,7 @@ model, because nothing else tells it the tag exists; both `system_prompt()` and
 web conversation — unless the run is a task turn (`YUKI_TASK_ID`), where the
 CLI posts an agent comment on that task instead and never calls `/api/push`.
 That comment carries `notify: true`, so `actions.add_comment` pings the user
-through `notify.on_comment` (web push + Slack), as a push would; a plain
+through `notify.on_comment` (web push), as a push would; a plain
 `task comment` stays silent. The message is sent with `pushed=True`; `WebPlatform` uses
 that to tag the WebSocket payload (drives the notification sound) and mark the
 conversation unread. `web_server.PUSH_MARKER` is appended to the text itself so
@@ -523,8 +524,7 @@ user also goes out as a Web Push notification
 sidebar. Each push names a target, `{kind: "conversation" | "task", id}`
 (`web_push.conversation_target` / `task_target`). A notification names the
 conversation or task and what happened ("Responded to a conversation",
-"Moved to Needs Input", "Agent posted a comment"), never the content — Slack
-task notifications too. The service worker
+"Moved to Needs Input", "Agent posted a comment"), never the content. The service worker
 `web/public/sw.js` shows it, unless a focused window is already on that
 target; a click focuses the app and opens `#chat/<id>` or `#tasks/<id>`. Subscriptions live in the `push_subscriptions` table and are
 dropped when the push service answers 404/410. The VAPID key is generated on
