@@ -93,6 +93,31 @@ def test_long_labels_are_truncated_to_one_line():
     assert len(events[0].label) <= 120
 
 
+def test_detail_keeps_full_text_and_tool_input():
+    text = "line one\nline two " + "x" * 500
+    command = "echo " + "y" * 500
+    events, _, _ = parse_stream_line(
+        _line({"type": "assistant", "message": {"content": [
+            {"type": "text", "text": text},
+            {"type": "thinking", "thinking": text},
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": command}},
+        ]}})
+    )
+    assert events[0].detail["text"] == text
+    assert events[1].detail["text"] == text
+    assert events[2].detail["summary"] == command
+    assert len(events[2].label) <= len("Bash()") + 120
+
+
+def test_tool_result_stays_truncated():
+    events, _, _ = parse_stream_line(
+        _line({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "z" * 500},
+        ]}})
+    )
+    assert len(events[0].detail["summary"]) <= 120
+
+
 def test_garbage_lines_are_ignored():
     """Stray non-JSON output must not abort a run."""
     assert parse_stream_line("not json at all") == ([], None, None)

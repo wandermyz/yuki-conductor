@@ -16,12 +16,12 @@ from pathlib import Path
 from yuki_conductor.config import CLAUDE_BIN, CLAUDE_DEFAULT_MODEL
 from yuki_conductor.harness.base import (
     SUMMARY_LIMIT,
-    TEXT_LIMIT,
     Launch,
     RunRequest,
     RunResult,
     StreamEvent,
     prompt_tokens,
+    tool_label,
     tool_summary,
     truncate,
 )
@@ -62,7 +62,7 @@ def _assistant_events(message: dict) -> list[StreamEvent]:
                     StreamEvent(
                         kind="text",
                         label=truncate(text, SUMMARY_LIMIT),
-                        detail={"text": truncate(text, TEXT_LIMIT)},
+                        detail={"text": text},
                     )
                 )
         elif btype == "thinking":
@@ -72,7 +72,7 @@ def _assistant_events(message: dict) -> list[StreamEvent]:
                     StreamEvent(
                         kind="thinking",
                         label=truncate(text, SUMMARY_LIMIT),
-                        detail={"text": truncate(text, TEXT_LIMIT)},
+                        detail={"text": text},
                     )
                 )
         elif btype == "tool_use":
@@ -81,7 +81,7 @@ def _assistant_events(message: dict) -> list[StreamEvent]:
             events.append(
                 StreamEvent(
                     kind="tool_use",
-                    label=f"{name}({summary})" if summary else name,
+                    label=tool_label(name, summary),
                     detail={
                         "tool_use_id": block.get("id") or "",
                         "name": name,

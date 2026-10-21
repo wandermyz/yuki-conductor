@@ -867,9 +867,11 @@
 .step {
   display: flex;
   gap: 6px;
+  min-width: 0;
   font-size: 12px;
   line-height: 1.4;
   color: var(--text);
+  cursor: pointer;
 }
 
 .step-icon {
@@ -881,6 +883,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.step-open .step-label {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 24em;
+  overflow-y: auto;
 }
 
 .step-tool_use .step-label {
@@ -897,6 +906,11 @@
 .step-hidden {
   font-size: 11px;
   opacity: 0.5;
+  cursor: pointer;
+}
+
+.step-hidden:hover {
+  opacity: 0.8;
 }
 
 /* A finished turn keeps its trace, dimmed so it reads as history. */

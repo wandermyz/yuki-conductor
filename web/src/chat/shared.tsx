@@ -118,6 +118,17 @@ const STEP_ICONS: Record<StreamStep["kind"], string> = {
 /** How many trailing steps stay visible; older ones collapse away. */
 const VISIBLE_STEPS = 8;
 
+/** A step's whole text: the label is a one-line cut of it. A tool result's
+ *  label is all the backend keeps, so expanding it just unwraps the line. */
+function fullText(step: StreamStep): string {
+  const { name, summary, text } = step.detail;
+  if ((step.kind === "text" || step.kind === "thinking") && typeof text === "string") return text;
+  if (step.kind === "tool_use" && typeof name === "string" && typeof summary === "string") {
+    return summary ? `${name}(${summary})` : name;
+  }
+  return step.label;
+}
+
 export function StepList({
   steps,
   running,
@@ -127,21 +138,44 @@ export function StepList({
   running: boolean;
   agent: string;
 }) {
-  const visible = steps.slice(-VISIBLE_STEPS);
+  const [showAll, setShowAll] = useState(false);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const visible = showAll ? steps : steps.slice(-VISIBLE_STEPS);
   const hidden = steps.length - visible.length;
+  const toggle = (seq: number) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(seq)) next.delete(seq);
+      else next.add(seq);
+      return next;
+    });
   return (
     <div className={running ? "step-list" : "step-list step-list-done"}>
       {hidden > 0 && (
-        <div className="step-hidden">…{hidden} earlier step{hidden === 1 ? "" : "s"}</div>
-      )}
-      {visible.map((s) => (
-        <div key={s.seq} className={`step step-${s.kind}`}>
-          <span className="step-icon">{STEP_ICONS[s.kind] ?? "·"}</span>
-          <span className="step-label">{s.label}</span>
+        <div className="step-hidden" role="button" onClick={() => setShowAll(true)}>
+          …{hidden} earlier step{hidden === 1 ? "" : "s"}
         </div>
-      ))}
+      )}
+      {visible.map((s) => {
+        const open = expanded.has(s.seq);
+        return (
+          <div
+            key={s.seq}
+            className={`step step-${s.kind}${open ? " step-open" : ""}`}
+            role="button"
+            title={open ? "Collapse" : "Expand"}
+            onClick={() => {
+              // Don't collapse a step while the user is selecting text in it.
+              if (!window.getSelection()?.isCollapsed) return;
+              toggle(s.seq);
+            }}
+          >
+            <span className="step-icon">{STEP_ICONS[s.kind] ?? "·"}</span>
+            <span className="step-label">{open ? fullText(s) : s.label}</span>
+          </div>
+        );
+      })}
       {running && <div className="responding-shimmer">{agent} is responding…</div>}
     </div>
   );
 }
-

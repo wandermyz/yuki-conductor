@@ -29,12 +29,12 @@ from pathlib import Path
 from yuki_conductor.config import PI_BIN, PI_DEFAULT_MODEL
 from yuki_conductor.harness.base import (
     SUMMARY_LIMIT,
-    TEXT_LIMIT,
     Launch,
     RunRequest,
     RunResult,
     StreamEvent,
     prompt_tokens,
+    tool_label,
     tool_summary,
     truncate,
 )
@@ -126,7 +126,7 @@ def _assistant_events(message: dict) -> list[StreamEvent]:
                 events.append(StreamEvent(
                     kind="text",
                     label=truncate(text, SUMMARY_LIMIT),
-                    detail={"text": truncate(text, TEXT_LIMIT)},
+                    detail={"text": text},
                 ))
         elif btype == "thinking":
             text = (block.get("thinking") or "").strip()
@@ -134,14 +134,14 @@ def _assistant_events(message: dict) -> list[StreamEvent]:
                 events.append(StreamEvent(
                     kind="thinking",
                     label=truncate(text, SUMMARY_LIMIT),
-                    detail={"text": truncate(text, TEXT_LIMIT)},
+                    detail={"text": text},
                 ))
         elif btype == "toolCall":
             name = block.get("name") or "tool"
             summary = tool_summary(block.get("arguments") or {})
             events.append(StreamEvent(
                 kind="tool_use",
-                label=f"{name}({summary})" if summary else name,
+                label=tool_label(name, summary),
                 detail={"tool_use_id": block.get("id") or "", "name": name, "summary": summary},
             ))
     return events

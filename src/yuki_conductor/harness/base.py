@@ -9,9 +9,10 @@ from dataclasses import asdict, dataclass, field
 from typing import Protocol
 
 # Longest snippet kept in a label. Slack's assistant status and the web step
-# list are both single lines, so anything longer just truncates.
+# list are both single lines, so anything longer just truncates. A step's
+# `detail` carries the full text of a reply or tool call for the web UI to
+# expand; a tool result is only ever kept to this length.
 SUMMARY_LIMIT = 120
-TEXT_LIMIT = 400
 
 
 @dataclass
@@ -114,7 +115,10 @@ def prompt_tokens(usage: dict, keys: tuple[str, ...]) -> int | None:
 
 
 def tool_summary(tool_input: dict) -> str:
-    """Pick the one argument that best identifies what a tool call is doing."""
+    """Pick the one argument that best identifies what a tool call is doing.
+
+    Returned whole; callers truncate it for a label.
+    """
     if not isinstance(tool_input, dict):
         return ""
     for key in (
@@ -123,8 +127,12 @@ def tool_summary(tool_input: dict) -> str:
     ):
         value = tool_input.get(key)
         if isinstance(value, str) and value.strip():
-            return truncate(value, SUMMARY_LIMIT)
+            return value.strip()
     for value in tool_input.values():
         if isinstance(value, str) and value.strip():
-            return truncate(value, SUMMARY_LIMIT)
+            return value.strip()
     return ""
+
+
+def tool_label(name: str, summary: str) -> str:
+    return f"{name}({truncate(summary, SUMMARY_LIMIT)})" if summary else name
