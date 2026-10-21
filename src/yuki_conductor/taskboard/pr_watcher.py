@@ -1,7 +1,8 @@
 """Follow the pull requests of tasks in Ready for Review.
 
 Nothing polls on a timer: opening the Tasks tab calls `refresh()`, which
-checks each such task's PR once with `gh`, in the background:
+checks each such task's PR once with `gh`, in the background (and the
+refresh button beside a task's PR calls `refresh_one()` for just that one):
 
 - merged or closed → Done (which cleans up its worktree);
 - new comments from anyone but the agent → imported onto the timeline as
@@ -150,8 +151,20 @@ def _since(task: Task) -> float:
     return task.updated_at
 
 
+# One check at a time, so a task's refresh button racing the tab-load
+# refresh can't import the same comment twice.
+_checking = threading.Lock()
+
+
 def check(task: Task) -> None:
     """Poll one Ready for Review task's PR and act on it."""
+    with _checking:
+        task = taskboard.store.get(task.id)  # may have moved while we waited
+        if task is not None and task.status == READY_FOR_REVIEW:
+            _check(task)
+
+
+def _check(task: Task) -> None:
     polled_at = time.time()
     state, comments = fetch(task.pr_url, ProjectStore().get_path(task.project))
     seen = {c.external_url for c in taskboard.store.comments(task.id) if c.external_url}
@@ -186,6 +199,19 @@ def check_all() -> None:
             logger.warning("Task #%s: couldn't check %s: %s", task.id, task.pr_url, exc)
         except Exception:
             logger.exception("Task #%s: PR check failed", task.id)
+
+
+def refresh_one(task: Task) -> None:
+    """Check one task's PR now. Ready for Review gets the full `check`;
+    any other status only has its `pr_state` updated, since comments and
+    merges only drive a task that's waiting on review. Raises `GhError`."""
+    if task.status == READY_FOR_REVIEW:
+        check(task)
+        return
+    state = pr_state(task.pr_url, ProjectStore().get_path(task.project))
+    if state != task.pr_state:
+        taskboard.store.update_fields(task.id, pr_state=state)
+        live.task_changed(task.id)
 
 
 _refreshing = threading.Lock()

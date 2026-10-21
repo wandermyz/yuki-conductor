@@ -11,6 +11,7 @@ import {
   commentOnTask,
   deleteTaskComment,
   markTaskDone,
+  refreshTaskPr,
   reopenTask,
   moveTaskToTop,
   retryCleanup,
@@ -156,6 +157,7 @@ export default function TaskDetail({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSession, setShowSession] = useState(false);
+  const [refreshingPr, setRefreshingPr] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const [quoteTarget, clearQuote] = useQuoteSelection(timelineRef);
@@ -219,6 +221,12 @@ export default function TaskDetail({
       onChanged(); // show the cleanup error, if that's what failed
     }
     setBusy(false);
+  };
+
+  const refreshPr = async () => {
+    setRefreshingPr(true);
+    await act(() => refreshTaskPr(task.id));
+    setRefreshingPr(false);
   };
 
   // Only a comment of yours the agent hasn't been sent yet; the server
@@ -318,7 +326,20 @@ export default function TaskDetail({
           </span>
           {task.branch && <code>{task.branch}</code>}
           {!task.branch && task.use_worktree && <span>worktree</span>}
-          {task.pr_url && <PrMarker url={task.pr_url} state={task.pr_state} link />}
+          {task.pr_url && (
+            <span className="task-pr">
+              <PrMarker url={task.pr_url} state={task.pr_state} link />
+              <button
+                className={`task-pr-refresh${refreshingPr ? " spinning" : ""}`}
+                onClick={refreshPr}
+                disabled={refreshingPr}
+                title="Check the PR's status on GitHub now"
+                aria-label="Refresh PR status"
+              >
+                ↻
+              </button>
+            </span>
+          )}
         </div>
         {task.parent && (
           <div className="task-links">

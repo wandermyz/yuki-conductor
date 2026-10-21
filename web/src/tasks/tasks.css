@@ -494,6 +494,37 @@ a.pr-marker:hover {
   gap: 4px;
 }
 
+.task-pr {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Overrides `.tasks-view button`, including its 44px mobile tap height,
+   which would make the meta row twice as tall. */
+.tasks-view .task-pr-refresh {
+  min-height: 0;
+  padding: 2px 6px;
+  border: none;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.tasks-view .task-pr-refresh:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.tasks-view .task-pr-refresh.spinning {
+  animation: task-pr-spin 0.8s linear infinite;
+}
+
+@keyframes task-pr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .task-meta code {
   font-size: 12px;
   overflow-wrap: anywhere;

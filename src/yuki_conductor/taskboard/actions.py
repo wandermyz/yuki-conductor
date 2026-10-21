@@ -199,6 +199,20 @@ def set_pr(task_id: int, url: str) -> Task:
     return task
 
 
+def refresh_pr(task_id: int) -> Task:
+    """Ask GitHub for the task's PR state now (the PR's refresh button)."""
+    from yuki_conductor.taskboard import pr_watcher
+
+    task = get(task_id)
+    if not task.pr_url:
+        raise BoardError(409, "This task has no pull request")
+    try:
+        pr_watcher.refresh_one(task)
+    except pr_watcher.GhError as exc:
+        raise BoardError(502, f"Couldn't check the PR: {exc}") from exc
+    return get(task_id)
+
+
 def cancel(task_id: int) -> Task:
     """Take a task off the queue, or stop its running turn. Either way it
     ends up in Needs Input, waiting for the user's next comment."""
