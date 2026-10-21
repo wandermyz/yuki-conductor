@@ -375,6 +375,66 @@ let connected = false;
 const BASE_DELAY = 1000;
 const MAX_DELAY = 30000;
 
+// A socket can stay "open" on this end long after the tunnel relay or the
+// devbox dropped it — a sleeping phone or a relay blip never delivers the
+// close. So the client pings and treats silence as a dead connection: every
+// message (pongs included) proves the path is alive.
+const PING_INTERVAL = 15000;
+const SILENCE_TIMEOUT = 40000;
+// After the page comes back (iOS resume, network change) don't wait out the
+// full timeout: ping now and expect an answer quickly.
+const RESUME_TIMEOUT = 5000;
+
+let lastHeard = 0;
+let deadline = 0;
+let heartbeat: ReturnType<typeof setInterval> | null = null;
+
+function sendPing() {
+  if (ws?.readyState === WebSocket.OPEN) ws.send("ping");
+}
+
+/** Close handler body: shared by a real close and a detected dead socket. */
+function handleClose() {
+  if (heartbeat) clearInterval(heartbeat);
+  heartbeat = null;
+  connected = false;
+  for (const sub of subscribers) sub.onClose?.();
+  const delay = Math.min(BASE_DELAY * 2 ** attempt, MAX_DELAY);
+  attempt++;
+  setTimeout(wsConnect, delay);
+}
+
+/** Give up on a silent socket without waiting for a close that may never come. */
+function dropDead() {
+  const dead = ws;
+  if (!dead) return;
+  dead.onopen = dead.onmessage = dead.onclose = null;
+  dead.close();
+  attempt = 0; // the server was reachable a moment ago; retry right away
+  handleClose();
+}
+
+function checkAlive() {
+  if (!connected) return;
+  const now = Date.now();
+  // Any message clears `deadline`, so a passed deadline means no answer.
+  if (now - lastHeard > SILENCE_TIMEOUT || (deadline && now > deadline)) {
+    dropDead();
+  }
+}
+
+function probe() {
+  if (!connected) return;
+  deadline = Date.now() + RESUME_TIMEOUT;
+  sendPing();
+  setTimeout(checkAlive, RESUME_TIMEOUT + 100);
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") probe();
+});
+window.addEventListener("online", probe);
+
 function wsConnect() {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${window.location.host}/ws/chat`);
@@ -382,25 +442,28 @@ function wsConnect() {
   ws.onopen = () => {
     attempt = 0;
     connected = true;
+    lastHeard = Date.now();
+    deadline = 0;
+    heartbeat = setInterval(() => {
+      checkAlive();
+      sendPing();
+    }, PING_INTERVAL);
     for (const sub of subscribers) sub.onOpen?.();
   };
 
   ws.onmessage = (ev) => {
+    lastHeard = Date.now();
+    deadline = 0;
     try {
-      const data = JSON.parse(ev.data) as WSEvent;
+      const data = JSON.parse(ev.data) as WSEvent | { type: "pong" };
+      if (data.type === "pong") return;
       for (const sub of subscribers) sub.onEvent(data);
     } catch {
       /* ignore */
     }
   };
 
-  ws.onclose = () => {
-    connected = false;
-    for (const sub of subscribers) sub.onClose?.();
-    const delay = Math.min(BASE_DELAY * 2 ** attempt, MAX_DELAY);
-    attempt++;
-    setTimeout(wsConnect, delay);
-  };
+  ws.onclose = handleClose;
 }
 
 /**

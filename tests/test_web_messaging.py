@@ -324,3 +324,9 @@ def test_search_api(client):
 
     client.post(f"/api/conversations/{conv['id']}/archive")
     assert client.get("/api/search", params={"q": "timed"}).json() == []
+
+
+def test_chat_ws_answers_ping_with_pong(client):
+    with client.websocket_connect("/ws/chat") as ws:
+        ws.send_text("ping")
+        assert ws.receive_json() == {"type": "pong"}
