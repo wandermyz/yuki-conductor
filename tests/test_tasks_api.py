@@ -265,6 +265,15 @@ def test_board_state_and_pause(client, monkeypatch):
     assert taskboard.board_state.paused()
 
 
+def test_pr_refresh(client, monkeypatch):
+    from yuki_conductor.taskboard import pr_watcher
+
+    monkeypatch.setattr(pr_watcher, "refresh", lambda: True)
+    r = client.post("/api/taskboard/pr-refresh")
+    assert r.status_code == 202
+    assert r.json() == {"started": True}
+
+
 def test_steps_replay(client, monkeypatch):
     from yuki_conductor.taskboard import live
 

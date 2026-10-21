@@ -20,7 +20,7 @@ src/yuki_conductor/
     actions.py         — create/edit/comment/cancel/done: what the API and CLI call
     routes.py          — /api/tasks + /api/taskboard HTTP routes
     notify.py          — web push + Slack when a task needs the user
-    pr_watcher.py      — 5-minute `gh` poll of Ready for Review PRs
+    pr_watcher.py      — `gh` check of Ready for Review PRs, run when the Tasks tab opens
     cleanup.py         — removes a Done task's worktree + branches
   cli_task.py       — `yuki-conductor task …` (show/list/comment/ask/pr/create)
   cli_search.py     — `yuki-conductor search` + `conversation show`, with web UI links
@@ -384,16 +384,20 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
   (`run_agent(task_id=...)`), and the bundled `yuki-conductor-task` skill
   documents `yuki-conductor task show|list|comment|ask|pr|create`
   (`cli_task.py`, over HTTP like `send`).
-- **PRs** (`pr_watcher.py`): every 5 minutes, each Ready for Review task's PR
-  is read over the GitHub REST API via `gh api` (not `gh pr view`: its
-  GraphQL authors can't tell bots apart). Merged or closed → Done; new
-  comments → imported as `github` comments (once each, by URL) and the task
-  goes to To Do. Comments carrying `skills.GITHUB_AGENT_MARKER` — the footer
-  agents must append to everything they post — are ignored, since the agent
-  may post as the user's own account. Each poll also records the PR's
-  `pr_state` (OPEN / DRAFT / MERGED / CLOSED; a newly registered PR starts
-  OPEN, and Done cleanup refreshes it), which the Tasks tab draws as
-  GitHub's octicon, coloured by state, in the list and the detail header.
+- **PRs** (`pr_watcher.py`): nothing polls on a timer. Each time the Tasks
+  tab loads (page load, refresh, switching to the tab) it calls
+  `POST /api/taskboard/pr-refresh`, which starts one background check
+  (`pr_watcher.refresh`; skipped while one is already running). Each Ready for
+  Review task's PR is read over the GitHub REST API via `gh api` (not
+  `gh pr view`: its GraphQL authors can't tell bots apart). Merged or closed →
+  Done; new comments → imported as `github` comments (once each, by URL) and
+  the task goes to To Do; the page picks the changes up as task broadcasts.
+  Comments carrying `skills.GITHUB_AGENT_MARKER` — the footer agents must
+  append to everything they post — are ignored, since the agent may post as
+  the user's own account. Each check also records the PR's `pr_state` (OPEN /
+  DRAFT / MERGED / CLOSED; a newly registered PR starts OPEN, and Done cleanup
+  refreshes it), which the Tasks tab draws as GitHub's octicon, coloured by
+  state, in the list and the detail header.
 - **Done** cleanup (`cleanup.py`, background): removes the worktree, the
   local `task/` branch and the remote branch. It keeps a local branch whose
   commits no remote has, and the remote branch of a PR that's still open

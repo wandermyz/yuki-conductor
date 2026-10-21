@@ -166,7 +166,6 @@ def test_start_taskboard_recovers_and_broadcasts(monkeypatch):
 
     monkeypatch.setattr(taskboard, "active_harvester", None)
     monkeypatch.setattr(harvester_mod.Harvester, "loop", lambda self, stop: None)
-    monkeypatch.setattr("yuki_conductor.taskboard.pr_watcher.loop", lambda stop: None)
     task = _new()
     claim(task.id)
     try:

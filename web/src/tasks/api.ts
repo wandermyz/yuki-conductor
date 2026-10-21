@@ -153,6 +153,8 @@ export const reorderTasks = (ids: number[]) => call<{ ok: boolean }>("PUT", "/ap
 export const getBoardState = () => call<BoardState>("GET", "/api/taskboard/state");
 export const setBoardPaused = (paused: boolean) =>
   call<BoardState>("PUT", "/api/taskboard/state", { paused });
+/** Check every Ready for Review task's PR once, in the background. */
+export const refreshPrs = () => call<{ started: boolean }>("POST", "/api/taskboard/pr-refresh");
 
 /** Buffered live steps of the task's current (or last) turn. */
 export const fetchTaskSteps = (id: number) => call<StreamStep[]>("GET", `/api/tasks/${id}/steps`);
