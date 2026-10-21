@@ -231,6 +231,12 @@ def comment_on_task(task_id: int, body: CommentCreate):
     return serialize_comment(comment)
 
 
+@router.delete("/api/tasks/{task_id}/comments/{comment_id}")
+def delete_task_comment(task_id: int, comment_id: int):
+    _call(actions.delete_comment, task_id, comment_id)
+    return {"ok": True}
+
+
 @router.post("/api/tasks/{task_id}/ask", status_code=201)
 def ask_on_task(task_id: int, body: AskBody):
     return serialize_comment(_call(actions.ask, task_id, body.question))

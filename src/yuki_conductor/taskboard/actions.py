@@ -148,6 +148,34 @@ def add_comment(
     return comment
 
 
+def delete_comment(task_id: int, comment_id: int) -> None:
+    """Take back a user comment the agent hasn't been sent yet.
+
+    If that comment was what sent the task back to To Do and no other
+    pending comment remains, the task returns to waiting for the user in
+    Needs Input rather than running a turn with nothing new.
+    """
+    get(task_id)
+    if not taskboard.store.delete_pending_comment(task_id, comment_id):
+        raise BoardError(409, "Only your own comments that are still pending can be deleted")
+    task = get(task_id)
+    if task.status == TODO and _requeued_by_comment(task_id):
+        try:
+            transition(task_id, NEEDS_INPUT, reason="pending comment deleted")
+        except InvalidTransition:
+            pass  # picked up meanwhile
+    _changed(task_id)
+
+
+def _requeued_by_comment(task_id: int) -> bool:
+    """The task entered To Do because of a comment, and none is pending now."""
+    comments = taskboard.store.comments(task_id)
+    if any(not c.delivered for c in comments):
+        return False
+    moves = [c for c in comments if c.author == "system" and " → " in c.body]
+    return bool(moves) and moves[-1].body.endswith("→ To Do: new comment")
+
+
 def ask(task_id: int, question: str) -> TaskComment:
     """The agent needs the user: post the question; the turn's end moves the
     task to Needs Input."""

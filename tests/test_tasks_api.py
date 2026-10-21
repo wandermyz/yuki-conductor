@@ -172,6 +172,56 @@ def test_comment_racing_the_end_of_a_turn_still_requeues(client, monkeypatch):
     assert _status(task["id"]) == TODO
 
 
+def test_delete_pending_comment(client):
+    task = _create(client)
+    tid = task["id"]
+    first = client.post(f"/api/tasks/{tid}/comments", json={"body": "oops"}).json()
+    reply = client.post(
+        f"/api/tasks/{tid}/comments", json={"body": "more", "quote_comment_id": first["id"]}
+    ).json()
+    assert client.delete(f"/api/tasks/{tid}/comments/{first['id']}").status_code == 200
+    comments = client.get(f"/api/tasks/{tid}").json()["comments"]
+    assert [c["id"] for c in comments] == [reply["id"]]
+    assert comments[0]["quote_comment_id"] is None
+    assert taskboard.store.search("oops") == []
+    # Gone already, on another task, or unknown task.
+    assert client.delete(f"/api/tasks/{tid}/comments/{first['id']}").status_code == 409
+    other = _create(client)
+    assert client.delete(f"/api/tasks/{other['id']}/comments/{reply['id']}").status_code == 409
+    assert client.delete(f"/api/tasks/999/comments/{reply['id']}").status_code == 404
+
+
+def test_delivered_and_agent_comments_cannot_be_deleted(client):
+    task = _create(client)
+    tid = task["id"]
+    sent = client.post(f"/api/tasks/{tid}/comments", json={"body": "sent"}).json()
+    taskboard.store.mark_delivered([sent["id"]])
+    agent = client.post(f"/api/tasks/{tid}/comments", json={"body": "hi", "author": "agent"}).json()
+    for c in (sent, agent):
+        assert client.delete(f"/api/tasks/{tid}/comments/{c['id']}").status_code == 409
+
+
+def test_deleting_the_requeuing_comment_returns_to_needs_input(client):
+    task = _create(client)
+    tid = task["id"]
+    claim(tid)
+    transition(tid, READY_FOR_REVIEW, reason="turn finished")
+    a = client.post(f"/api/tasks/{tid}/comments", json={"body": "a"}).json()
+    b = client.post(f"/api/tasks/{tid}/comments", json={"body": "b"}).json()
+    assert _status(tid) == TODO
+    client.delete(f"/api/tasks/{tid}/comments/{a['id']}")
+    assert _status(tid) == TODO  # b still pending
+    client.delete(f"/api/tasks/{tid}/comments/{b['id']}")
+    assert _status(tid) == NEEDS_INPUT
+
+
+def test_deleting_a_comment_on_a_new_task_keeps_it_queued(client):
+    task = _create(client)
+    c = client.post(f"/api/tasks/{task['id']}/comments", json={"body": "x"}).json()
+    client.delete(f"/api/tasks/{task['id']}/comments/{c['id']}")
+    assert _status(task["id"]) == TODO
+
+
 def test_quote_must_be_on_the_same_task(client):
     a, b = _create(client), _create(client)
     other = client.post(f"/api/tasks/{b['id']}/comments", json={"body": "x"}).json()

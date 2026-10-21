@@ -142,6 +142,10 @@ export const commentOnTask = (
     attachment_ids: attachmentIds,
   });
 
+/** Only a user comment that's still pending (not yet sent to the agent). */
+export const deleteTaskComment = (id: number, commentId: number) =>
+  call<{ ok: boolean }>("DELETE", `/api/tasks/${id}/comments/${commentId}`);
+
 export const cancelTask = (id: number) => call<Task>("POST", `/api/tasks/${id}/cancel`);
 export const markTaskDone = (id: number) => call<Task>("POST", `/api/tasks/${id}/done`);
 export const reopenTask = (id: number) => call<Task>("POST", `/api/tasks/${id}/reopen`);
