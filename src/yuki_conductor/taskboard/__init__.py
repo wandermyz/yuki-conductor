@@ -17,10 +17,9 @@ board_state = TaskboardStateStore()
 active_harvester = None
 
 
-def start_taskboard(platforms_by_name: dict | None = None, ws_manager=None) -> threading.Event:
+def start_taskboard(ws_manager=None) -> threading.Event:
     """Recover tasks left In Progress, then start picking up To Do tasks.
 
-    `platforms_by_name` are the enabled chat platforms (for notifications);
     `ws_manager` is the web `ConnectionManager` the board reports live state
     to. Returns an event that stops the loop when set.
     """
@@ -29,7 +28,6 @@ def start_taskboard(platforms_by_name: dict | None = None, ws_manager=None) -> t
     from yuki_conductor.taskboard.harvester import Harvester
 
     live.attach(ws_manager)
-    notify.set_platforms(platforms_by_name or {})
     active_harvester = Harvester()
     transitions.add_listener(lambda event: live.task_changed(event.task.id))
     transitions.add_listener(active_harvester.on_transition)

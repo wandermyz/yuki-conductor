@@ -169,7 +169,7 @@ def test_start_taskboard_recovers_and_broadcasts(monkeypatch):
     task = _new()
     claim(task.id)
     try:
-        taskboard.start_taskboard({}, Manager())
+        taskboard.start_taskboard(Manager())
     finally:
         live.attach(None)
     assert taskboard.store.get(task.id).status == TODO
