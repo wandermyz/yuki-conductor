@@ -955,7 +955,11 @@ def create_api() -> FastAPI:
         ws_manager.add(websocket, loop)
         try:
             while True:
-                await websocket.receive_text()
+                # The client pings to prove the path through the tunnel relay
+                # is still alive; a socket can look open on its end long after
+                # the relay or the devbox dropped it.
+                if await websocket.receive_text() == "ping":
+                    await websocket.send_json({"type": "pong"})
         except WebSocketDisconnect:
             pass
         finally:
