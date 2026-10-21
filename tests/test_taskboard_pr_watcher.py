@@ -1,5 +1,7 @@
 """The PR watcher, with `gh api` mocked (GitHub REST shapes)."""
 
+import threading
+
 import pytest
 
 from yuki_conductor import taskboard
@@ -177,3 +179,27 @@ def test_pr_state(gh):
     assert pr_watcher.pr_state(PR, None) == "CLOSED"
     gh.pr = {"state": "closed", "merged": True}
     assert pr_watcher.pr_state(PR, None) == "MERGED"
+
+
+def test_refresh_runs_once_at_a_time(monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    runs = []
+
+    def slow_check_all():
+        runs.append(1)
+        entered.set()
+        release.wait(5)
+
+    monkeypatch.setattr(pr_watcher, "check_all", slow_check_all)
+    assert pr_watcher.refresh() is True
+    assert entered.wait(5)
+    assert pr_watcher.refresh() is False  # one already in flight
+    release.set()
+    for _ in range(100):
+        if not pr_watcher._refreshing.locked():
+            break
+        threading.Event().wait(0.02)
+    entered.clear()
+    assert pr_watcher.refresh() is True
+    assert entered.wait(5)
+    assert runs == [1, 1]

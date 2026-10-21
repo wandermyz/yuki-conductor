@@ -1,6 +1,7 @@
 """Follow the pull requests of tasks in Ready for Review.
 
-Every `POLL_SECONDS`, each such task's PR is checked with `gh`:
+Nothing polls on a timer: opening the Tasks tab calls `refresh()`, which
+checks each such task's PR once with `gh`, in the background:
 
 - merged or closed → Done (which cleans up its worktree);
 - new comments from anyone but the agent → imported onto the timeline as
@@ -28,8 +29,6 @@ from yuki_conductor.taskboard import live
 from yuki_conductor.taskboard.transitions import InvalidTransition, transition
 
 logger = logging.getLogger(__name__)
-
-POLL_SECONDS = 300
 
 _PR_RE = re.compile(r"github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)")
 
@@ -189,6 +188,23 @@ def check_all() -> None:
             logger.exception("Task #%s: PR check failed", task.id)
 
 
-def loop(stop: threading.Event) -> None:
-    while not stop.wait(POLL_SECONDS):
-        check_all()
+_refreshing = threading.Lock()
+
+
+def refresh() -> bool:
+    """Run `check_all` in a background thread, unless one already is.
+
+    Whatever it changes reaches the browser through the usual task-change
+    broadcasts. Returns whether a check was started.
+    """
+    if not _refreshing.acquire(blocking=False):
+        return False
+
+    def run() -> None:
+        try:
+            check_all()
+        finally:
+            _refreshing.release()
+
+    threading.Thread(target=run, name="taskboard-pr-refresh", daemon=True).start()
+    return True

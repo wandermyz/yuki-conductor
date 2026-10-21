@@ -28,6 +28,7 @@ import {
   getBoardState,
   getTask,
   listTasks,
+  refreshPrs,
   reorderTasks,
   searchTasks,
   setBoardPaused,
@@ -241,6 +242,12 @@ export default function TasksView({
   useEffect(() => {
     refreshList();
   }, [refreshList]);
+
+  // PRs aren't polled: opening the tab checks them once, and any change
+  // comes back as a task broadcast.
+  useEffect(() => {
+    refreshPrs().catch(console.error);
+  }, []);
 
   // Load the selected task and replay its live steps.
   useEffect(() => {

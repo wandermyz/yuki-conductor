@@ -12,7 +12,7 @@ from yuki_conductor import taskboard
 from yuki_conductor.harness import HARNESSES
 from yuki_conductor.messaging.web_platform import resolve_file
 from yuki_conductor.task_store import STATUS_LABELS, Task, TaskComment
-from yuki_conductor.taskboard import actions, live
+from yuki_conductor.taskboard import actions, live, pr_watcher
 from yuki_conductor.taskboard.actions import BoardError
 
 router = APIRouter()
@@ -294,3 +294,9 @@ def board_state():
 @router.put("/api/taskboard/state")
 def set_board_state(body: StateBody):
     return actions.set_paused(body.paused)
+
+
+@router.post("/api/taskboard/pr-refresh", status_code=202)
+def refresh_prs():
+    """Check every Ready for Review PR once; the Tasks tab calls it on load."""
+    return {"started": pr_watcher.refresh()}
