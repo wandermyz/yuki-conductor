@@ -231,9 +231,18 @@ def cancel(task_id: int) -> Task:
 
 
 def mark_done(task_id: int) -> Task:
+    """Finish a task. A running one (its agent ran `task done`) is only
+    flagged: the turn's end moves it to Done, unless something else, like a
+    new comment, sends it elsewhere first."""
     task = get(task_id)
+    if task.status == IN_PROGRESS:
+        task = taskboard.store.update_fields(task_id, done_requested=True)
+        _changed(task_id)
+        return task
     if task.status not in (NEEDS_INPUT, READY_FOR_REVIEW):
-        raise BoardError(409, "Only a Needs Input or Ready for Review task can be marked done")
+        raise BoardError(
+            409, "Only an In Progress, Needs Input or Ready for Review task can be marked done"
+        )
     try:
         return transition(task_id, DONE, reason="marked done")
     except InvalidTransition as exc:
@@ -257,7 +266,9 @@ def reopen(task_id: int) -> Task:
     if not cleanup.run(task_id):
         raise BoardError(500, f"Couldn't clean up the old worktree: {get(task_id).cleanup_error}")
     task = get(task_id)  # cleanup refreshed pr_state
-    fields = dict(worktree_path=None, cleanup_error=None, asked_input=False)
+    fields = dict(
+        worktree_path=None, cleanup_error=None, asked_input=False, done_requested=False
+    )
     if task.pr_state not in ("OPEN", "DRAFT"):
         # A finished PR would mark the task Done again at the next poll.
         fields.update(branch=None, pr_url=None, pr_state=None, pr_checked_at=None)

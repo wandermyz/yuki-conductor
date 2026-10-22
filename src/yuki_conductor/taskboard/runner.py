@@ -18,7 +18,7 @@ from yuki_conductor.harness.base import RunResult
 from yuki_conductor.harness.process import cancel_process, run_agent
 from yuki_conductor.messaging import split_response
 from yuki_conductor.store import ProjectStore
-from yuki_conductor.task_store import NEEDS_INPUT, READY_FOR_REVIEW, TODO, Task
+from yuki_conductor.task_store import DONE, NEEDS_INPUT, READY_FOR_REVIEW, TODO, Task
 from yuki_conductor.taskboard import live, prompts
 from yuki_conductor.taskboard.transitions import InvalidTransition, transition
 from yuki_conductor.taskboard.worktree import WorktreeError, ensure_worktree
@@ -82,6 +82,8 @@ def resolve_outcome(
         return Outcome(NEEDS_INPUT, "the run failed", notify=True)
     if task.asked_input:
         return Outcome(NEEDS_INPUT, "the agent asked for input", notify=True)
+    if task.done_requested:
+        return Outcome(DONE, "the agent marked it done", notify=True)
     if task.pr_url:
         return Outcome(READY_FOR_REVIEW, "PR opened", notify=True)
     return Outcome(READY_FOR_REVIEW, "turn finished", notify=True)
@@ -213,7 +215,7 @@ def _new_comments(task_id: int, delivered: list[int]) -> bool:
 
 
 def _run_turn(task_id: int) -> None:
-    task = taskboard.store.update_fields(task_id, asked_input=False)
+    task = taskboard.store.update_fields(task_id, asked_input=False, done_requested=False)
     cwd = _working_dir(task)
     if cwd is None:
         return

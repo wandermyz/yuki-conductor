@@ -6,7 +6,7 @@ import pytest
 
 from yuki_conductor import taskboard
 from yuki_conductor.harness.base import RunResult, StreamEvent
-from yuki_conductor.task_store import NEEDS_INPUT, READY_FOR_REVIEW, TODO
+from yuki_conductor.task_store import DONE, NEEDS_INPUT, READY_FOR_REVIEW, TODO
 from yuki_conductor.taskboard import runner
 from yuki_conductor.taskboard.transitions import claim
 from yuki_conductor.taskboard.worktree import WorktreeError
@@ -119,6 +119,30 @@ def test_origin_repo_parsing(tmp_path):
                     "git@github.com:Owner/my.repo.git"], check=True)
     assert runner._origin_repo(str(tmp_path)) == "Owner/my.repo"
     assert runner._origin_repo(str(tmp_path / "nope")) is None
+
+
+def test_done_lands_in_done(env):
+    task = _claimed()
+
+    def finishes(prompt, kwargs):
+        taskboard.store.update_fields(task.id, done_requested=True)
+        return RunResult(text="All set.", session_id="s1")
+
+    env.script = [finishes]
+    runner.run_turn(task.id)
+    assert _status(task) == DONE
+
+
+def test_ask_beats_done(env):
+    task = _claimed()
+
+    def both(prompt, kwargs):
+        taskboard.store.update_fields(task.id, asked_input=True, done_requested=True)
+        return RunResult(text="Done, unless...?", session_id="s1")
+
+    env.script = [both]
+    runner.run_turn(task.id)
+    assert _status(task) == NEEDS_INPUT
 
 
 def test_ask_lands_in_needs_input(env):

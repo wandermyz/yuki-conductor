@@ -364,7 +364,8 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
   starts fresh with the whole timeline (`prompts.py`). The reply becomes an
   agent comment. Where the task goes next, first match wins: new user
   comment during the turn → To Do; cancelled → Needs Input; failed → Needs
-  Input; agent ran `task ask` → Needs Input; else Ready for Review.
+  Input; agent ran `task ask` → Needs Input; agent ran `task done` → Done; else
+  Ready for Review.
 - **Comments** requeue: a user comment on Needs Input / Ready for Review sends
   the task to the end of To Do; on In Progress it waits for the turn's end;
   Done never reopens on a comment; only Reopen does. Comments are stored before the status is read, and the
@@ -382,7 +383,7 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
   `ensure_worktree` checks out from `origin/<branch>`.
 - **Agents** get a "Taskboard" system-prompt section and `YUKI_TASK_ID`
   (`run_agent(task_id=...)`), and the bundled `yuki-conductor-task` skill
-  documents `yuki-conductor task show|list|comment|ask|pr|create`
+  documents `yuki-conductor task show|list|comment|ask|done|pr|create`
   (`cli_task.py`, over HTTP like `send`).
 - **PRs** (`pr_watcher.py`): nothing polls on a timer. Each time the Tasks
   tab loads (page load, refresh, switching to the tab) it calls
@@ -439,7 +440,7 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
 - `uv run yuki-conductor --help` — show CLI help
 - `uv run yuki-conductor simulate message "test"` — test without Slack
 - `uv run yuki-conductor send -c <conv-id> "text"` — push a message (and `--attach` files) into a web or Slack conversation (see Outbound Messages)
-- `uv run yuki-conductor task show|list|comment|ask|pr|create` — the taskboard from a shell (see Taskboard)
+- `uv run yuki-conductor task show|list|comment|ask|done|pr|create` — the taskboard from a shell (see Taskboard)
 - `uv run yuki-conductor search [--conversations|--tasks] TERMS` / `conversation show <id>` — find and read past work (see Conversation search)
 - `uv run yuki-conductor web rebuild` — rebuild frontend + auto-reload connected browsers
 - `cd web && pnpm dev` — start frontend dev server (proxies /api to port 2333)

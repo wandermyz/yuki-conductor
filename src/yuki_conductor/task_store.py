@@ -49,8 +49,8 @@ HIDE_DONE_AFTER_SECONDS = 30 * 24 * 3600
 _TASK_COLUMNS = (
     "id", "title", "body", "attachments", "project", "harness", "use_worktree",
     "status", "sort_order", "session_id", "worktree_path", "branch", "pr_url",
-    "pr_state", "pr_checked_at", "asked_input", "parent_task_id", "cleanup_error",
-    "created_at", "updated_at", "started_at", "done_at", "archived_at",
+    "pr_state", "pr_checked_at", "asked_input", "done_requested", "parent_task_id",
+    "cleanup_error", "created_at", "updated_at", "started_at", "done_at", "archived_at",
 )
 _COMMENT_COLUMNS = (
     "id", "task_id", "author", "body", "quote_comment_id", "attachments",
@@ -62,7 +62,7 @@ _COMMENT_COLUMNS = (
 _UPDATABLE = frozenset({
     "title", "body", "attachments", "project", "harness", "use_worktree",
     "session_id", "worktree_path", "branch", "pr_url", "pr_state", "pr_checked_at",
-    "asked_input", "cleanup_error",
+    "asked_input", "done_requested", "cleanup_error",
 })
 
 
@@ -84,6 +84,7 @@ class Task:
     pr_state: str | None
     pr_checked_at: float | None
     asked_input: bool
+    done_requested: bool  # the agent ran `task done` this turn
     parent_task_id: int | None
     cleanup_error: str | None
     created_at: float
@@ -127,6 +128,7 @@ def _task(row: tuple) -> Task:
     d["attachments"] = json.loads(d["attachments"])
     d["use_worktree"] = bool(d["use_worktree"])
     d["asked_input"] = bool(d["asked_input"])
+    d["done_requested"] = bool(d["done_requested"])
     return Task(**d)
 
 
@@ -175,6 +177,7 @@ class TaskStore:
                     "pr_state TEXT, "
                     "pr_checked_at REAL, "
                     "asked_input INTEGER NOT NULL DEFAULT 0, "
+                    "done_requested INTEGER NOT NULL DEFAULT 0, "
                     "parent_task_id INTEGER REFERENCES tasks(id), "
                     "cleanup_error TEXT, "
                     "created_at REAL NOT NULL, "
@@ -186,6 +189,10 @@ class TaskStore:
                 columns = {row[1] for row in con.execute("PRAGMA table_info(tasks)")}
                 if "archived_at" not in columns:
                     con.execute("ALTER TABLE tasks ADD COLUMN archived_at REAL")
+                if "done_requested" not in columns:
+                    con.execute(
+                        "ALTER TABLE tasks ADD COLUMN done_requested INTEGER NOT NULL DEFAULT 0"
+                    )
                 if "pr_state" not in columns:
                     con.execute("ALTER TABLE tasks ADD COLUMN pr_state TEXT")
                     # The PR watcher's Done moves say how a PR ended.
@@ -316,7 +323,7 @@ class TaskStore:
             raise ValueError(f"Not updatable: {', '.join(sorted(unknown))}")
         if "attachments" in fields:
             fields["attachments"] = json.dumps(fields["attachments"])
-        for flag in ("use_worktree", "asked_input"):
+        for flag in ("use_worktree", "asked_input", "done_requested"):
             if flag in fields:
                 fields[flag] = int(fields[flag])
         fields["updated_at"] = time.time()

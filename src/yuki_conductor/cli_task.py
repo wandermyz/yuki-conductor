@@ -35,6 +35,9 @@ def register(sub) -> argparse.ArgumentParser:
     ask = tsub.add_parser("ask", help="Ask the user a question; end your turn after")
     _id_and_text(ask)
 
+    done = tsub.add_parser("done", help="Mark a task done; your own when its turn ends")
+    done.add_argument("id", nargs="?", type=int)
+
     pr = tsub.add_parser("pr", help="Register the task's pull request")
     pr.add_argument("args", nargs="+", metavar="[ID] URL")
 
@@ -167,6 +170,13 @@ def handle(args) -> None:
             _die("`task ask` only works on your own running task; use `task comment` elsewhere")
         api_request("POST", f"/api/tasks/{task_id}/ask", {"question": _text(text)}, what="Ask")
         print(f"Asked on task #{task_id}. End your turn now; the user's reply starts the next one.")
+    elif cmd == "done":
+        task_id = _resolve_id(args.id)
+        t = api_request("POST", f"/api/tasks/{task_id}/done", what="Done")
+        if t["status"] == "in_progress":
+            print(f"Task #{task_id} moves to Done when this turn ends. Finish your reply now.")
+        else:
+            print(f"Marked task #{task_id} done")
     elif cmd == "pr":
         task_id, url = _split_id(args.args)
         api_request("POST", f"/api/tasks/{task_id}/pr", {"url": url}, what="Register PR")
@@ -184,4 +194,4 @@ def handle(args) -> None:
         t = api_request("POST", "/api/tasks", payload, what="Create")
         print(f"Created task #{t['id']}: {t['title']}")
     else:
-        _die("usage: yuki-conductor task {show,list,comment,ask,pr,create} ...")
+        _die("usage: yuki-conductor task {show,list,comment,ask,done,pr,create} ...")
