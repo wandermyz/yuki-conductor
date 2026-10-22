@@ -367,6 +367,8 @@ def _taskboard_section(task_id: int | None) -> list[str]:
         "- If you open a pull request, register it with `yuki-conductor task pr "
         "<url>`. The board follows it: review comments come back to you as a new "
         "turn, and merging it finishes the task.",
+        "- If the task is complete and needs no PR or review, run `yuki-conductor "
+        "task done`; it moves to Done when your turn ends.",
         "- Post progress worth keeping with `yuki-conductor task comment`.",
         "- Your final response is posted to the task as a comment, so make it a "
         "summary of what you did and what is left.",

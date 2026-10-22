@@ -280,6 +280,15 @@ def test_mark_done(client):
     transition(task["id"], NEEDS_INPUT, reason="x")
     done = client.post(f"/api/tasks/{task['id']}/done").json()
     assert done["status"] == "done" and done["done_at"]
+    assert client.post(f"/api/tasks/{task['id']}/done").status_code == 409
+
+
+def test_mark_done_while_running_waits_for_the_turn(client):
+    task = _create(client)
+    claim(task["id"])
+    running = client.post(f"/api/tasks/{task['id']}/done").json()
+    assert running["status"] == "in_progress"
+    assert taskboard.store.get(task["id"]).done_requested
 
 
 def test_order_and_top(client):

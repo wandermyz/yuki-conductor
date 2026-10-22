@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # `claim()` does that, atomically.
 ALLOWED: dict[str, frozenset[str]] = {
     TODO: frozenset({NEEDS_INPUT}),
-    IN_PROGRESS: frozenset({TODO, NEEDS_INPUT, READY_FOR_REVIEW}),
+    IN_PROGRESS: frozenset({TODO, NEEDS_INPUT, READY_FOR_REVIEW, DONE}),
     NEEDS_INPUT: frozenset({TODO, DONE}),
     READY_FOR_REVIEW: frozenset({TODO, DONE}),
     DONE: frozenset({TODO}),  # reopened

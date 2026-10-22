@@ -4,7 +4,7 @@ description: >
   Use when working on a yuki-conductor taskboard task (your system prompt has a
   "Taskboard" section): read your task and its comment timeline, post progress
   comments or quote-replies, ask the user for input when blocked, register the
-  pull request you opened, or create follow-up tasks. Also use in any session
+  pull request you opened, mark the task done, or create follow-up tasks. Also use in any session
   when the user asks to "create a task", "add this to the taskboard", "queue
   this for later", or "have an agent work on this in the background".
 ---
@@ -65,6 +65,23 @@ Nobody answers mid-turn. The task moves to Needs Input and the user is
 notified. Their reply starts your next turn in the same session, with the
 reply as the prompt. Don't loop waiting, and don't guess on decisions the user
 would want to make.
+
+## Finishing without a pull request
+
+When the task is complete and there's nothing for the user to review or
+merge — a question answered, a report delivered, a change pushed that needs
+no PR — close it yourself:
+
+```
+yuki-conductor task done
+```
+
+The task moves to Done when your turn ends, and its worktree and branches are
+cleaned up then (a branch with commits no remote has is kept). Your final
+response is still posted, so end with the summary as usual. Don't use it when
+you opened a PR (merging that finishes the task), when you've asked a
+question, or when the user would want to check the result first; a user
+comment during the turn also overrides it.
 
 ## Registering a pull request
 

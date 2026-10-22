@@ -10,7 +10,7 @@ from yuki_conductor import cli_http, cli_task, taskboard, web_server
 from yuki_conductor.cli import main
 from yuki_conductor.task_store import NEEDS_INPUT
 from yuki_conductor.taskboard import actions, routes
-from yuki_conductor.taskboard.transitions import claim
+from yuki_conductor.taskboard.transitions import claim, transition
 
 
 class FakeProjects:
@@ -80,6 +80,23 @@ def test_agent_commenting_on_another_task_is_input_for_it(api, monkeypatch):
     main(["task", "comment", str(other.id), "heads up"])
     comment = taskboard.store.comments(other.id)[-1]
     assert comment.author == "user" and not comment.delivered
+
+
+def test_done_on_own_running_task(api, monkeypatch, capsys):
+    task = _task()
+    claim(task.id)
+    monkeypatch.setenv("YUKI_TASK_ID", str(task.id))
+    main(["task", "done"])
+    assert "when this turn ends" in capsys.readouterr().out
+    assert taskboard.store.get(task.id).done_requested
+
+
+def test_done_on_a_waiting_task(api, capsys):
+    task = _task()
+    transition(task.id, NEEDS_INPUT, reason="x")
+    main(["task", "done", str(task.id)])
+    assert f"Marked task #{task.id} done" in capsys.readouterr().out
+    assert taskboard.store.get(task.id).status == "done"
 
 
 def test_ask_only_on_own_task(api, monkeypatch, capsys):
