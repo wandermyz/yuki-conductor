@@ -3,6 +3,7 @@ import { uploadFile } from "../chat/api";
 import type { AttachmentRef, StreamStep } from "../chat/api";
 import { SessionIdModal } from "../chat/Chat";
 import { HarnessIcon, StepList } from "../chat/shared";
+import { FileAttachment } from "../FileAttachment";
 import Markdown from "../Markdown";
 import { imageMarkers, insertAt, pastedFiles, withoutMarker } from "../paste";
 import {
@@ -32,9 +33,7 @@ function Attachments({ items }: { items: TaskAttachment[] }) {
             <img src={a.url} alt={a.filename} />
           </a>
         ) : (
-          <a key={a.path} className="file-link" href={a.url} target="_blank" rel="noreferrer">
-            📎 {a.filename}
-          </a>
+          <FileAttachment key={a.path} url={a.url} filename={a.filename} />
         ),
       )}
     </div>

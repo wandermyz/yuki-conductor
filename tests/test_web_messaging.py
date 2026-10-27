@@ -111,6 +111,27 @@ def test_upload_and_download_roundtrip(client):
     assert dl.content == b"hi there"
 
 
+def test_file_download_flag_sets_attachment_disposition(client):
+    files = {"file": ("notes.txt", b"hi", "text/plain")}
+    url = client.post("/api/uploads", files=files).json()["url"]
+
+    assert client.get(url).headers["content-disposition"].startswith("inline")
+    assert client.get(url + "?download=1").headers["content-disposition"].startswith("attachment")
+
+
+def test_html_file_is_sandboxed(client):
+    files = {"file": ("page.html", b"<h1>hi</h1>", "text/html")}
+    url = client.post("/api/uploads", files=files).json()["url"]
+
+    html = client.get(url)
+    assert html.headers["content-type"].startswith("text/html")
+    assert html.headers["content-security-policy"].startswith("sandbox")
+    assert "allow-same-origin" not in html.headers["content-security-policy"]
+
+    txt = client.post("/api/uploads", files={"file": ("a.txt", b"x", "text/plain")}).json()
+    assert "content-security-policy" not in client.get(txt["url"]).headers
+
+
 def test_post_message_rejects_unknown_attachment_id(client):
     conv = client.post("/api/conversations", json={"title": None}).json()
     r = client.post(

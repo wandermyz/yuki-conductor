@@ -48,6 +48,10 @@ from yuki_conductor.store import CronRunStore, ProjectStore, SessionStore
 
 logger = logging.getLogger(__name__)
 
+# Served file types a browser would run script in when opened directly.
+SCRIPTABLE_SUFFIXES = {".html", ".htm", ".xhtml", ".svg", ".xml"}
+FILE_SANDBOX_CSP = "sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads"
+
 _receivers: list = []
 
 # Identifies this daemon process. After asking for a restart, the frontend
@@ -743,14 +747,25 @@ def create_api() -> FastAPI:
         }
 
     @api.get("/api/files/{file_id}")
-    def get_file(file_id: str):
+    def get_file(file_id: str, download: bool = False):
+        """Serve an uploaded or attached file: inline by default, so the chat
+        can preview it, or as a download with `?download=1`.
+
+        Documents that can run script (HTML, SVG, XML) are served under a CSP
+        sandbox, which gives them an opaque origin of their own: an agent's
+        HTML page can run its scripts but can't call this API as the app.
+        """
         path = resolve_file(file_id)
         if path is None:
             raise HTTPException(status_code=404, detail="File not found")
+        headers = {}
+        if path.suffix.lower() in SCRIPTABLE_SUFFIXES:
+            headers["Content-Security-Policy"] = FILE_SANDBOX_CSP
         return FileResponse(
             str(path),
             filename=path.name,
-            content_disposition_type="inline",
+            content_disposition_type="attachment" if download else "inline",
+            headers=headers,
         )
 
     @api.get("/api/chat/processing")
