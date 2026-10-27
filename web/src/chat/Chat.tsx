@@ -33,6 +33,7 @@ import type {
   StreamStep,
   WSEvent,
 } from "./api";
+import { FileAttachment, FileRow } from "../FileAttachment";
 import { pastedFiles } from "../paste";
 import { disablePush, enablePush, getPushState } from "../webPush";
 import type { PushState } from "../webPush";
@@ -626,14 +627,10 @@ function MessageBubble({
             ) : isAudio(a.mime_type, a.filename) ? (
               <div key={a.id} className="audio-attachment">
                 <audio src={a.url} controls preload="metadata" />
-                <a className="file-link" href={a.url} download>
-                  📎 {a.filename}
-                </a>
+                <FileRow url={a.url} filename={a.filename} />
               </div>
             ) : (
-              <a key={a.id} className="file-link" href={a.url} download>
-                📎 {a.filename}
-              </a>
+              <FileAttachment key={a.id} url={a.url} filename={a.filename} mime={a.mime_type} />
             ),
           )}
         </div>
