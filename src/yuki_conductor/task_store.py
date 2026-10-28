@@ -189,6 +189,8 @@ class TaskStore:
                     "archived_at REAL)"
                 )
                 columns = {row[1] for row in con.execute("PRAGMA table_info(tasks)")}
+                if "model" not in columns:
+                    con.execute("ALTER TABLE tasks ADD COLUMN model TEXT")
                 if "archived_at" not in columns:
                     con.execute("ALTER TABLE tasks ADD COLUMN archived_at REAL")
                 if "done_requested" not in columns:

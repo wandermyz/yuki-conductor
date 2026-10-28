@@ -257,6 +257,18 @@ def test_pr_state_column_is_added_and_backfilled(tmp_path):
     ]
 
 
+def test_model_column_is_added(tmp_path):
+    db = tmp_path / "t.db"
+    task = _new(TaskStore(db_path=db))
+    con = sqlite3.connect(db)
+    con.execute("ALTER TABLE tasks DROP COLUMN model")
+    con.commit()
+    con.close()
+
+    store = TaskStore(db_path=db)
+    assert store.get(task.id).model is None
+
+
 def test_search_title_body_and_comments(tmp_path):
     store = TaskStore(db_path=tmp_path / "t.db")
     titled = _new(store, title="Widget renderer crash")
