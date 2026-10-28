@@ -1,0 +1,2 @@
+# The shared development reference exceeds Codex's default 32 KiB limit.
+project_doc_max_bytes = 65536

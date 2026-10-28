@@ -1,5 +1,14 @@
 # yuki-conductor Development Reference
 
+## Shared Agent Instructions
+
+`CLAUDE.md` is the single source for this development reference. `AGENTS.md`
+is a relative symlink to it so Codex reads the same instructions. Likewise,
+`.agents/skills` links to `../.claude/skills` for Codex's native project skill
+discovery. Edit the Claude paths to update both tools; keep the links intact.
+`.codex/config.toml` raises Codex's instruction size limit to 64 KiB so this
+reference fits (project config is loaded for trusted projects).
+
 ## Project Structure
 
 ```
