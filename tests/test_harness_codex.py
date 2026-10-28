@@ -1,8 +1,9 @@
 """CodexHarness: command line and parsing of real `codex exec --json` runs.
 
 The fixtures in tests/fixtures/harness/codex were recorded on 2026-10-27 with
-codex-cli 0.163.0 against a LiteLLM proxy: tool_turn (shell calls, one
-failing), resume (a resumed session) and bad_model (a model the proxy refused).
+codex-cli 0.163.0 against an OpenAI-compatible endpoint: tool_turn (shell
+calls, one failing), resume (a resumed session) and bad_model (a model the
+provider refused; its error body rewritten to a generic one).
 """
 
 import json
@@ -160,7 +161,9 @@ def test_resume_keeps_the_session():
 def test_failed_turn_reads_the_provider_message():
     events, result = _parse("bad_model")
     assert result.is_error
-    assert result.text.startswith("litellm.BadRequestError: You passed in model=no-such-model")
+    assert result.text == (
+        "The model `no-such-model` does not exist or you do not have access to it."
+    )
     # Codex's own warning item is shown as a step, not taken as the reply.
     assert events[1].kind == "status"
 
