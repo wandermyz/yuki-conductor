@@ -173,6 +173,26 @@ def test_model_flag_when_pinned():
     assert cmd[cmd.index("--model") + 1] == "opus[1m]"
 
 
+def test_model_picker_offers_bare_aliases():
+    """The web picker's aliases, unlike CLAUDE_DEFAULT_MODEL, carry no [1m]
+    suffix: live `claude -p` runs on 2026-10-28 (fresh, resumed, and with no
+    --model flag at all) all reported modelUsage.contextWindow == 1_000_000
+    for both opus and sonnet, suffixed or not. The suffix only ever mattered
+    for CLAUDE_DEFAULT_MODEL's own comment about a stale assumption; the bare
+    forms are what the Anthropic API re-resolves to "latest" on every call.
+    """
+    from yuki_conductor.harness.claude_code import MODEL_ALIASES, ClaudeCodeHarness
+
+    assert MODEL_ALIASES == {
+        "default": CLAUDE_DEFAULT_MODEL, "sonnet": "sonnet", "opus": "opus",
+    }
+    harness = ClaudeCodeHarness()
+    assert harness.default_model() == CLAUDE_DEFAULT_MODEL
+    assert [(m.id, m.label) for m in harness.models()] == [
+        ("sonnet", "sonnet"), ("opus", "opus"),
+    ]
+
+
 def test_resume_session():
     output = _stream(_result_record("Resumed!", "sess_456"))
     mock_proc = _mock_popen(stdout=output)

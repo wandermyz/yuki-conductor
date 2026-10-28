@@ -135,8 +135,9 @@ def taskboard_limit(harness: str) -> int:
 PI_BIN = os.environ.get("PI_BIN", "pi")
 PI_DEFAULT_MODEL = os.environ.get("PI_DEFAULT_MODEL", "strata/qwen3.8-flash-next-iq2_xs")
 
-# Codex (https://github.com/openai/codex). Its provider and default model live
-# in ~/.codex/config.toml; CODEX_DEFAULT_MODEL overrides that model if set.
+# Codex (https://github.com/openai/codex). CODEX_DEFAULT_MODEL overrides the
+# model a turn gets when a conversation pins none (harness.codex.MODEL_ALIASES
+# otherwise supplies it); its provider still lives in ~/.codex/config.toml.
 CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
 CODEX_DEFAULT_MODEL = os.environ.get("CODEX_DEFAULT_MODEL") or None
 

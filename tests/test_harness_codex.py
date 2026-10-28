@@ -85,8 +85,9 @@ def test_resume_puts_the_session_before_the_prompt():
     assert argv[-3:] == ["--", "sess-1", "hello"]
 
 
-def test_model_is_config_toml_unless_named(monkeypatch):
-    assert "-m" not in _launch().argv
+def test_model_falls_back_to_the_sol_alias_unless_named(monkeypatch):
+    argv = _launch().argv
+    assert argv[argv.index("-m") + 1] == "gpt-6.1-sol"
     argv = _launch(model="gpt-6-sol").argv
     assert argv[argv.index("-m") + 1] == "gpt-6-sol"
     monkeypatch.setattr(codex_mod, "CODEX_DEFAULT_MODEL", "gpt-6-luna")
@@ -276,35 +277,16 @@ def test_run_agent_flags_a_missing_session():
 # --------------------------------------------------------------------------
 
 
-def _catalog(monkeypatch, stdout: str):
-    monkeypatch.setattr(
-        codex_mod.subprocess, "run",
-        lambda argv, **kw: subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr=""),
-    )
-
-
-def test_models_come_from_the_catalog_without_hidden_ones(codex_home, monkeypatch):
-    (codex_home / "config.toml").write_text('model = "gpt-6-sol"\n')
-    _catalog(monkeypatch, json.dumps({"models": [
-        {"slug": "gpt-6-sol", "display_name": "GPT-6-Sol", "visibility": "list"},
-        {"slug": "internal", "display_name": "Internal", "visibility": "hide"},
-        {"slug": "gpt-5.5", "display_name": "GPT-5.5", "visibility": "list"},
-    ]}))
+def test_models_are_the_static_aliases(codex_home):
     codex = CodexHarness()
     assert [(m.id, m.label) for m in codex.models()] == [
-        ("gpt-6-sol", "GPT-6-Sol"), ("gpt-5.5", "GPT-5.5"),
+        ("gpt-6-astra", "astra"), ("gpt-6.1-sol", "sol"),
     ]
-    assert codex.default_model() == "gpt-6-sol"
+    assert codex.default_model() == "gpt-6.1-sol"
 
 
-def test_a_configured_model_missing_from_the_catalog_is_still_offered(codex_home, monkeypatch):
-    (codex_home / "config.toml").write_text('model = "proxy-alias"\n')
-    _catalog(monkeypatch, json.dumps({"models": [{"slug": "gpt-5.5", "visibility": "list"}]}))
-    assert [m.id for m in CodexHarness().models()] == ["proxy-alias", "gpt-5.5"]
-
-
-def test_an_unreadable_catalog_offers_only_the_default(codex_home, monkeypatch):
-    _catalog(monkeypatch, "not json")
-    assert CodexHarness().models() == []
+def test_codex_default_model_env_overrides_the_alias(codex_home, monkeypatch):
     monkeypatch.setattr(codex_mod, "CODEX_DEFAULT_MODEL", "gpt-6-luna")
-    assert [m.id for m in CodexHarness().models()] == ["gpt-6-luna"]
+    assert CodexHarness().default_model() == "gpt-6-luna"
+    argv = _launch().argv
+    assert argv[argv.index("-m") + 1] == "gpt-6-luna"

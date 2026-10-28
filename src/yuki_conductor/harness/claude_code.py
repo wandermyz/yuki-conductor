@@ -27,7 +27,17 @@ from yuki_conductor.harness.base import (
     truncate,
 )
 from yuki_conductor.skills import skill_plugin_dirs, system_prompt
-from yuki_conductor.store import MODEL_ALIASES
+
+# Named picks the web model picker offers. Bare aliases, not Slack's suffixed
+# forms (MODEL_ALIASES in store.py): the Anthropic API resolves `opus`/`sonnet`
+# to whatever snapshot is current on every request — no "[1m]" is needed to
+# keep the 1M window, verified live against a fresh run, a resume, and with no
+# --model flag at all (modelUsage.contextWindow was 1,000,000 all three ways).
+MODEL_ALIASES = {
+    "default": CLAUDE_DEFAULT_MODEL,
+    "sonnet": "sonnet",
+    "opus": "opus",
+}
 
 # ---------------------------------------------------------------------------
 # stream-json parsing
@@ -345,12 +355,8 @@ class ClaudeCodeHarness:
         return (config / "projects" / project / f"{session_id}.jsonl").is_file()
 
     def models(self) -> list[ModelOption]:
-        # The aliases Slack's /<prefix>-model offers, which are the ones the
-        # gateway is known to route (see MODEL_ALIASES).
-        return [
-            ModelOption(id=model, label=model)
-            for model in dict.fromkeys([CLAUDE_DEFAULT_MODEL, *MODEL_ALIASES.values()])
-        ]
+        return [ModelOption(id=slug, label=name) for name, slug in MODEL_ALIASES.items()
+                if name != "default"]
 
     def default_model(self) -> str | None:
-        return CLAUDE_DEFAULT_MODEL
+        return MODEL_ALIASES["default"]

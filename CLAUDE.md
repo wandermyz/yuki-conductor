@@ -658,9 +658,36 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
   (`$CODEX_HOME/sessions/…/rollout-…-<id>.jsonl`), read after the run. Both are stored per assistant message in
   `message_usage` and reach the chat through the message list: a meter in the
   thread header plus a label on each reply.
-- **Model pins are Claude Code only.** `/<prefix>-model` stores a Claude alias, so
-  the conversation core passes `IncomingMessage.model` only to `claude-code`
-  turns; other harnesses use their own default (e.g. `PI_DEFAULT_MODEL`).
+- **Slack's `/<prefix>-model` pin is a Claude alias**, so `slack_app` drops it
+  for a thread whose harness isn't `claude-code` rather than passing it on; a
+  pin only means something on a Claude thread.
+- **The web picker's model is per conversation, for every harness.** A
+  conversation's `model` column (`conversations.model`, `PATCH
+  /api/conversations/{id}`) is what `IncomingMessage.model` carries on every
+  turn; `None` means the harness's own default. `GET /api/harnesses` adds each
+  harness's `default_model()` and `models()` (`ModelOption(id, label)`) for the
+  picker to render — empty for a harness with nothing to choose (pi). Each
+  harness keeps its own small, hand-maintained `MODEL_ALIASES` table (named
+  pick → literal model id passed to the CLI), the same shape Slack's
+  `/<prefix>-model` already used for Claude, now with its own copy per
+  harness rather than a shared one:
+  - **Claude Code**: `sonnet` / `opus`, bare (no `[1m]` suffix) — the
+    Anthropic API re-resolves a bare alias to whatever snapshot is current on
+    every single request, which a live check on 2026-10-28 confirmed also
+    carries the 1M context window already (`modelUsage.contextWindow` was
+    1,000,000 for a fresh run, a resume, and even with no `--model` flag at
+    all). `CLAUDE_DEFAULT_MODEL`'s own `[1m]` suffix is untouched — it
+    predates this check and still works — but nothing about the suffix is
+    required for the picker's aliases.
+  - **Codex**: `astra` / `sol`, mapped to today's literal GPT slug
+    (`gpt-6-astra` / `gpt-6.1-sol`). Unlike Claude's bare aliases, a GPT slug
+    *is* the resolved version already — OpenAI has no live "latest Sol" for
+    anything to resolve per request — so there is nothing to ask the CLI or
+    the provider for at runtime; the table is bumped by hand when a new
+    generation ships. (`codex debug models` can print Codex's own bundled
+    catalog, but that's what Codex knows how to drive, not what a provider
+    actually serves, so it isn't used here.)
+  - **pi** offers no named picks, only its own configured default.
 - **Slack shows the harness** two ways: the shimmering status is tagged
   `(<label>) is thinking...`, and every thread's root message (user-started
   or cron's `start_thread`) gets a reaction from `HARNESS_EMOJI` in

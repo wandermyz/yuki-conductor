@@ -381,6 +381,12 @@ def test_model_is_picked_per_conversation_and_used_for_its_turns(client, monkeyp
 
 
 def test_harnesses_list_their_models(client):
-    [claude] = [h for h in client.get("/api/harnesses").json()["harnesses"] if h["name"] == "claude-code"]
-    assert claude["default_model"] == claude["models"][0]["id"]
+    harnesses = client.get("/api/harnesses").json()["harnesses"]
+    [claude] = [h for h in harnesses if h["name"] == "claude-code"]
+    [codex] = [h for h in harnesses if h["name"] == "codex"]
+    assert claude["default_model"]
     assert {"id": "sonnet", "label": "sonnet"} in claude["models"]
+    assert {"id": "opus", "label": "opus"} in claude["models"]
+    assert codex["default_model"] == "gpt-6.1-sol"
+    assert {"id": "gpt-6-astra", "label": "astra"} in codex["models"]
+    assert {"id": "gpt-6.1-sol", "label": "sol"} in codex["models"]
