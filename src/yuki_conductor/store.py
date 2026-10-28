@@ -462,13 +462,22 @@ class CronRunStore:
 
 
 class ModelStore(_SqliteKVStore):
-    """Maps Slack channel_id -> model alias."""
+    """Maps a Slack channel + harness -> pinned model id.
+
+    Keyed `<channel>:<harness>`, since a model id only means something to
+    the harness that runs it: pinning `astra` on Codex leaves the channel's
+    Claude pin alone.
+    """
 
     def __init__(self, db_path: Path | None = None):
         super().__init__("models", db_path)
 
+    @staticmethod
+    def key(channel: str, harness: str) -> str:
+        return f"{channel}:{harness}"
+
     def list_all(self) -> list[tuple[str, str]]:
-        """Return all (channel_id, model) pairs."""
+        """Return all (`<channel>:<harness>`, model) pairs."""
         with self._lock:
             con = self._connect()
             try:
@@ -591,30 +600,5 @@ class ProjectStore:
                 con.close()
 
 
-# /<prefix>-model argument -> value passed to `claude --model`.
-# The 1M-context variants are spelled without brackets because the command
-# arg is lowercased and "[1m]" is awkward to type in Slack; the resolved
-# value (with brackets) is what gets stored and passed to the CLI.
-#
-# Only models actually reachable through the configured ANTHROPIC_BASE_URL are
-# listed. Deliberately absent, both verified returning HTTP 400 against a
-# non-default endpoint:
-#   - haiku: Claude Code sends a dated model id (claude-haiku-4-5-20251001)
-#     that a gateway may publish only in undated form, so the ids never match
-#   - fable: not carried at all, so no gateway-side route fixes it
-# Both work against api.anthropic.com — re-add them if ANTHROPIC_BASE_URL ever
-# points back there.
-MODEL_ALIASES = {
-    "sonnet": "sonnet",
-    "sonnet1m": "sonnet[1m]",
-    "opus": "opus",
-    "opus1m": "opus[1m]",
-}
-
-# Clearing a channel's pin doesn't mean "no --model flag" — run_agent always
-# passes one, falling back to CLAUDE_DEFAULT_MODEL (opus[1m]). The flag can't be
-# omitted, because a `-r` resume would then rehydrate the canonical model id and
-# silently drop the 1M context window. The bare aliases above resolve to the
-# plain 200k variants, so pinning one is a deliberate downgrade; `default` is
-# how a channel returns to the 1M default.
+# `/<prefix>-model default` clears the pin for the channel's current harness.
 DEFAULT_MODEL_ARG = "default"

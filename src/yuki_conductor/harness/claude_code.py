@@ -370,9 +370,11 @@ class ClaudeCodeHarness:
         project = re.sub(r"[^A-Za-z0-9]", "-", str(Path(cwd).resolve()))
         return (config / "projects" / project / f"{session_id}.jsonl").is_file()
 
+    def model_aliases(self) -> dict[str, str]:
+        return {name: slug for name, slug in MODEL_ALIASES.items() if name != "default"}
+
     def models(self) -> list[ModelOption]:
-        return [ModelOption(id=slug, label=name) for name, slug in MODEL_ALIASES.items()
-                if name != "default"]
+        return [ModelOption(id=slug, label=name) for name, slug in self.model_aliases().items()]
 
     def default_model(self) -> str | None:
         return MODEL_ALIASES["default"]

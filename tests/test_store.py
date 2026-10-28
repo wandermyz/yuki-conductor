@@ -3,7 +3,7 @@
 import threading
 from pathlib import Path
 
-from yuki_conductor.store import DEFAULT_MODEL_ARG, MODEL_ALIASES, ModelStore, SessionStore
+from yuki_conductor.store import ModelStore, SessionStore
 
 
 def test_session_roundtrip(tmp_path: Path):
@@ -76,37 +76,15 @@ def test_db_creation(tmp_path: Path):
     assert db.exists()
 
 
-def test_model_aliases():
-    assert set(MODEL_ALIASES) == {"sonnet", "sonnet1m", "opus", "opus1m"}
-
-
-def test_unreachable_models_stay_out():
-    """haiku and fable 400 against a non-default endpoint; don't offer them."""
-    assert "haiku" not in MODEL_ALIASES
-    assert "fable" not in MODEL_ALIASES
-
-
-def test_1m_aliases_resolve_to_bracketed_cli_values():
-    """The whole point of the 1m aliases: bracket-free in, bracketed out."""
-    assert MODEL_ALIASES["opus1m"] == "opus[1m]"
-    assert MODEL_ALIASES["sonnet1m"] == "sonnet[1m]"
-
-
-def test_plain_aliases_are_passthrough():
-    for alias in ("sonnet", "opus"):
-        assert MODEL_ALIASES[alias] == alias
-
-
-def test_aliases_are_lowercase_and_bracket_free():
-    """Slack lowercases the arg before lookup, so uppercase keys are unreachable."""
-    for alias in MODEL_ALIASES:
-        assert alias == alias.lower()
-        assert "[" not in alias
-
-
-def test_default_is_not_a_pinnable_model():
-    """`default` means "no override", so it must not collide with a real alias."""
-    assert DEFAULT_MODEL_ARG not in MODEL_ALIASES
+def test_model_pins_are_per_harness(tmp_path: Path):
+    """A model id only means something to one harness, so each keeps its own pin."""
+    models = ModelStore(db_path=tmp_path / "test.db")
+    models.set(ModelStore.key("C1", "claude-code"), "sonnet")
+    models.set(ModelStore.key("C1", "codex"), "gpt-6-astra")
+    assert models.get(ModelStore.key("C1", "claude-code")) == "sonnet"
+    assert models.get(ModelStore.key("C1", "codex")) == "gpt-6-astra"
+    models.clear(ModelStore.key("C1", "codex"))
+    assert models.get(ModelStore.key("C1", "claude-code")) == "sonnet"
 
 
 def test_model_clear_restores_default(tmp_path: Path):

@@ -109,6 +109,13 @@ class Harness(Protocol):
         """Whether `session_id` can still be resumed from `cwd`."""
         ...
 
+    def model_aliases(self) -> dict[str, str]:
+        """Named picks -> model id passed to the CLI, `default` excluded.
+
+        The web picker and Slack's `/<prefix>-model` both offer these.
+        """
+        ...
+
     def models(self) -> list[ModelOption]:
         """Models a conversation may pick; empty when the harness offers no choice."""
         ...

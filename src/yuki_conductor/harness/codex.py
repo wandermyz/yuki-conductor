@@ -333,9 +333,11 @@ class CodexHarness:
     def session_exists(self, session_id: str, cwd: str) -> bool:
         return _rollout_path(session_id) is not None
 
+    def model_aliases(self) -> dict[str, str]:
+        return {name: slug for name, slug in MODEL_ALIASES.items() if name != "default"}
+
     def models(self) -> list[ModelOption]:
-        return [ModelOption(id=slug, label=name) for name, slug in MODEL_ALIASES.items()
-                if name != "default"]
+        return [ModelOption(id=slug, label=name) for name, slug in self.model_aliases().items()]
 
     def default_model(self) -> str | None:
         return CODEX_DEFAULT_MODEL or MODEL_ALIASES["default"]

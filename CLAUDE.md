@@ -594,7 +594,7 @@ Keep the code clean. **No backward compatibility is required.** This project has
 
 ## Architecture
 
-- **Session tracking**: SQLite database at `~/.yuki-conductor/workspace/yuki-conductor.db` maps `thread_ts → (session_id, channel_id, harness)` and `channel_id → model`
+- **Session tracking**: SQLite database at `~/.yuki-conductor/workspace/yuki-conductor.db` maps `thread_ts → (session_id, channel_id, harness)` and `<channel>:<harness> → model`
 - **Web server**: FastAPI on 127.0.0.1:2333 (env: `WEB_HOST`, `WEB_PORT`), serves React frontend and `/api/sessions` + chat endpoints. Starts in a daemon thread alongside any enabled chat-app receivers.
 - **Concurrency**: slack-bolt's default thread pool (10 threads); each handler blocks on `subprocess.run`
 - **Agent invocation**: `harness.process.run_agent(harness, prompt, ...)` spawns the harness's CLI and reads its stdout line by line; the harness's parser turns each record into a `StreamEvent` (tool calls, text, thinking, tool results) delivered live via `on_event`, and its final state into the returned `RunResult`. See Harnesses.
@@ -658,9 +658,13 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
   (`$CODEX_HOME/sessions/…/rollout-…-<id>.jsonl`), read after the run. Both are stored per assistant message in
   `message_usage` and reach the chat through the message list: a meter in the
   thread header plus a label on each reply.
-- **Slack's `/<prefix>-model` pin is a Claude alias**, so `slack_app` drops it
-  for a thread whose harness isn't `claude-code` rather than passing it on; a
-  pin only means something on a Claude thread.
+- **Slack's `/<prefix>-model` pins a model for the channel's current harness**
+  (its `/<prefix>-harness` pin, else the default), from that harness's
+  `model_aliases()` — `/yuki-model sonnet` on a Claude channel,
+  `/yuki-model astra` on a Codex one. `ModelStore` keys pins
+  `<channel>:<harness>`, so switching harness never carries a model id to a
+  CLI that doesn't know it, and each harness keeps its own pin. A thread uses
+  the pin for the harness *it* runs on; pi offers no picks.
 - **The web picker's model is per conversation, for every harness.** A
   conversation's `model` column (`conversations.model`, `PATCH
   /api/conversations/{id}`) is what `IncomingMessage.model` carries on every
@@ -668,9 +672,8 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
   harness's `default_model()` and `models()` (`ModelOption(id, label)`) for the
   picker to render — empty for a harness with nothing to choose (pi). Each
   harness keeps its own small, hand-maintained `MODEL_ALIASES` table (named
-  pick → literal model id passed to the CLI), the same shape Slack's
-  `/<prefix>-model` already used for Claude, now with its own copy per
-  harness rather than a shared one:
+  pick → literal model id passed to the CLI), exposed as `model_aliases()` and
+  shared by the web picker and Slack's `/<prefix>-model`:
   - **Claude Code**: `sonnet` / `opus`, bare (no `[1m]` suffix) — the
     Anthropic API re-resolves a bare alias to whatever snapshot is current on
     every single request, which a live check on 2026-10-28 confirmed also

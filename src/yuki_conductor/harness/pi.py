@@ -348,6 +348,9 @@ class PiHarness:
             return False
         return any(root.rglob(f"*{session_id}*"))
 
+    def model_aliases(self) -> dict[str, str]:
+        return {}
+
     def models(self) -> list[ModelOption]:
         # pi runs one local model; there is nothing to pick between.
         return []
