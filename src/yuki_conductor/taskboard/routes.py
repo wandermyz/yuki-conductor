@@ -37,6 +37,7 @@ def serialize_task(task: Task, *, comment_count: int | None = None) -> dict:
         "attachments": _attachments(task.id, task.attachments),
         "project": task.project,
         "harness": task.harness,
+        "model": task.model,
         "harness_enabled": task.harness in HARNESSES,
         "use_worktree": task.use_worktree,
         "status": task.status,
@@ -102,6 +103,7 @@ class TaskCreate(BaseModel):
     title: str
     project: str
     harness: str | None = None
+    model: str | None = None
     use_worktree: bool = True
     body: str = ""
     attachments: list[str] = []  # absolute paths (CLI)
@@ -113,6 +115,7 @@ class TaskEdit(BaseModel):
     title: str | None = None
     project: str | None = None
     harness: str | None = None
+    model: str | None = None
     use_worktree: bool | None = None
     body: str | None = None
     attachments: list[str] | None = None  # the full new list of paths
@@ -158,6 +161,7 @@ def create_task(body: TaskCreate):
         title=body.title,
         project=body.project,
         harness=body.harness,
+        model=body.model,
         use_worktree=body.use_worktree,
         body=body.body,
         attachments=_paths(body.attachments, body.attachment_ids),
@@ -206,7 +210,7 @@ def get_task(task_id: int):
 @router.patch("/api/tasks/{task_id}")
 def edit_task(task_id: int, body: TaskEdit):
     fields = {k: getattr(body, k) for k in body.model_fields_set - {"attachment_ids"}}
-    nulls = [k for k, v in fields.items() if v is None and k != "attachments"]
+    nulls = [k for k, v in fields.items() if v is None and k not in {"attachments", "model"}]
     if nulls:
         raise HTTPException(status_code=400, detail=f"Can't clear: {', '.join(nulls)}")
     if "attachments" in fields or body.attachment_ids:

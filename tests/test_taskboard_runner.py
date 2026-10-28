@@ -8,7 +8,7 @@ from yuki_conductor import taskboard
 from yuki_conductor.harness.base import RunResult, StreamEvent
 from yuki_conductor.task_store import DONE, NEEDS_INPUT, READY_FOR_REVIEW, TODO
 from yuki_conductor.taskboard import runner
-from yuki_conductor.taskboard.transitions import claim
+from yuki_conductor.taskboard.transitions import claim, transition
 from yuki_conductor.taskboard.worktree import WorktreeError
 
 
@@ -430,3 +430,14 @@ def test_resolve_outcome_notifies_only_when_the_user_is_needed():
     assert not runner.resolve_outcome(task, ok, cancelled=False, has_new_comments=True).notify
 
 
+@pytest.mark.parametrize("model", [None, "opus"])
+def test_task_model_is_passed_on_every_turn(env, model):
+    task = _claimed(model=model)
+    env.script = [reply()]
+    runner.run_turn(task.id)
+    assert env.calls[-1]["model"] == model
+    transition(task.id, TODO, reason="follow-up")
+    claim(task.id)
+    env.script = [reply()]
+    runner.run_turn(task.id)
+    assert env.calls[-1]["model"] == model

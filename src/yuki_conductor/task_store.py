@@ -47,7 +47,7 @@ PR_STATES = ("OPEN", "DRAFT", "MERGED", "CLOSED")
 HIDE_DONE_AFTER_SECONDS = 30 * 24 * 3600
 
 _TASK_COLUMNS = (
-    "id", "title", "body", "attachments", "project", "harness", "use_worktree",
+    "id", "title", "body", "attachments", "project", "harness", "model", "use_worktree",
     "status", "sort_order", "session_id", "worktree_path", "branch", "pr_url",
     "pr_state", "pr_checked_at", "asked_input", "done_requested", "parent_task_id",
     "cleanup_error", "created_at", "updated_at", "started_at", "done_at", "archived_at",
@@ -60,7 +60,7 @@ _COMMENT_COLUMNS = (
 # Columns `update_fields` may write. Status, ordering and timestamps have
 # dedicated methods so their invariants live in one place.
 _UPDATABLE = frozenset({
-    "title", "body", "attachments", "project", "harness", "use_worktree",
+    "title", "body", "attachments", "project", "harness", "model", "use_worktree",
     "session_id", "worktree_path", "branch", "pr_url", "pr_state", "pr_checked_at",
     "asked_input", "done_requested", "cleanup_error",
 })
@@ -74,6 +74,7 @@ class Task:
     attachments: list[str]
     project: str
     harness: str
+    model: str | None
     use_worktree: bool
     status: str
     sort_order: float
@@ -167,6 +168,7 @@ class TaskStore:
                     "attachments TEXT NOT NULL DEFAULT '[]', "
                     "project TEXT NOT NULL, "
                     "harness TEXT NOT NULL, "
+                    "model TEXT, "
                     "use_worktree INTEGER NOT NULL, "
                     "status TEXT NOT NULL, "
                     "sort_order REAL NOT NULL, "
@@ -236,6 +238,7 @@ class TaskStore:
         body: str = "",
         attachments: list[str] | None = None,
         parent_task_id: int | None = None,
+        model: str | None = None,
     ) -> Task:
         """Add a task at the end of the To Do queue."""
         now = time.time()
@@ -243,12 +246,12 @@ class TaskStore:
             con = self._connect()
             try:
                 cur = con.execute(
-                    "INSERT INTO tasks (title, body, attachments, project, harness, "
+                    "INSERT INTO tasks (title, body, attachments, project, harness, model, "
                     "use_worktree, status, sort_order, parent_task_id, created_at, "
-                    "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, "
+                    "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "
                     "(SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks), ?, ?, ?)",
                     (
-                        title, body, json.dumps(attachments or []), project, harness,
+                        title, body, json.dumps(attachments or []), project, harness, model,
                         int(use_worktree), TODO, parent_task_id, now, now,
                     ),
                 )
