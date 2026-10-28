@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"01a17fd7-e03f-7c03-99c5-f154c58c3aa6"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `no-such-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
+{"type":"turn.started"}
+{"type":"error","message":"{\"error\":{\"message\":\"litellm.BadRequestError: You passed in model=no-such-model. There are no healthy deployments for this model\\n\\nLiteLLM: model group 'no-such-model' failed with the error above. No fallback was attempted.\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"400\"}}"}
+{"type":"turn.failed","error":{"message":"{\"error\":{\"message\":\"litellm.BadRequestError: You passed in model=no-such-model. There are no healthy deployments for this model\\n\\nLiteLLM: model group 'no-such-model' failed with the error above. No fallback was attempted.\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"400\"}}"}}

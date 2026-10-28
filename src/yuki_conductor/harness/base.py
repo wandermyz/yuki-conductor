@@ -74,6 +74,13 @@ class StreamParser(Protocol):
 
     def finish(self, raw_stdout: str, fallback_session_id: str | None) -> RunResult: ...
 
+    def failure(self) -> str | None:
+        """The error the stream itself reported, for a CLI that exits non-zero.
+
+        None when it reported none; stderr or stdout is shown instead.
+        """
+        ...
+
 
 class Harness(Protocol):
     name: str  # stored per conversation: "claude-code" | "pi"

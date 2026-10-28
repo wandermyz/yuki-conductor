@@ -91,7 +91,7 @@ CLAUDE_DEFAULT_MODEL = os.environ.get("CLAUDE_DEFAULT_MODEL", "opus[1m]")
 # Agent harnesses enabled on this machine, comma-separated, in preference
 # order: the first one is the default for a new conversation that names none
 # (web picker, cron `harness:`). A conversation keeps the harness it started
-# with. pi needs its own install and ~/.pi/agent config, so it's opt-in.
+# with. pi and Codex need their own install and config, so they are opt-in.
 def parse_harnesses(raw: str | None) -> list[str]:
     return [h.strip() for h in (raw or "claude-code").split(",") if h.strip()]
 
@@ -102,7 +102,7 @@ ENABLED_HARNESSES = parse_harnesses(os.environ.get("HARNESSES"))
 # `TASKBOARD_CONCURRENCY=claude-code:10,pi:1`. Harnesses not named fall back
 # to `TASKBOARD_DEFAULT_LIMITS`, then to 1. pi defaults to 1 because it
 # usually runs on a single local GPU.
-TASKBOARD_DEFAULT_LIMITS = {"claude-code": 10, "pi": 1}
+TASKBOARD_DEFAULT_LIMITS = {"claude-code": 10, "pi": 1, "codex": 10}
 
 
 def parse_taskboard_concurrency(raw: str | None) -> dict[str, int]:
@@ -134,6 +134,11 @@ def taskboard_limit(harness: str) -> int:
 # only names the model, as `provider/id`.
 PI_BIN = os.environ.get("PI_BIN", "pi")
 PI_DEFAULT_MODEL = os.environ.get("PI_DEFAULT_MODEL", "strata/qwen3.8-flash-next-iq2_xs")
+
+# Codex (https://github.com/openai/codex). Its provider and default model live
+# in ~/.codex/config.toml; CODEX_DEFAULT_MODEL overrides that model if set.
+CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
+CODEX_DEFAULT_MODEL = os.environ.get("CODEX_DEFAULT_MODEL") or None
 
 def channels_override() -> list[str] | None:
     """Return the `CHANNELS` env override, or None when it isn't set.

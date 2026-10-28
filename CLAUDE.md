@@ -30,6 +30,7 @@ src/yuki_conductor/
     process.py         — run_agent: subprocess, idle watchdog, cancel registry
     claude_code.py     — Claude Code: command line + stream-json parser
     pi.py              — pi: command line + `--mode json` parser
+    codex.py           — Codex: `codex exec --json` command line + parser
   skills.py         — skill discovery + system-prompt synthesis for spawned sessions
   runtime.py        — process orchestrator (starts receivers + web + cron)
   slack_app.py      — Slack Bolt handlers + SlackSocketReceiver + create_receiver
@@ -261,7 +262,12 @@ resolvable.
 
 All of this is **Claude Code only**. pi lists skills natively, so it gets
 `skills.core_prompt()` instead: the attachment contract, the conversation id and
-the workspace prompt, without the synthesized listing.
+the workspace prompt, without the synthesized listing. Codex lists its own
+skills (`~/.codex/skills`) but has no `--plugin-dir` and ignores
+`.claude/skills`, so `skills.codex_prompt()` is `core_prompt()` plus the
+`YUKI` and `PROJECT` tiers, each named with its `SKILL.md` path for the model
+to read. It reaches Codex as `-c developer_instructions=…`, since `codex exec`
+has no system-prompt flag.
 
 Finally, if `~/.yuki-conductor/workspace/system-prompt.md` exists, its contents
 are appended verbatim. That file is outside the repo, so it's where private
@@ -604,11 +610,12 @@ A turn runs on one **harness**, an agent CLI. `harness/__init__.py` knows these
 | --- | --- | --- |
 | `claude-code` | `claude -p --output-format stream-json --verbose …` | Windows shims; skill listing synthesized (see Skill Discovery) |
 | `pi` | `pi --mode json --no-approve --model <provider/id> …` | `PI_BIN`, `PI_DEFAULT_MODEL` (`strata/qwen3.8-flash-next-iq2_xs`); providers live in `~/.pi/agent`, not here |
+| `codex` | `codex exec [resume] --json --dangerously-bypass-approvals-and-sandbox …` | `CODEX_BIN`; provider and model live in `~/.codex/config.toml`, `CODEX_DEFAULT_MODEL` overrides the model. On Windows the npm `.cmd` shim is skipped for the vendored `codex.exe`, since cmd.exe mangles a multi-line argument |
 
 **Which exist on a machine is the `HARNESSES` setting** in
 `~/.yuki-conductor/.env`, e.g. `HARNESSES=claude-code,pi`. It's a
 comma-separated list in preference order; the first entry is the default for a
-new conversation. It defaults to `claude-code` alone, since pi needs its own
+new conversation. It defaults to `claude-code` alone, since pi and Codex need their own
 install and config. Only enabled harnesses are registered (`HARNESSES` in
 `harness/__init__.py`), so a disabled one is never offered, scheduled or run:
 
@@ -640,12 +647,15 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
   `RunResult.context_tokens` is that call's prompt-side tokens — Claude Code:
   `input + cache_creation + cache_read` of the last *top-level* assistant record
   (a subagent's own small context is ignored); pi: `input + cacheRead +
-  cacheWrite` of the last `message_end`. The result record's own `usage` sums
+  cacheWrite` of the last `message_end`; Codex: `input_tokens` (cache
+  included) of the last call. The result record's own `usage` sums
   every call of the turn, so it is never the window size. `context_window` is
   the window that call ran against: Claude Code reports it per model in
   `modelUsage`, pi never reports it at all, so pi's is read from pi's own
   catalogs — `<agent-dir>/models.json` (or `PI_CODING_AGENT_DIR`) over the
-  cached `models-store.json`. Both are stored per assistant message in
+  cached `models-store.json`. Codex's stream has only the turn total, so both
+  come from the last `token_count` event in the session's rollout file
+  (`$CODEX_HOME/sessions/…/rollout-…-<id>.jsonl`), read after the run. Both are stored per assistant message in
   `message_usage` and reach the chat through the message list: a meter in the
   thread header plus a label on each reply.
 - **Model pins are Claude Code only.** `/<prefix>-model` stores a Claude alias, so
@@ -654,12 +664,17 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
 - **Slack shows the harness** two ways: the shimmering status is tagged
   `(<label>) is thinking...`, and every thread's root message (user-started
   or cron's `start_thread`) gets a reaction from `HARNESS_EMOJI` in
-  `slack_platform.py` (`:large_orange_diamond:` Claude Code, `:pie:` pi).
+  `slack_platform.py` (`:large_orange_diamond:` Claude Code, `:pie:` pi,
+  `:large_blue_diamond:` Codex).
   Both are best-effort; a new harness without an emoji just gets no reaction.
 - **Slack's `/<prefix>-<skill>` catch-all** forwards Claude's `/<skill>` syntax, so it
   always runs on Claude Code.
 - **pi exits 0 even when the model call failed.** `PiStreamParser` reads the
   outcome from the last assistant message's `stopReason`.
+- **Codex exits 1 on a failed turn with nothing useful on stderr.** The reason
+  is in the stream (`turn.failed`); `StreamParser.failure()` hands it to
+  `run_agent`, which prefers it over stderr. Codex also reads an open stdin as
+  more prompt, so `run_agent` spawns every harness with stdin closed.
 - **pi and the GPU:** pi usually runs on Strata, which shares the GPU with
   ComfyUI. That sharing is handled entirely outside this repo, by
   vhotseat (`~/Projects/vhotseat`). yuki-conductor never checks or switches the
@@ -674,5 +689,6 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
 - `test_store.py` — unit tests for SQLite store (roundtrip, concurrent access, separate tables)
 - `test_harness_claude_code.py` — Claude Code through `run_agent` with a mocked subprocess (flag construction, errors, timeouts, cancel)
 - `test_harness_pi.py` — pi command line, plus its parser against real recorded runs in `tests/fixtures/harness/pi/` (system prompt scrubbed)
+- `test_harness_codex.py` — Codex command line, parser against real runs in `tests/fixtures/harness/codex/`, rollout-file context, `run_agent` end to end
 - `test_cli_simulate.py` — integration tests via simulate commands
 - `test_task_store.py`, `test_taskboard_*.py`, `test_tasks_api.py`, `test_cli_task.py` — the taskboard: store, state machine, harvester, runner (fake `run_agent`), worktrees and cleanup against a temp repo with a bare origin, PR watcher with `gh` mocked, API, CLI end to end through the API. The autouse `no_stray_harvester` fixture fails any test that leaves a real board loop running.

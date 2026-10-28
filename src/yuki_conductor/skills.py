@@ -418,6 +418,39 @@ def core_prompt(conversation_key: str | None = None, task_id: int | None = None)
     return _with_workspace_prompt("\n".join(lines))
 
 
+_CODEX_SKILLS_INTRO = (
+    "Besides your own skills, these are available. Each is a directory with a "
+    "`SKILL.md`: when a request matches a skill's description, read that file "
+    "and follow it."
+)
+
+
+def codex_prompt(
+    plugin_dirs: list[str] | None = None,
+    cwd: Path | str | None = None,
+    conversation_key: str | None = None,
+    task_id: int | None = None,
+) -> str:
+    """The developer instructions for a Codex run.
+
+    Codex lists its own skills (`~/.codex/skills`), but has no `--plugin-dir`
+    and doesn't read `.claude/skills`, so yuki-conductor's plugin skills and
+    the project's are listed here by path, the way Codex lists its own.
+    """
+    resolved = [
+        s for s in resolve_skills(cwd=cwd, plugin_dirs=plugin_dirs)
+        if s.tier in (Tier.YUKI, Tier.PROJECT)
+    ]
+    lines = [f"{_INTRO}\n\n{_ATTACHMENTS}"]
+    if resolved:
+        lines.extend(["", "## yuki-conductor skills", "", _CODEX_SKILLS_INTRO, ""])
+        lines.extend(
+            f"- `{s.name}` ({s.source / 'SKILL.md'}) — {s.description}" for s in resolved
+        )
+    lines.extend([*_conversation_section(conversation_key), *_taskboard_section(task_id)])
+    return _with_workspace_prompt("\n".join(lines))
+
+
 def _with_workspace_prompt(prompt: str) -> str:
     workspace = _workspace_prompt()
     return f"{prompt}\n\n{workspace}" if workspace else prompt

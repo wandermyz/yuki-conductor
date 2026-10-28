@@ -241,6 +241,9 @@ class ClaudeStreamParser:
             self._final, raw_stdout, fallback_session_id, self._last_assistant
         )
 
+    def failure(self) -> str | None:
+        return None
+
 
 # ---------------------------------------------------------------------------
 # launch

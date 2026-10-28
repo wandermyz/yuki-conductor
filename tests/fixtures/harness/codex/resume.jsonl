@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a17fd7-b95b-7d20-b777-ab4c701e6264"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I created `notes.txt` containing `hello`."}}
+{"type":"turn.completed","usage":{"input_tokens":44641,"cached_input_tokens":29002,"cache_write_input_tokens":15630,"output_tokens":224,"reasoning_output_tokens":0}}

@@ -11,12 +11,13 @@ import logging
 from yuki_conductor.config import ENABLED_HARNESSES
 from yuki_conductor.harness.base import Harness, RunResult, StreamEvent
 from yuki_conductor.harness.claude_code import ClaudeCodeHarness
+from yuki_conductor.harness.codex import CodexHarness
 from yuki_conductor.harness.pi import PiHarness
 
 logger = logging.getLogger(__name__)
 
 KNOWN_HARNESSES: dict[str, Harness] = {
-    h.name: h for h in (ClaudeCodeHarness(), PiHarness())
+    h.name: h for h in (ClaudeCodeHarness(), PiHarness(), CodexHarness())
 }
 
 

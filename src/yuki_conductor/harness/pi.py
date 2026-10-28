@@ -292,6 +292,11 @@ class PiStreamParser:
         )
 
 
+    def failure(self) -> str | None:
+        # pi exits 0 even when the model call failed; `finish` reads the error.
+        return None
+
+
 class PiHarness:
     name = "pi"
     label = "pi"
