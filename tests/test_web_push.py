@@ -2,6 +2,7 @@
 
 import base64
 import json
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
@@ -39,7 +40,8 @@ def test_public_key_is_generated_once_and_persisted(isolated_push_subscriptions)
     raw = base64.urlsafe_b64decode(key + "=" * (-len(key) % 4))
     assert len(raw) == 65 and raw[0] == 4  # uncompressed P-256 point
     assert web_push.VAPID_KEY_FILE.is_file()
-    assert web_push.VAPID_KEY_FILE.stat().st_mode & 0o777 == 0o600
+    if sys.platform != "win32":  # Windows has no POSIX mode bits
+        assert web_push.VAPID_KEY_FILE.stat().st_mode & 0o777 == 0o600
 
     web_push._vapid = None
     assert web_push.public_key() == key

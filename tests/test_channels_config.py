@@ -1,5 +1,7 @@
 """Tests for the CHANNELS env override."""
 
+from unittest.mock import patch
+
 import pytest
 
 from yuki_conductor.config import channels, channels_override
@@ -41,7 +43,8 @@ def test_whitespace_and_case_normalized(monkeypatch):
     assert channels() == ["slack", "my_plugin"]
 
 
-def test_override_wins_over_registry(monkeypatch, isolated_plugin_registry):
+@patch("yuki_conductor.plugins._entry_points", return_value=[])
+def test_override_wins_over_registry(_, monkeypatch, isolated_plugin_registry):
     """The env var is the escape hatch, so it beats an enabled registry."""
     isolated_plugin_registry.write_text(
         "plugins:\n  - name: slack\n    builtin: true\n    enabled: true\n",
