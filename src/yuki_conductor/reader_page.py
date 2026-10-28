@@ -74,7 +74,7 @@ def render_reader_page(msg: StoredMessage, title: str | None) -> str:
 <article>
 <header>
 <h1>{title}</h1>
-<p class="byline"><time datetime="{when.isoformat()}">{when.strftime("%b %-d, %Y, %-I:%M %p")}</time></p>
+<p class="byline"><time datetime="{when.isoformat()}">{when:%b} {when.day}, {when.year}, {when.hour % 12 or 12}:{when:%M %p}</time></p>
 </header>
 {body}
 </article>

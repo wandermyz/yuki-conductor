@@ -1019,7 +1019,8 @@ class _FrontendFiles(StaticFiles):
 
     async def get_response(self, path, scope):
         response = await super().get_response(path, scope)
-        if path.startswith("assets/"):
+        # `path` uses the OS separator: `assets\index-….js` on Windows.
+        if Path(path).parts[:1] == ("assets",):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         else:
             response.headers["Cache-Control"] = "no-store"
