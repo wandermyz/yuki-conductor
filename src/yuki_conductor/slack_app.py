@@ -16,7 +16,6 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from yuki_conductor.config import (
     CLAUDE_BIN,
-    CLAUDE_DEFAULT_MODEL,
     CLAUDE_WORKING_DIR,
     slack_app_token,
     slack_bot_token,
@@ -33,7 +32,6 @@ from yuki_conductor.messaging.slack_platform import (
 )
 from yuki_conductor.store import (
     DEFAULT_MODEL_ARG,
-    MODEL_ALIASES,
     HarnessStore,
     ModelStore,
     SessionStore,
@@ -103,28 +101,42 @@ def create_app() -> App:
 
     @app.command(f"/{prefix}-model")
     def handle_model_command(ack, command, respond):
+        """Pin a model for the channel's current harness (see `/<prefix>-harness`)."""
         ack()
         channel = command["channel_id"]
         arg = command.get("text", "").strip().lower()
-        options = ", ".join([DEFAULT_MODEL_ARG, *MODEL_ALIASES])
+        name = channel_harness(channel)
+        harness = get_harness(name)
+        aliases = harness.model_aliases()
+        key = model_store.key(channel, name)
+        default = harness.default_label() or harness.default_model() or "its own default"
 
+        if not aliases:
+            respond(f"*{name}* has no models to pick from here; it runs {default}.")
+            return
+
+        options = ", ".join([DEFAULT_MODEL_ARG, *aliases])
         if not arg:
-            current = model_store.get(channel) or f"{DEFAULT_MODEL_ARG} ({CLAUDE_DEFAULT_MODEL})"
-            respond(f"Current model: *{current}*\nUsage: `/{prefix}-model [{options}]`")
+            pinned = model_store.get(key)
+            current = next((a for a, m in aliases.items() if m == pinned), pinned)
+            current = current or f"{DEFAULT_MODEL_ARG} ({default})"
+            respond(
+                f"Current model for *{name}*: *{current}*\n"
+                f"Usage: `/{prefix}-model [{options}]`"
+            )
             return
 
         if arg == DEFAULT_MODEL_ARG:
-            model_store.clear(channel)
-            respond(f"Model reset to the default ({CLAUDE_DEFAULT_MODEL}) for this channel.")
+            model_store.clear(key)
+            respond(f"*{name}* model reset to the default ({default}) for this channel.")
             return
 
-        if arg not in MODEL_ALIASES:
-            respond(f"Unknown model `{arg}`. Valid options: {options}")
+        if arg not in aliases:
+            respond(f"Unknown model `{arg}` for *{name}*. Valid options: {options}")
             return
 
-        resolved = MODEL_ALIASES[arg]
-        model_store.set(channel, resolved)
-        respond(f"Model switched to *{resolved}* for this channel.")
+        model_store.set(key, aliases[arg])
+        respond(f"*{name}* model switched to *{arg}* (`{aliases[arg]}`) for this channel.")
 
     @app.command(f"/{prefix}-title")
     def handle_title_command(ack, command, respond):
@@ -150,7 +162,11 @@ def create_app() -> App:
 
         model_rows = model_store.list_all()
         if model_rows:
-            model_parts = [f"<#{k}>: {v}" for k, v in model_rows[:5]]
+            # Keys are `<channel>:<harness>`.
+            model_parts = []
+            for key, model in model_rows[:5]:
+                ch_id, _, harness_name = key.partition(":")
+                model_parts.append(f"<#{ch_id}> {harness_name}: {model}")
             lines.append(f"*Model settings:*  {' | '.join(model_parts)}")
 
         lines.append(
@@ -184,7 +200,7 @@ def create_app() -> App:
         channel = command["channel_id"]
         arg = command.get("text", "").strip()
         prompt = f"/{skill_name} {arg}" if arg else f"/{skill_name}"
-        model = model_store.get(channel)
+        model = model_store.get(model_store.key(channel, "claude-code"))
 
         respond(f"Running `/{skill_name}`...")
         # Forwards Claude's `/<skill>` slash syntax, so it stays on Claude Code.
@@ -206,7 +222,6 @@ def create_app() -> App:
         channel = event["channel"]
         ts = event["ts"]
         thread_ts = event.get("thread_ts")
-        model = model_store.get(channel)
         logger.info(
             f"Slack message channel={channel} channel_type={event.get('channel_type')} ts={ts}"
         )
@@ -266,6 +281,9 @@ def create_app() -> App:
         platform = SlackPlatform(client=client, bot_token=slack_bot_token())
         if is_thread_start:
             platform.mark_harness(conversation_key, harness)
+        # The channel's pin for the harness this thread runs on.
+        thread_harness = harness or store.get_harness(conversation_key) or default_harness()
+        model = model_store.get(model_store.key(channel, thread_harness))
         msg = IncomingMessage(
             platform=SESSION_TYPE,
             conversation_key=conversation_key,

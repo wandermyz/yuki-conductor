@@ -248,8 +248,8 @@ def test_conversation_bound_to_a_disabled_harness_fails_instead_of_switching(mon
     assert platform.processing[-1] == ("conv-h", "m2", False)
 
 
-def test_claude_model_pin_only_reaches_claude_code(monkeypatch):
-    """pi would get `--model opus[1m]`, a model name it doesn't know."""
+def test_model_reaches_every_harness(monkeypatch):
+    """A message's model is already in its harness's terms; the core passes it on."""
     from yuki_conductor import harness as harness_pkg
 
     other = MagicMock(name="other-harness")
@@ -259,14 +259,14 @@ def test_claude_model_pin_only_reaches_claude_code(monkeypatch):
     harness_pkg.HARNESSES.update({"claude-code": harness_pkg.KNOWN_HARNESSES["claude-code"], "other": other})
     fake = RunResult(text="ok", session_id="s")
     try:
-        for name, expected in (("claude-code", "opus[1m]"), ("other", None)):
+        for name, model in (("claude-code", "opus[1m]"), ("other", "gpt-6-sol"), ("other", None)):
             msg = IncomingMessage(
                 platform="web", conversation_key=f"c-{name}", message_id="m", text="hi",
-                is_thread_start=True, harness=name, model="opus[1m]",
+                is_thread_start=True, harness=name, model=model,
             )
             with patch("yuki_conductor.messaging.conversation.run_agent", return_value=fake) as run:
                 handle_incoming_message(StubPlatform(), msg)
-            assert run.call_args.kwargs["model"] == expected, name
+            assert run.call_args.kwargs["model"] == model, name
     finally:
         harness_pkg.HARNESSES.clear()
         harness_pkg.HARNESSES.update(saved)

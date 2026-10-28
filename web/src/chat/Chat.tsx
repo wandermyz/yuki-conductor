@@ -28,6 +28,7 @@ import type {
   ConversationUsage,
   ConvStatus,
   HarnessInfo,
+  ModelOption,
   Project,
   SearchHit,
   StreamStep,
@@ -216,15 +217,6 @@ function contextOf(msg: ChatMessage): ContextUse | null {
   return { tokens, window };
 }
 
-/** The newest turn that reported one: what the conversation is carrying now. */
-function latestContext(messages: ChatMessage[]): ContextUse | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const use = contextOf(messages[i]);
-    if (use) return use;
-  }
-  return null;
-}
-
 function contextPct(use: ContextUse): number {
   return Math.min(100, Math.round((use.tokens / use.window) * 100));
 }
@@ -239,24 +231,6 @@ function contextTitle(use: ContextUse): string {
 /** Colour says what the number is for: room left, nearly full, or full. */
 function contextLevel(pct: number): string {
   return pct >= 85 ? "high" : pct >= 60 ? "mid" : "low";
-}
-
-function ContextMeter({ use }: { use: ContextUse }) {
-  const pct = contextPct(use);
-  return (
-    <span
-      className={`ctx-meter ctx-${contextLevel(pct)}`}
-      title={contextTitle(use)}
-    >
-      <span className="ctx-bar" aria-hidden="true">
-        <span className="ctx-fill" style={{ width: `${Math.max(3, pct)}%` }} />
-      </span>
-      <span className="ctx-text">
-        {formatTokens(use.tokens)} / {formatTokens(use.window)}
-        <span className="ctx-pct">{pct}%</span>
-      </span>
-    </span>
-  );
 }
 
 function getStatus(statuses: Record<string, ConvStatus>, id: string): ConvStatus {
@@ -636,15 +610,28 @@ function MessageBubble({
         </div>
       )}
       <div className="bubble-time">
-        {formatTime(msg.created_at)}
-        {use && (
-          <span
-            className={`bubble-ctx ctx-${contextLevel(contextPct(use))}`}
-            title={contextTitle(use)}
-          >
-            {formatTokens(use.tokens)}/{formatTokens(use.window)} ({contextPct(use)}%)
-          </span>
-        )}
+        {/* Date on one line, model and context under it, so neither wraps
+            mid-phrase beside the action buttons on a phone. */}
+        <span className="bubble-meta">
+          <span className="bubble-date">{formatTime(msg.created_at)}</span>
+          {((msg.role === "assistant" && msg.model) || use) && (
+            <span className="bubble-usage">
+              {msg.role === "assistant" && msg.model && (
+                <span className="bubble-model" title="Model that answered">
+                  {msg.model}
+                </span>
+              )}
+              {use && (
+                <span
+                  className={`bubble-ctx ctx-${contextLevel(contextPct(use))}`}
+                  title={contextTitle(use)}
+                >
+                  {formatTokens(use.tokens)}/{formatTokens(use.window)} ({contextPct(use)}%)
+                </span>
+              )}
+            </span>
+          )}
+        </span>
         {msg.text && (
           <MessageActions
             text={msg.text}
@@ -671,6 +658,40 @@ function MessageBubble({
         )}
       </div>
     </div>
+  );
+}
+
+/** Picks the model a conversation's next turns run on. Hidden when the
+ * harness offers no choice. Empty value: the harness's default. */
+function ModelPicker({
+  harness,
+  model,
+  onChange,
+}: {
+  harness: HarnessInfo | undefined;
+  model: string | null;
+  onChange: (model: string | null) => void;
+}) {
+  if (!harness || harness.models.length === 0) return null;
+  const options: ModelOption[] = [...harness.models];
+  // A model picked earlier that the harness no longer lists stays selectable.
+  if (model && !options.some((o) => o.id === model)) options.unshift({ id: model, label: model });
+  const fallbackLabel = harness.default_label ?? harness.default_model;
+  return (
+    <select
+      className="chat-model-picker"
+      value={model ?? ""}
+      onChange={(e) => onChange(e.target.value || null)}
+      title="Model for the next message"
+      aria-label="Model"
+    >
+      <option value="">{fallbackLabel ? `Default (${fallbackLabel})` : "Default"}</option>
+      {options.map((o) => (
+        <option key={o.id} value={o.id}>
+          {o.label}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -886,6 +907,7 @@ function SearchResults({
 
 function ChatThread({
   conv,
+  harness,
   messages,
   processing,
   steps,
@@ -900,8 +922,10 @@ function ChatThread({
   onSetStatus,
   onArchive,
   onDelete,
+  onSetModel,
 }: {
   conv: Conversation;
+  harness: HarnessInfo | undefined;
   messages: ChatMessage[];
   processing: boolean;
   steps: StreamStep[];
@@ -916,10 +940,10 @@ function ChatThread({
   onSetStatus: (s: ConvStatus) => void;
   onArchive: () => void;
   onDelete: () => void;
+  onSetModel: (model: string | null) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
-  const contextUse = latestContext(messages);
 
   // Steps belong to the turn that produced the last assistant message, so once
   // the run finishes that message renders below the trace rather than above it.
@@ -966,8 +990,8 @@ function ChatThread({
           ←
         </button>
         <h2 className="chat-thread-title">{conv.title || "New chat"}</h2>
+        <ModelPicker harness={harness} model={conv.model} onChange={onSetModel} />
         <HarnessMarker name={conv.harness} />
-        {contextUse && <ContextMeter use={contextUse} />}
         <div className="menu-anchor">
           <button
             className="chat-list-menu-btn"
@@ -1293,6 +1317,20 @@ export default function Chat({
     }
   };
 
+  const setModel = async (id: string, model: string | null) => {
+    // Optimistic, like rename: the picker shows the choice at once.
+    const prevModel = conversations.find((c) => c.id === id)?.model ?? null;
+    setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, model } : c)));
+    try {
+      await updateConversation(id, { model });
+    } catch (e) {
+      console.error(e);
+      setConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, model: prevModel } : c)),
+      );
+    }
+  };
+
   const handleSend = async (convId: string, text: string, files: AttachmentRef[]) => {
     // Optimistically render the message immediately so nothing typed is lost,
     // even if the network request fails. A temp id lets us update/dedupe later.
@@ -1522,6 +1560,7 @@ export default function Chat({
           <ChatThread
             key={active.id}
             conv={active}
+            harness={harnesses.find((h) => h.name === active.harness)}
             messages={messagesByConv[active.id] || []}
             processing={processingConvs.has(active.id)}
             steps={stepsByConv[active.id] || []}
@@ -1536,6 +1575,7 @@ export default function Chat({
             onSetStatus={(s) => setStatus(active.id, s)}
             onArchive={() => archive(active.id)}
             onDelete={() => remove(active.id)}
+            onSetModel={(model) => setModel(active.id, model)}
           />
         ) : (
           <div className="chat-placeholder">

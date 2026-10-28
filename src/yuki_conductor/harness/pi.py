@@ -30,6 +30,7 @@ from yuki_conductor.config import PI_BIN, PI_DEFAULT_MODEL
 from yuki_conductor.harness.base import (
     SUMMARY_LIMIT,
     Launch,
+    ModelOption,
     RunRequest,
     RunResult,
     StreamEvent,
@@ -287,9 +288,17 @@ class PiStreamParser:
         )
         if stop == "length":
             text = (text + "\n\n" if text else "") + "(reply cut off: the model hit its output limit)"
+        # A virtual model routes to a physical `responseModel`: that one answered.
+        model = msg.get("responseModel") or msg.get("model")
         return RunResult(
-            text=text or "(empty response)", session_id=session_id, **usage, **context
+            text=text or "(empty response)", session_id=session_id, **usage, **context,
+            model=model if isinstance(model, str) else None,
         )
+
+
+    def failure(self) -> str | None:
+        # pi exits 0 even when the model call failed; `finish` reads the error.
+        return None
 
 
 class PiHarness:
@@ -338,3 +347,16 @@ class PiHarness:
         if not root.is_dir():
             return False
         return any(root.rglob(f"*{session_id}*"))
+
+    def model_aliases(self) -> dict[str, str]:
+        return {}
+
+    def models(self) -> list[ModelOption]:
+        # pi runs one local model; there is nothing to pick between.
+        return []
+
+    def default_model(self) -> str | None:
+        return PI_DEFAULT_MODEL
+
+    def default_label(self) -> str | None:
+        return PI_DEFAULT_MODEL

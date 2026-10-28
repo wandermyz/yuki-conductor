@@ -134,6 +134,7 @@ def serialize_message(msg: StoredMessage) -> dict:
         "created_at": msg.created_at,
         "context_tokens": msg.context_tokens,
         "context_window": msg.context_window,
+        "model": msg.model,
     }
 
 
@@ -182,6 +183,7 @@ class WebPlatform:
         )
         stored_msg.context_tokens = msg.context_tokens
         stored_msg.context_window = msg.context_window
+        stored_msg.model = msg.model
         self._store.record_usage(
             message_id=stored_msg.id,
             conversation_id=conversation_key,
@@ -190,6 +192,7 @@ class WebPlatform:
             cost_usd=msg.cost_usd,
             context_tokens=msg.context_tokens,
             context_window=msg.context_window,
+            model=msg.model,
         )
         payload = {"type": "message", "message": serialize_message(stored_msg)}
         if msg.pushed:

@@ -128,9 +128,8 @@ def handle_incoming_message(
             platform.send(msg.conversation_key, OutgoingMessage(text=str(exc)))
             return
         prompt = _build_prompt(msg.text, msg.attachments)
-        # msg.model is a Claude Code alias (Slack's /<prefix>-model). Other
-        # harnesses name models differently, so they use their own default.
-        model = msg.model if harness == "claude-code" else None
+        # Native to the conversation's harness; None: the harness's default.
+        model = msg.model
         logger.info(
             "Running %s for %s (session=%s, model=%s)",
             harness, msg.conversation_key, session_id, model,
@@ -177,6 +176,7 @@ def handle_incoming_message(
             cost_usd=result.cost_usd,
             context_tokens=result.context_tokens,
             context_window=result.context_window,
+            model=result.model,
         )
         logger.info(
             "Sending reply for %s (%d chars, %d attachments)",

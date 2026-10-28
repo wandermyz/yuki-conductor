@@ -31,6 +31,7 @@ STATUS_LABEL_LIMIT = 80
 HARNESS_EMOJI = {
     "claude-code": "large_orange_diamond",
     "pi": "pie",
+    "codex": "large_blue_diamond",
 }
 
 # Slack visibly truncates messages past ~4000 characters, so long replies are

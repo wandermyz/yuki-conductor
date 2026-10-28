@@ -76,7 +76,7 @@ def test_reply_reports_context_occupation(client, monkeypatch):
     fake = RunResult(
         text="done", session_id="claude-1",
         input_tokens=50000, output_tokens=300,
-        context_tokens=40000, context_window=200000,
+        context_tokens=40000, context_window=200000, model="claude-opus-5-5",
     )
     monkeypatch.setattr(
         "yuki_conductor.messaging.conversation.run_agent", lambda *a, **k: fake
@@ -95,7 +95,8 @@ def test_reply_reports_context_occupation(client, monkeypatch):
     msgs = client.get(f"/api/conversations/{conv['id']}/messages").json()
     user, assistant = msgs[0], msgs[1]
     assert (assistant["context_tokens"], assistant["context_window"]) == (40000, 200000)
-    assert (user["context_tokens"], user["context_window"]) == (None, None)
+    assert assistant["model"] == "claude-opus-5-5"
+    assert (user["context_tokens"], user["context_window"], user["model"]) == (None, None, None)
 
 
 def test_upload_and_download_roundtrip(client):
@@ -351,3 +352,44 @@ def test_chat_ws_answers_ping_with_pong(client):
     with client.websocket_connect("/ws/chat") as ws:
         ws.send_text("ping")
         assert ws.receive_json() == {"type": "pong"}
+
+
+def test_model_is_picked_per_conversation_and_used_for_its_turns(client, monkeypatch):
+    from yuki_conductor.harness.base import RunResult
+
+    conv = client.post("/api/conversations", json={"title": "m"}).json()
+    assert conv["model"] is None
+    r = client.patch(f"/api/conversations/{conv['id']}", json={"model": "sonnet"})
+    assert r.status_code == 200 and r.json()["model"] == "sonnet"
+    assert r.json()["title"] == "m"  # untouched
+
+    seen = []
+    monkeypatch.setattr(
+        "yuki_conductor.messaging.conversation.run_agent",
+        lambda harness, prompt, **kw: seen.append(kw["model"]) or RunResult(text="ok", session_id="s"),
+    )
+    client.post(f"/api/conversations/{conv['id']}/messages", json={"text": "hi"})
+    deadline = time.time() + 5
+    while not seen and time.time() < deadline:
+        time.sleep(0.05)
+    assert seen == ["sonnet"]
+
+    # A rename leaves the model alone; null returns to the harness default.
+    client.patch(f"/api/conversations/{conv['id']}", json={"title": "renamed"})
+    assert client.get(f"/api/conversations/{conv['id']}").json()["model"] == "sonnet"
+    client.patch(f"/api/conversations/{conv['id']}", json={"model": None})
+    assert client.get(f"/api/conversations/{conv['id']}").json()["model"] is None
+
+
+def test_harnesses_list_their_models(client):
+    harnesses = client.get("/api/harnesses").json()["harnesses"]
+    [claude] = [h for h in harnesses if h["name"] == "claude-code"]
+    [codex] = [h for h in harnesses if h["name"] == "codex"]
+    assert claude["default_label"] == "opus"
+    assert codex["default_label"] == "sol"
+    assert {"id": "sonnet", "label": "sonnet"} in claude["models"]
+    assert {"id": "opus", "label": "opus"} in claude["models"]
+    assert codex["default_model"] == "gpt-6.1-sol"
+    assert {"id": "gpt-6-astra", "label": "astra"} in codex["models"]
+    assert {"id": "gpt-6.1-sol", "label": "sol"} in codex["models"]
+

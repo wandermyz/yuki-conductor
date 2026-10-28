@@ -6,8 +6,15 @@ export interface Conversation {
   claude_session_id: string | null;
   /** Agent harness, fixed when the conversation is created. */
   harness: string;
+  /** Model for its next turns, in the harness's terms; null: the harness default. */
+  model: string | null;
   created_at: number;
   updated_at: number;
+}
+
+export interface ModelOption {
+  id: string;
+  label: string;
 }
 
 export interface HarnessInfo {
@@ -15,6 +22,12 @@ export interface HarnessInfo {
   label: string;
   /** Its CLI is on the daemon's PATH. */
   available: boolean;
+  /** What a turn runs on when the conversation picks none, if known. */
+  default_model: string | null;
+  /** How the picker names the default ("opus", "sol"). */
+  default_label: string | null;
+  /** Models a conversation may pick; empty: no choice offered. */
+  models: ModelOption[];
 }
 
 export async function listHarnesses(): Promise<{ default: string; harnesses: HarnessInfo[] }> {
@@ -43,6 +56,8 @@ export interface ChatMessage {
    *  before the server confirms. */
   context_tokens?: number | null;
   context_window?: number | null;
+  /** The exact model that answered (e.g. `claude-opus-5-5`), if reported. */
+  model?: string | null;
   /** Client-only delivery state for optimistic user messages. Absent on
    *  server-confirmed messages (treated as delivered). */
   status?: "sending" | "failed";
@@ -126,7 +141,7 @@ export async function archiveConversation(id: string): Promise<void> {
 
 export async function updateConversation(
   id: string,
-  patch: { title?: string; project?: string },
+  patch: { title?: string; project?: string; model?: string | null },
 ): Promise<Conversation> {
   const r = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
     method: "PATCH",

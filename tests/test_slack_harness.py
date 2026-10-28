@@ -11,7 +11,7 @@ import pytest
 
 from yuki_conductor import harness as harness_pkg
 from yuki_conductor import slack_app
-from yuki_conductor.store import HarnessStore, SessionStore
+from yuki_conductor.store import HarnessStore, ModelStore, SessionStore
 
 
 class FakeApp:
@@ -42,13 +42,14 @@ def app(monkeypatch, tmp_path):
     monkeypatch.setattr(slack_app, "slack_command_prefix", lambda: "yuki")
     monkeypatch.setattr(slack_app, "store", SessionStore(db_path=db))
     monkeypatch.setattr(slack_app, "harness_store", HarnessStore(db_path=db))
-    monkeypatch.setattr(slack_app, "model_store", MagicMock(get=lambda c: None, list_all=lambda: []))
+    monkeypatch.setattr(slack_app, "model_store", ModelStore(db_path=db))
 
     saved = dict(harness_pkg.HARNESSES)
     harness_pkg.HARNESSES.clear()
     harness_pkg.HARNESSES.update({
         "claude-code": harness_pkg.KNOWN_HARNESSES["claude-code"],
         "pi": harness_pkg.KNOWN_HARNESSES["pi"],
+        "codex": harness_pkg.KNOWN_HARNESSES["codex"],
     })
     yield slack_app.create_app()
     harness_pkg.HARNESSES.clear()
@@ -111,6 +112,47 @@ def test_reply_keeps_its_threads_harness_after_the_channel_changes(app, monkeypa
     msg = _post(app, monkeypatch, ts="2.0", thread_ts="1.0")
     assert msg.harness is None  # the core reads the thread's own record
     assert slack_app.store.get_harness("1.0") == "pi"
+
+
+def _model_cmd(app, text, channel="C1"):
+    respond = MagicMock()
+    app.commands["/yuki-model"](ack=MagicMock(), command={"channel_id": channel, "text": text},
+                                respond=respond)
+    return respond.call_args.args[0]
+
+
+def test_model_command_uses_the_channels_harness_aliases(app):
+    # Claude Code (the default harness here): its own aliases.
+    assert "default (opus)" in _model_cmd(app, "")
+    assert "switched to *sonnet*" in _model_cmd(app, "sonnet")
+    assert "Unknown model `astra`" in _model_cmd(app, "astra")
+    # Switch the channel to Codex: astra / sol, and the Claude pin is untouched.
+    _harness_cmd(app, "codex")
+    assert "default (sol)" in _model_cmd(app, "")
+    assert "switched to *astra* (`gpt-6-astra`)" in _model_cmd(app, "astra")
+    assert "*astra*" in _model_cmd(app, "")
+    assert slack_app.model_store.get(ModelStore.key("C1", "codex")) == "gpt-6-astra"
+    assert slack_app.model_store.get(ModelStore.key("C1", "claude-code")) == "sonnet"
+    assert "reset to the default (sol)" in _model_cmd(app, "default")
+    assert slack_app.model_store.get(ModelStore.key("C1", "claude-code")) == "sonnet"
+
+
+def test_model_command_on_a_harness_without_choices(app):
+    _harness_cmd(app, "pi")
+    assert "no models to pick from" in _model_cmd(app, "astra")
+
+
+def test_thread_gets_the_pin_for_its_own_harness(app, monkeypatch):
+    slack_app.model_store.set(ModelStore.key("C1", "claude-code"), "sonnet")
+    slack_app.model_store.set(ModelStore.key("C1", "codex"), "gpt-6-astra")
+    assert _post(app, monkeypatch).model == "sonnet"
+    slack_app.harness_store.set("C1", "codex")
+    assert _post(app, monkeypatch, ts="2.0").model == "gpt-6-astra"
+    slack_app.harness_store.set("C1", "pi")
+    assert _post(app, monkeypatch, ts="3.0").model is None
+    # A reply follows its thread's harness, not the channel's current one.
+    slack_app.store.set("4.0", "sess-4", channel_id="C1", harness="claude-code")
+    assert _post(app, monkeypatch, ts="5.0", thread_ts="4.0").model == "sonnet"
 
 
 # --------------------------------------------------------------------------

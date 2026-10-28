@@ -27,6 +27,7 @@ class IncomingMessage:
     attachments: list[Attachment] = field(default_factory=list)
     is_thread_start: bool = False
     title_hint: str | None = None
+    # In the conversation's harness's own terms; None: its default model.
     model: str | None = None
     cwd: str | None = None
     # Harness for a *new* conversation; an existing one keeps its own.
@@ -45,6 +46,7 @@ class OutgoingMessage:
     # How full the model's context was at the end of the turn, and its window.
     context_tokens: int | None = None
     context_window: int | None = None
+    model: str | None = None  # the exact model that answered
     # Sent out-of-band via `/api/push` rather than as the reply to a turn.
     pushed: bool = False
 

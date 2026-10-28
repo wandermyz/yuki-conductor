@@ -17,6 +17,7 @@ from yuki_conductor.config import CLAUDE_BIN, CLAUDE_DEFAULT_MODEL
 from yuki_conductor.harness.base import (
     SUMMARY_LIMIT,
     Launch,
+    ModelOption,
     RunRequest,
     RunResult,
     StreamEvent,
@@ -26,6 +27,17 @@ from yuki_conductor.harness.base import (
     truncate,
 )
 from yuki_conductor.skills import skill_plugin_dirs, system_prompt
+
+# Named picks the web model picker offers. Bare aliases, not Slack's suffixed
+# forms (MODEL_ALIASES in store.py): the Anthropic API resolves `opus`/`sonnet`
+# to whatever snapshot is current on every request — no "[1m]" is needed to
+# keep the 1M window, verified live against a fresh run, a resume, and with no
+# --model flag at all (modelUsage.contextWindow was 1,000,000 all three ways).
+MODEL_ALIASES = {
+    "default": CLAUDE_DEFAULT_MODEL,
+    "sonnet": "sonnet",
+    "opus": "opus",
+}
 
 # ---------------------------------------------------------------------------
 # stream-json parsing
@@ -178,6 +190,21 @@ def _model_context_window(model_usage, model: str | None) -> int | None:
     return max(windows.values())
 
 
+def _resolved_model(model_usage, model: str | None) -> str | None:
+    """The canonical model id behind the alias that answered.
+
+    `modelUsage` is keyed by the requested model (`claude-opus-5-5[1m]`) and
+    carries `canonicalModel` (`claude-opus-5-5`); fall back to the key itself,
+    minus a `[...]` suffix, when an older CLI doesn't report it.
+    """
+    if not isinstance(model_usage, dict) or not model_usage:
+        return None
+    key = model if model in model_usage else next(iter(model_usage))
+    entry = model_usage.get(key)
+    canonical = entry.get("canonicalModel") if isinstance(entry, dict) else None
+    return canonical if isinstance(canonical, str) and canonical else key.split("[", 1)[0]
+
+
 def build_result(
     final: dict | None,
     raw_stdout: str,
@@ -220,6 +247,7 @@ def build_result(
         context_window=_model_context_window(
             final.get("modelUsage"), (last_assistant or {}).get("model")
         ),
+        model=_resolved_model(final.get("modelUsage"), (last_assistant or {}).get("model")),
     )
 
 
@@ -240,6 +268,9 @@ class ClaudeStreamParser:
         return build_result(
             self._final, raw_stdout, fallback_session_id, self._last_assistant
         )
+
+    def failure(self) -> str | None:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -338,3 +369,17 @@ class ClaudeCodeHarness:
         config = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
         project = re.sub(r"[^A-Za-z0-9]", "-", str(Path(cwd).resolve()))
         return (config / "projects" / project / f"{session_id}.jsonl").is_file()
+
+    def model_aliases(self) -> dict[str, str]:
+        return {name: slug for name, slug in MODEL_ALIASES.items() if name != "default"}
+
+    def models(self) -> list[ModelOption]:
+        return [ModelOption(id=slug, label=name) for name, slug in self.model_aliases().items()]
+
+    def default_model(self) -> str | None:
+        return MODEL_ALIASES["default"]
+
+    def default_label(self) -> str | None:
+        # CLAUDE_DEFAULT_MODEL is opus[1m]; it and bare `opus` resolve to the
+        # same model and window, so the picker just says "opus".
+        return MODEL_ALIASES["default"].split("[", 1)[0]

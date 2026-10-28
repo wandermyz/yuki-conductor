@@ -37,6 +37,7 @@ class StoredMessage:
     # was at the end of the turn that produced it, and how big that window is.
     context_tokens: int | None = None
     context_window: int | None = None
+    model: str | None = None  # the exact model that answered
 
 
 @dataclass
@@ -50,6 +51,7 @@ class StoredConversation:
     updated_at: float
     harness: str = "claude-code"  # fixed when the conversation is created
     archived_at: float | None = None  # set: hidden from the web UI, only reachable via SQL
+    model: str | None = None  # harness-native model id; None: the harness's default
 
 
 # Wraps each matched term in a search snippet. Control characters, so they
@@ -94,7 +96,8 @@ class ConversationStore:
                         updated_at REAL NOT NULL,
                         status TEXT NOT NULL DEFAULT 'read',
                         harness TEXT NOT NULL DEFAULT 'claude-code',
-                        archived_at REAL
+                        archived_at REAL,
+                        model TEXT
                     )
                     """
                 )
@@ -125,6 +128,7 @@ class ConversationStore:
                         cost_usd REAL,
                         context_tokens INTEGER,
                         context_window INTEGER,
+                        model TEXT,
                         created_at REAL NOT NULL
                     )
                     """
@@ -149,6 +153,8 @@ class ConversationStore:
                     )
                 if "archived_at" not in cols:
                     con.execute("ALTER TABLE conversations ADD COLUMN archived_at REAL")
+                if "model" not in cols:
+                    con.execute("ALTER TABLE conversations ADD COLUMN model TEXT")
                 usage_cols = {
                     row[1]
                     for row in con.execute("PRAGMA table_info(message_usage)").fetchall()
@@ -156,6 +162,8 @@ class ConversationStore:
                 for name in ("context_tokens", "context_window"):
                     if name not in usage_cols:
                         con.execute(f"ALTER TABLE message_usage ADD COLUMN {name} INTEGER")
+                if "model" not in usage_cols:
+                    con.execute("ALTER TABLE message_usage ADD COLUMN model TEXT")
                 con.commit()
             finally:
                 con.close()
@@ -207,7 +215,7 @@ class ConversationStore:
             try:
                 row = con.execute(
                     "SELECT id, platform, title, project, claude_session_id, "
-                    "created_at, updated_at, harness, archived_at FROM conversations WHERE id = ?",
+                    "created_at, updated_at, harness, archived_at, model FROM conversations WHERE id = ?",
                     (conv_id,),
                 ).fetchone()
                 if not row:
@@ -224,14 +232,14 @@ class ConversationStore:
                 if platform is not None:
                     rows = con.execute(
                         "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at, harness, archived_at FROM conversations "
+                        "created_at, updated_at, harness, archived_at, model FROM conversations "
                         "WHERE platform = ? AND archived_at IS NULL ORDER BY updated_at DESC",
                         (platform,),
                     ).fetchall()
                 else:
                     rows = con.execute(
                         "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at, harness, archived_at FROM conversations "
+                        "created_at, updated_at, harness, archived_at, model FROM conversations "
                         "WHERE archived_at IS NULL ORDER BY updated_at DESC"
                     ).fetchall()
                 return [StoredConversation(*r) for r in rows]
@@ -268,6 +276,22 @@ class ConversationStore:
                 cur = con.execute(
                     f"UPDATE conversations SET {', '.join(sets)} WHERE id = ?",
                     tuple(args),
+                )
+                con.commit()
+                return cur.rowcount > 0
+            finally:
+                con.close()
+
+    def set_model(self, conv_id: str, model: str | None) -> bool:
+        """Pick the model for the conversation's next turns; None: the default.
+
+        Leaves `updated_at` alone, so switching models doesn't reorder the list.
+        """
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    "UPDATE conversations SET model = ? WHERE id = ?", (model, conv_id)
                 )
                 con.commit()
                 return cur.rowcount > 0
@@ -391,7 +415,7 @@ class ConversationStore:
         # Usage lives in its own table, so left join it to keep user messages.
         select = (
             "SELECT m.id, m.conversation_id, m.role, m.text, m.attachments_json, m.created_at, "
-            "u.context_tokens, u.context_window "
+            "u.context_tokens, u.context_window, u.model "
             "FROM messages m LEFT JOIN message_usage u ON u.message_id = m.id "
             "WHERE m.conversation_id = ?"
         )
@@ -450,13 +474,15 @@ class ConversationStore:
         cost_usd: float | None = None,
         context_tokens: int | None = None,
         context_window: int | None = None,
+        model: str | None = None,
     ) -> None:
-        """Record token usage and/or cost for an assistant message."""
+        """Record token usage, cost and the answering model for an assistant message."""
         if (
             input_tokens is None
             and output_tokens is None
             and cost_usd is None
             and context_tokens is None
+            and model is None
         ):
             return
         with self._lock:
@@ -465,11 +491,11 @@ class ConversationStore:
                 con.execute(
                     "INSERT OR REPLACE INTO message_usage "
                     "(message_id, conversation_id, input_tokens, output_tokens, cost_usd, "
-                    "context_tokens, context_window, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "context_tokens, context_window, model, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         message_id, conversation_id, input_tokens, output_tokens, cost_usd,
-                        context_tokens, context_window, time.time(),
+                        context_tokens, context_window, model, time.time(),
                     ),
                 )
                 con.commit()
@@ -706,4 +732,5 @@ def _row_to_message(r: tuple) -> StoredMessage:
         # Only `list_messages` joins the usage table.
         context_tokens=r[6] if len(r) > 6 else None,
         context_window=r[7] if len(r) > 7 else None,
+        model=r[8] if len(r) > 8 else None,
     )

@@ -173,6 +173,26 @@ def test_model_flag_when_pinned():
     assert cmd[cmd.index("--model") + 1] == "opus[1m]"
 
 
+def test_model_picker_offers_bare_aliases():
+    """The web picker's aliases, unlike CLAUDE_DEFAULT_MODEL, carry no [1m]
+    suffix: live `claude -p` runs on 2026-10-28 (fresh, resumed, and with no
+    --model flag at all) all reported modelUsage.contextWindow == 1_000_000
+    for both opus and sonnet, suffixed or not. The suffix only ever mattered
+    for CLAUDE_DEFAULT_MODEL's own comment about a stale assumption; the bare
+    forms are what the Anthropic API re-resolves to "latest" on every call.
+    """
+    from yuki_conductor.harness.claude_code import MODEL_ALIASES, ClaudeCodeHarness
+
+    assert MODEL_ALIASES == {
+        "default": CLAUDE_DEFAULT_MODEL, "sonnet": "sonnet", "opus": "opus",
+    }
+    harness = ClaudeCodeHarness()
+    assert harness.default_model() == CLAUDE_DEFAULT_MODEL
+    assert [(m.id, m.label) for m in harness.models()] == [
+        ("sonnet", "sonnet"), ("opus", "opus"),
+    ]
+
+
 def test_resume_session():
     output = _stream(_result_record("Resumed!", "sess_456"))
     mock_proc = _mock_popen(stdout=output)
@@ -438,3 +458,28 @@ def test_cancelled_run_is_flagged():
     ):
         result = run_agent(CLAUDE, "go", conversation_key="task:1")
     assert result.cancelled and not result.is_error
+
+
+def test_result_names_the_canonical_model():
+    """modelUsage is keyed by what was asked for; canonicalModel is what answered."""
+    output = _stream(_result_record("ok", "s1", modelUsage={
+        "claude-opus-5-5[1m]": {"contextWindow": 1000000, "canonicalModel": "claude-opus-5-5"},
+    }))
+    with patch("subprocess.Popen", return_value=_mock_popen(stdout=output)):
+        result = run_agent(CLAUDE, "go")
+    assert result.model == "claude-opus-5-5"
+    assert result.context_window == 1000000
+
+
+def test_model_falls_back_to_the_usage_key_without_its_suffix():
+    output = _stream(_result_record("ok", "s1", modelUsage={
+        "claude-sonnet-5-5[1m]": {"contextWindow": 1000000},
+    }))
+    with patch("subprocess.Popen", return_value=_mock_popen(stdout=output)):
+        assert run_agent(CLAUDE, "go").model == "claude-sonnet-5-5"
+
+
+def test_picker_labels_the_default_without_its_suffix():
+    from yuki_conductor.harness.claude_code import ClaudeCodeHarness
+
+    assert ClaudeCodeHarness().default_label() == "opus"

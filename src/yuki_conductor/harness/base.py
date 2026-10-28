@@ -39,6 +39,9 @@ class RunResult:
     # big that window is. Both None when the harness reported neither.
     context_tokens: int | None = None
     context_window: int | None = None
+    # The exact model that answered (e.g. `claude-opus-5-5`, `gpt-6.1-sol`),
+    # as the harness reports it, not the alias that was asked for.
+    model: str | None = None
     # The resumed session no longer exists (the harness said so). The caller
     # can retry with a fresh session that carries the history in the prompt.
     session_missing: bool = False
@@ -59,6 +62,14 @@ class RunRequest:
 
 
 @dataclass
+class ModelOption:
+    """A model the web picker offers for a harness."""
+
+    id: str  # passed to the harness as RunRequest.model
+    label: str
+
+
+@dataclass
 class Launch:
     """A built command, plus temp files to remove once the run ends."""
 
@@ -73,6 +84,13 @@ class StreamParser(Protocol):
     def feed(self, line: str) -> list[StreamEvent]: ...
 
     def finish(self, raw_stdout: str, fallback_session_id: str | None) -> RunResult: ...
+
+    def failure(self) -> str | None:
+        """The error the stream itself reported, for a CLI that exits non-zero.
+
+        None when it reported none; stderr or stdout is shown instead.
+        """
+        ...
 
 
 class Harness(Protocol):
@@ -89,6 +107,25 @@ class Harness(Protocol):
 
     def session_exists(self, session_id: str, cwd: str) -> bool:
         """Whether `session_id` can still be resumed from `cwd`."""
+        ...
+
+    def model_aliases(self) -> dict[str, str]:
+        """Named picks -> model id passed to the CLI, `default` excluded.
+
+        The web picker and Slack's `/<prefix>-model` both offer these.
+        """
+        ...
+
+    def models(self) -> list[ModelOption]:
+        """Models a conversation may pick; empty when the harness offers no choice."""
+        ...
+
+    def default_model(self) -> str | None:
+        """The model a turn gets when none is picked, if known."""
+        ...
+
+    def default_label(self) -> str | None:
+        """How the picker names the default, e.g. "opus" for `opus[1m]`."""
         ...
 
 

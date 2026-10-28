@@ -207,6 +207,9 @@ def _run_agent(
     try:
         proc = subprocess.Popen(
             launch.argv,
+            # Nothing is ever typed into a run. An inherited stdin can block a
+            # CLI that reads it for more prompt (Codex does).
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -272,7 +275,7 @@ def _run_agent(
                 cancelled=True,
             )
         error_text = (
-            stderr.strip() or raw_stdout.strip()
+            parser.failure() or stderr.strip() or raw_stdout.strip()
             or f"{harness.bin} exited with code {proc.returncode}"
         )
         return RunResult(
