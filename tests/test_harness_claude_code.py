@@ -458,3 +458,28 @@ def test_cancelled_run_is_flagged():
     ):
         result = run_agent(CLAUDE, "go", conversation_key="task:1")
     assert result.cancelled and not result.is_error
+
+
+def test_result_names_the_canonical_model():
+    """modelUsage is keyed by what was asked for; canonicalModel is what answered."""
+    output = _stream(_result_record("ok", "s1", modelUsage={
+        "claude-opus-5-5[1m]": {"contextWindow": 1000000, "canonicalModel": "claude-opus-5-5"},
+    }))
+    with patch("subprocess.Popen", return_value=_mock_popen(stdout=output)):
+        result = run_agent(CLAUDE, "go")
+    assert result.model == "claude-opus-5-5"
+    assert result.context_window == 1000000
+
+
+def test_model_falls_back_to_the_usage_key_without_its_suffix():
+    output = _stream(_result_record("ok", "s1", modelUsage={
+        "claude-sonnet-5-5[1m]": {"contextWindow": 1000000},
+    }))
+    with patch("subprocess.Popen", return_value=_mock_popen(stdout=output)):
+        assert run_agent(CLAUDE, "go").model == "claude-sonnet-5-5"
+
+
+def test_picker_labels_the_default_without_its_suffix():
+    from yuki_conductor.harness.claude_code import ClaudeCodeHarness
+
+    assert ClaudeCodeHarness().default_label() == "opus"

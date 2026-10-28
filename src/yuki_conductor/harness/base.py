@@ -39,6 +39,9 @@ class RunResult:
     # big that window is. Both None when the harness reported neither.
     context_tokens: int | None = None
     context_window: int | None = None
+    # The exact model that answered (e.g. `claude-opus-5-5`, `gpt-6.1-sol`),
+    # as the harness reports it, not the alias that was asked for.
+    model: str | None = None
     # The resumed session no longer exists (the harness said so). The caller
     # can retry with a fresh session that carries the history in the prompt.
     session_missing: bool = False
@@ -112,6 +115,10 @@ class Harness(Protocol):
 
     def default_model(self) -> str | None:
         """The model a turn gets when none is picked, if known."""
+        ...
+
+    def default_label(self) -> str | None:
+        """How the picker names the default, e.g. "opus" for `opus[1m]`."""
         ...
 
 

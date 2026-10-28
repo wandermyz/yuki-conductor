@@ -24,6 +24,8 @@ export interface HarnessInfo {
   available: boolean;
   /** What a turn runs on when the conversation picks none, if known. */
   default_model: string | null;
+  /** How the picker names the default ("opus", "sol"). */
+  default_label: string | null;
   /** Models a conversation may pick; empty: no choice offered. */
   models: ModelOption[];
 }
@@ -54,6 +56,8 @@ export interface ChatMessage {
    *  before the server confirms. */
   context_tokens?: number | null;
   context_window?: number | null;
+  /** The exact model that answered (e.g. `claude-opus-5-5`), if reported. */
+  model?: string | null;
   /** Client-only delivery state for optimistic user messages. Absent on
    *  server-confirmed messages (treated as delivered). */
   status?: "sending" | "failed";

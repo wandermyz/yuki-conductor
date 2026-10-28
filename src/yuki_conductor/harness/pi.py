@@ -288,8 +288,11 @@ class PiStreamParser:
         )
         if stop == "length":
             text = (text + "\n\n" if text else "") + "(reply cut off: the model hit its output limit)"
+        # A virtual model routes to a physical `responseModel`: that one answered.
+        model = msg.get("responseModel") or msg.get("model")
         return RunResult(
-            text=text or "(empty response)", session_id=session_id, **usage, **context
+            text=text or "(empty response)", session_id=session_id, **usage, **context,
+            model=model if isinstance(model, str) else None,
         )
 
 
@@ -350,4 +353,7 @@ class PiHarness:
         return []
 
     def default_model(self) -> str | None:
+        return PI_DEFAULT_MODEL
+
+    def default_label(self) -> str | None:
         return PI_DEFAULT_MODEL

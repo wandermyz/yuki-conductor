@@ -249,6 +249,7 @@ def test_context_is_the_last_request_not_the_run_total(tmp_path, monkeypatch):
     # cache — not the 4955 both calls together carried.
     assert result.context_tokens == 17 + 2495
     assert result.context_window == 131072
+    assert result.model == "qwen3.8-flash-next-iq2_xs"
 
 
 def test_context_window_is_unknown_without_a_catalog(tmp_path, monkeypatch):

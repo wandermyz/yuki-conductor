@@ -611,6 +611,11 @@ function MessageBubble({
       )}
       <div className="bubble-time">
         {formatTime(msg.created_at)}
+        {msg.role === "assistant" && msg.model && (
+          <span className="bubble-model" title="Model that answered">
+            {msg.model}
+          </span>
+        )}
         {use && (
           <span
             className={`bubble-ctx ctx-${contextLevel(contextPct(use))}`}
@@ -663,8 +668,7 @@ function ModelPicker({
   const options: ModelOption[] = [...harness.models];
   // A model picked earlier that the harness no longer lists stays selectable.
   if (model && !options.some((o) => o.id === model)) options.unshift({ id: model, label: model });
-  const fallback = harness.default_model;
-  const fallbackLabel = options.find((o) => o.id === fallback)?.label ?? fallback;
+  const fallbackLabel = harness.default_label ?? harness.default_model;
   return (
     <select
       className="chat-model-picker"
@@ -978,8 +982,8 @@ function ChatThread({
           ←
         </button>
         <h2 className="chat-thread-title">{conv.title || "New chat"}</h2>
-        <HarnessMarker name={conv.harness} />
         <ModelPicker harness={harness} model={conv.model} onChange={onSetModel} />
+        <HarnessMarker name={conv.harness} />
         <div className="menu-anchor">
           <button
             className="chat-list-menu-btn"

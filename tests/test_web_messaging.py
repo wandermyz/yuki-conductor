@@ -76,7 +76,7 @@ def test_reply_reports_context_occupation(client, monkeypatch):
     fake = RunResult(
         text="done", session_id="claude-1",
         input_tokens=50000, output_tokens=300,
-        context_tokens=40000, context_window=200000,
+        context_tokens=40000, context_window=200000, model="claude-opus-5-5",
     )
     monkeypatch.setattr(
         "yuki_conductor.messaging.conversation.run_agent", lambda *a, **k: fake
@@ -95,7 +95,8 @@ def test_reply_reports_context_occupation(client, monkeypatch):
     msgs = client.get(f"/api/conversations/{conv['id']}/messages").json()
     user, assistant = msgs[0], msgs[1]
     assert (assistant["context_tokens"], assistant["context_window"]) == (40000, 200000)
-    assert (user["context_tokens"], user["context_window"]) == (None, None)
+    assert assistant["model"] == "claude-opus-5-5"
+    assert (user["context_tokens"], user["context_window"], user["model"]) == (None, None, None)
 
 
 def test_upload_and_download_roundtrip(client):
@@ -384,9 +385,11 @@ def test_harnesses_list_their_models(client):
     harnesses = client.get("/api/harnesses").json()["harnesses"]
     [claude] = [h for h in harnesses if h["name"] == "claude-code"]
     [codex] = [h for h in harnesses if h["name"] == "codex"]
-    assert claude["default_model"]
+    assert claude["default_label"] == "opus"
+    assert codex["default_label"] == "sol"
     assert {"id": "sonnet", "label": "sonnet"} in claude["models"]
     assert {"id": "opus", "label": "opus"} in claude["models"]
     assert codex["default_model"] == "gpt-6.1-sol"
     assert {"id": "gpt-6-astra", "label": "astra"} in codex["models"]
     assert {"id": "gpt-6.1-sol", "label": "sol"} in codex["models"]
+

@@ -37,6 +37,7 @@ class StoredMessage:
     # was at the end of the turn that produced it, and how big that window is.
     context_tokens: int | None = None
     context_window: int | None = None
+    model: str | None = None  # the exact model that answered
 
 
 @dataclass
@@ -127,6 +128,7 @@ class ConversationStore:
                         cost_usd REAL,
                         context_tokens INTEGER,
                         context_window INTEGER,
+                        model TEXT,
                         created_at REAL NOT NULL
                     )
                     """
@@ -160,6 +162,8 @@ class ConversationStore:
                 for name in ("context_tokens", "context_window"):
                     if name not in usage_cols:
                         con.execute(f"ALTER TABLE message_usage ADD COLUMN {name} INTEGER")
+                if "model" not in usage_cols:
+                    con.execute("ALTER TABLE message_usage ADD COLUMN model TEXT")
                 con.commit()
             finally:
                 con.close()
@@ -411,7 +415,7 @@ class ConversationStore:
         # Usage lives in its own table, so left join it to keep user messages.
         select = (
             "SELECT m.id, m.conversation_id, m.role, m.text, m.attachments_json, m.created_at, "
-            "u.context_tokens, u.context_window "
+            "u.context_tokens, u.context_window, u.model "
             "FROM messages m LEFT JOIN message_usage u ON u.message_id = m.id "
             "WHERE m.conversation_id = ?"
         )
@@ -470,13 +474,15 @@ class ConversationStore:
         cost_usd: float | None = None,
         context_tokens: int | None = None,
         context_window: int | None = None,
+        model: str | None = None,
     ) -> None:
-        """Record token usage and/or cost for an assistant message."""
+        """Record token usage, cost and the answering model for an assistant message."""
         if (
             input_tokens is None
             and output_tokens is None
             and cost_usd is None
             and context_tokens is None
+            and model is None
         ):
             return
         with self._lock:
@@ -485,11 +491,11 @@ class ConversationStore:
                 con.execute(
                     "INSERT OR REPLACE INTO message_usage "
                     "(message_id, conversation_id, input_tokens, output_tokens, cost_usd, "
-                    "context_tokens, context_window, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "context_tokens, context_window, model, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         message_id, conversation_id, input_tokens, output_tokens, cost_usd,
-                        context_tokens, context_window, time.time(),
+                        context_tokens, context_window, model, time.time(),
                     ),
                 )
                 con.commit()
@@ -726,4 +732,5 @@ def _row_to_message(r: tuple) -> StoredMessage:
         # Only `list_messages` joins the usage table.
         context_tokens=r[6] if len(r) > 6 else None,
         context_window=r[7] if len(r) > 7 else None,
+        model=r[8] if len(r) > 8 else None,
     )

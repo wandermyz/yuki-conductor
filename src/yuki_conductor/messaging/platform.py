@@ -46,6 +46,7 @@ class OutgoingMessage:
     # How full the model's context was at the end of the turn, and its window.
     context_tokens: int | None = None
     context_window: int | None = None
+    model: str | None = None  # the exact model that answered
     # Sent out-of-band via `/api/push` rather than as the reply to a turn.
     pushed: bool = False
 

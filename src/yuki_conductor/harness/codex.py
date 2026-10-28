@@ -168,36 +168,46 @@ def _error_message(raw) -> str:
     return text
 
 
-def rollout_context(session_id: str | None) -> tuple[int | None, int | None]:
-    """The last call's prompt tokens and the context window, from the rollout.
+def rollout_context(session_id: str | None) -> tuple[int | None, int | None, str | None]:
+    """The last call's prompt tokens, the context window and the model, from the rollout.
 
-    `codex exec --json` reports only the turn's summed usage. The session's
-    rollout file logs a `token_count` event after each call with that call's
-    usage (`last_token_usage`) and the model's window.
+    `codex exec --json` reports only the turn's summed usage and never names
+    the model. The session's rollout file logs a `token_count` event after
+    each call with that call's usage (`last_token_usage`) and the model's
+    window, and a `turn_context` per turn naming the model it ran on.
     """
     path = _rollout_path(session_id) if session_id else None
     if path is None:
-        return None, None
+        return None, None, None
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
-        return None, None
+        return None, None, None
+    tokens = window = model = None
+    seen_usage = False
     for line in reversed(lines):
-        if '"token_count"' not in line:
-            continue
-        try:
-            info = (json.loads(line).get("payload") or {}).get("info")
-        except (json.JSONDecodeError, AttributeError):
-            continue
-        if not isinstance(info, dict):
-            continue
-        last = info.get("last_token_usage")
-        window = info.get("model_context_window")
-        return (
-            prompt_tokens(last if isinstance(last, dict) else {}, _CODEX_PROMPT_KEYS),
-            window if isinstance(window, int) else None,
-        )
-    return None, None
+        if not seen_usage and '"token_count"' in line:
+            info = _payload(line).get("info")
+            if isinstance(info, dict):
+                last = info.get("last_token_usage")
+                tokens = prompt_tokens(last if isinstance(last, dict) else {}, _CODEX_PROMPT_KEYS)
+                size = info.get("model_context_window")
+                window = size if isinstance(size, int) else None
+                seen_usage = True
+        elif model is None and '"turn_context"' in line:
+            name = _payload(line).get("model")
+            model = name if isinstance(name, str) and name else None
+        if seen_usage and model is not None:
+            break
+    return tokens, window, model
+
+
+def _payload(line: str) -> dict:
+    try:
+        payload = json.loads(line).get("payload")
+    except (json.JSONDecodeError, AttributeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _rollout_path(session_id: str) -> Path | None:
@@ -272,13 +282,13 @@ class CodexStreamParser:
         if self._usage is None:
             text = self._error or raw_stdout.strip() or "Codex produced no response"
             return RunResult(text=text, session_id=session_id, is_error=True, **tokens)
-        context_tokens, context_window = rollout_context(session_id)
+        context_tokens, context_window, model = rollout_context(session_id)
         # Codex narrates as it goes ("I'll run …"), each its own message; the
         # last one is the answer.
         text = self._messages[-1] if self._messages else "(empty response)"
         return RunResult(
             text=text, session_id=session_id, **tokens,
-            context_tokens=context_tokens, context_window=context_window,
+            context_tokens=context_tokens, context_window=context_window, model=model,
         )
 
 
@@ -329,3 +339,8 @@ class CodexHarness:
 
     def default_model(self) -> str | None:
         return CODEX_DEFAULT_MODEL or MODEL_ALIASES["default"]
+
+    def default_label(self) -> str | None:
+        default = self.default_model()
+        names = [name for name, slug in MODEL_ALIASES.items() if slug == default and name != "default"]
+        return names[0] if names else default

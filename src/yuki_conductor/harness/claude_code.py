@@ -190,6 +190,21 @@ def _model_context_window(model_usage, model: str | None) -> int | None:
     return max(windows.values())
 
 
+def _resolved_model(model_usage, model: str | None) -> str | None:
+    """The canonical model id behind the alias that answered.
+
+    `modelUsage` is keyed by the requested model (`claude-opus-5-5[1m]`) and
+    carries `canonicalModel` (`claude-opus-5-5`); fall back to the key itself,
+    minus a `[...]` suffix, when an older CLI doesn't report it.
+    """
+    if not isinstance(model_usage, dict) or not model_usage:
+        return None
+    key = model if model in model_usage else next(iter(model_usage))
+    entry = model_usage.get(key)
+    canonical = entry.get("canonicalModel") if isinstance(entry, dict) else None
+    return canonical if isinstance(canonical, str) and canonical else key.split("[", 1)[0]
+
+
 def build_result(
     final: dict | None,
     raw_stdout: str,
@@ -232,6 +247,7 @@ def build_result(
         context_window=_model_context_window(
             final.get("modelUsage"), (last_assistant or {}).get("model")
         ),
+        model=_resolved_model(final.get("modelUsage"), (last_assistant or {}).get("model")),
     )
 
 
@@ -360,3 +376,8 @@ class ClaudeCodeHarness:
 
     def default_model(self) -> str | None:
         return MODEL_ALIASES["default"]
+
+    def default_label(self) -> str | None:
+        # CLAUDE_DEFAULT_MODEL is opus[1m]; it and bare `opus` resolve to the
+        # same model and window, so the picker just says "opus".
+        return MODEL_ALIASES["default"].split("[", 1)[0]

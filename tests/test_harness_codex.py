@@ -189,11 +189,14 @@ def test_reasoning_and_file_changes_become_steps():
 # --------------------------------------------------------------------------
 
 
-def _rollout(home: Path, session_id: str, *infos) -> None:
+def _rollout(home: Path, session_id: str, *infos, model: str | None = None) -> None:
     day = home / "sessions" / "2026" / "10" / "27"
     day.mkdir(parents=True, exist_ok=True)
-    lines = [json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": info}})
-             for info in infos]
+    lines = []
+    if model:
+        lines.append(json.dumps({"type": "turn_context", "payload": {"model": model}}))
+    lines += [json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": info}})
+              for info in infos]
     (day / f"rollout-2026-10-27T17-00-00-{session_id}.jsonl").write_text("\n".join(lines) + "\n")
 
 
@@ -203,15 +206,18 @@ def test_context_is_the_last_call_from_the_rollout(codex_home):
         {"last_token_usage": {"input_tokens": 100}, "model_context_window": 258400},
         {"last_token_usage": {"input_tokens": 15210, "cached_input_tokens": 14600},
          "total_token_usage": {"input_tokens": 29590}, "model_context_window": 258400},
+        model="gpt-6.1-sol",
     )
     _, result = _parse("tool_turn")
     assert result.context_tokens == 15210
     assert result.context_window == 258400
+    assert result.model == "gpt-6.1-sol"
 
 
 def test_context_is_unknown_without_a_rollout():
     _, result = _parse("tool_turn")
     assert result.context_tokens is None and result.context_window is None
+    assert result.model is None
 
 
 # --------------------------------------------------------------------------
@@ -290,3 +296,9 @@ def test_codex_default_model_env_overrides_the_alias(codex_home, monkeypatch):
     assert CodexHarness().default_model() == "gpt-6-luna"
     argv = _launch().argv
     assert argv[argv.index("-m") + 1] == "gpt-6-luna"
+
+
+def test_picker_labels_the_default_by_its_alias(monkeypatch):
+    assert CodexHarness().default_label() == "sol"
+    monkeypatch.setattr(codex_mod, "CODEX_DEFAULT_MODEL", "gpt-6-luna")
+    assert CodexHarness().default_label() == "gpt-6-luna"

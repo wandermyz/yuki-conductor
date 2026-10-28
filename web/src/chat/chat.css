@@ -1202,6 +1202,13 @@
   .ctx-high { color: #f87171; }
 }
 
+.bubble-model {
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
 .bubble-ctx {
   font-family: var(--mono);
   font-size: 10px;

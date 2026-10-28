@@ -369,6 +369,7 @@ def create_api() -> FastAPI:
                     "label": h.label,
                     "available": shutil.which(h.bin) is not None,
                     "default_model": h.default_model(),
+                    "default_label": h.default_label(),
                     "models": [asdict(m) for m in h.models()],
                 }
                 for h in HARNESSES.values()
