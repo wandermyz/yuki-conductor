@@ -610,20 +610,28 @@ function MessageBubble({
         </div>
       )}
       <div className="bubble-time">
-        {formatTime(msg.created_at)}
-        {msg.role === "assistant" && msg.model && (
-          <span className="bubble-model" title="Model that answered">
-            {msg.model}
-          </span>
-        )}
-        {use && (
-          <span
-            className={`bubble-ctx ctx-${contextLevel(contextPct(use))}`}
-            title={contextTitle(use)}
-          >
-            {formatTokens(use.tokens)}/{formatTokens(use.window)} ({contextPct(use)}%)
-          </span>
-        )}
+        {/* Date on one line, model and context under it, so neither wraps
+            mid-phrase beside the action buttons on a phone. */}
+        <span className="bubble-meta">
+          <span className="bubble-date">{formatTime(msg.created_at)}</span>
+          {((msg.role === "assistant" && msg.model) || use) && (
+            <span className="bubble-usage">
+              {msg.role === "assistant" && msg.model && (
+                <span className="bubble-model" title="Model that answered">
+                  {msg.model}
+                </span>
+              )}
+              {use && (
+                <span
+                  className={`bubble-ctx ctx-${contextLevel(contextPct(use))}`}
+                  title={contextTitle(use)}
+                >
+                  {formatTokens(use.tokens)}/{formatTokens(use.window)} ({contextPct(use)}%)
+                </span>
+              )}
+            </span>
+          )}
+        </span>
         {msg.text && (
           <MessageActions
             text={msg.text}

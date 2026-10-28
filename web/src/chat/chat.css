@@ -760,6 +760,25 @@
   gap: 8px;
 }
 
+/* Date over model + context, right-aligned, beside the action buttons. */
+.bubble-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bubble-date,
+.bubble-usage {
+  white-space: nowrap;
+}
+
+.bubble-usage {
+  display: flex;
+  gap: 8px;
+}
+
 /* Transparent to layout, so the date and both buttons share one flex gap. */
 .bubble-actions {
   display: contents;
