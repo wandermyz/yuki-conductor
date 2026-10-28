@@ -1,3 +1,4 @@
+import { ModelPicker } from "./shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -28,7 +29,6 @@ import type {
   ConversationUsage,
   ConvStatus,
   HarnessInfo,
-  ModelOption,
   Project,
   SearchHit,
   StreamStep,
@@ -658,40 +658,6 @@ function MessageBubble({
         )}
       </div>
     </div>
-  );
-}
-
-/** Picks the model a conversation's next turns run on. Hidden when the
- * harness offers no choice. Empty value: the harness's default. */
-function ModelPicker({
-  harness,
-  model,
-  onChange,
-}: {
-  harness: HarnessInfo | undefined;
-  model: string | null;
-  onChange: (model: string | null) => void;
-}) {
-  if (!harness || harness.models.length === 0) return null;
-  const options: ModelOption[] = [...harness.models];
-  // A model picked earlier that the harness no longer lists stays selectable.
-  if (model && !options.some((o) => o.id === model)) options.unshift({ id: model, label: model });
-  const fallbackLabel = harness.default_label ?? harness.default_model;
-  return (
-    <select
-      className="chat-model-picker"
-      value={model ?? ""}
-      onChange={(e) => onChange(e.target.value || null)}
-      title="Model for the next message"
-      aria-label="Model"
-    >
-      <option value="">{fallbackLabel ? `Default (${fallbackLabel})` : "Default"}</option>
-      {options.map((o) => (
-        <option key={o.id} value={o.id}>
-          {o.label}
-        </option>
-      ))}
-    </select>
   );
 }
 

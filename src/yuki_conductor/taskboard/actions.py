@@ -65,6 +65,7 @@ def create(
     title: str,
     project: str,
     harness: str | None = None,
+    model: str | None = None,
     use_worktree: bool = True,
     body: str = "",
     attachments: list[str] | None = None,
@@ -80,6 +81,7 @@ def create(
         title=title,
         project=project,
         harness=harness,
+        model=model,
         use_worktree=use_worktree,
         body=body,
         attachments=attachments,
@@ -100,6 +102,8 @@ def edit(task_id: int, **fields) -> Task:
         _check_project(fields["project"])
     if "harness" in fields:
         _check_harness(fields["harness"])
+    if fields.get("harness", task.harness) != task.harness and "model" not in fields:
+        fields["model"] = None
     if fields and not taskboard.store.edit_if_untouched(task_id, **fields):
         raise BoardError(409, "The task was picked up before the edit could be saved")
     _changed(task_id)

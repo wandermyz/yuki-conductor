@@ -1,7 +1,7 @@
 /** Pieces the chat and the taskboard both draw. */
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import type { HarnessInfo, Project, StreamStep } from "./api";
+import type { HarnessInfo, ModelOption, Project, StreamStep } from "./api";
 import { HARNESS_ICONS } from "./harnessIcons";
 
 export function HarnessIcon({ name }: { name: string | null }) {
@@ -177,5 +177,41 @@ export function StepList({
       })}
       {running && <div className="responding-shimmer">{agent} is responding…</div>}
     </div>
+  );
+}
+
+/** Picks the model a conversation's next turns run on. Hidden when the
+ * harness offers no choice. Empty value: the harness's default. */
+export function ModelPicker({
+  harness,
+  model,
+  onChange,
+  title = "Model for the next message",
+}: {
+  title?: string;
+  harness: HarnessInfo | undefined;
+  model: string | null;
+  onChange: (model: string | null) => void;
+}) {
+  if (!harness || harness.models.length === 0) return null;
+  const options: ModelOption[] = [...harness.models];
+  // A model picked earlier that the harness no longer lists stays selectable.
+  if (model && !options.some((o) => o.id === model)) options.unshift({ id: model, label: model });
+  const fallbackLabel = harness.default_label ?? harness.default_model;
+  return (
+    <select
+      className="chat-model-picker"
+      value={model ?? ""}
+      onChange={(e) => onChange(e.target.value || null)}
+      title={title}
+      aria-label="Model"
+    >
+      <option value="">{fallbackLabel ? `Default (${fallbackLabel})` : "Default"}</option>
+      {options.map((o) => (
+        <option key={o.id} value={o.id}>
+          {o.label}
+        </option>
+      ))}
+    </select>
   );
 }

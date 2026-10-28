@@ -32,6 +32,7 @@ export interface Task {
   attachments: TaskAttachment[];
   project: string;
   harness: string;
+  model: string | null;
   harness_enabled: boolean;
   use_worktree: boolean;
   status: TaskStatus;
@@ -82,6 +83,7 @@ export interface TaskInput {
   title: string;
   project: string;
   harness: string;
+  model: string | null;
   use_worktree: boolean;
   body: string;
 }

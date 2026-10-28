@@ -145,6 +145,7 @@ def _run(task: Task, cwd: str) -> _Turn:
             harness,
             prompt,
             session_id=session_id,
+            model=task.model,
             conversation_key=live.steps_key(task.id),
             cwd=cwd,
             task_id=task.id,

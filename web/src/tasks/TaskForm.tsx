@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { uploadFile } from "../chat/api";
 import type { AttachmentRef, HarnessInfo, Project } from "../chat/api";
-import { HarnessIcon, NewSessionPicker } from "../chat/shared";
+import { HarnessIcon, ModelPicker, NewSessionPicker } from "../chat/shared";
 import Markdown from "../Markdown";
 import { imageMarkers, insertAt, pastedFiles, withoutMarker } from "../paste";
 import { createTask, editTask } from "./api";
@@ -37,6 +37,7 @@ export default function TaskForm({
         project: task?.project ?? picked?.project ?? "",
         // Empty means the server's default harness.
         harness: task?.harness ?? picked?.harness ?? "",
+        model: task?.model ?? null,
         use_worktree: task?.use_worktree ?? true,
       },
   );
@@ -117,6 +118,13 @@ export default function TaskForm({
             <span className="task-form-repick-hint">Change</span>
           </button>
         </h3>
+
+        <ModelPicker
+          harness={harnesses.find((h) => h.name === input.harness) ?? (!input.harness ? harnesses[0] : undefined)}
+          model={input.model ?? null}
+          onChange={(model) => set("model", model)}
+          title="Model for this task"
+        />
 
         <input
           className="task-form-title"
@@ -204,7 +212,7 @@ export default function TaskForm({
           allowNoProject={false}
           onPick={(harness, project) => {
             // `harness` is null only without a harness list: keep the current one.
-            setInput((cur) => ({ ...cur, harness: harness ?? cur.harness, project: project ?? cur.project }));
+            setInput((cur) => ({ ...cur, harness: harness ?? cur.harness, model: harness && harness !== cur.harness ? null : cur.model, project: project ?? cur.project }));
             setPicking(false);
           }}
           onCancel={() => setPicking(false)}

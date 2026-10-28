@@ -442,3 +442,14 @@ def test_refresh_one_pr(client, monkeypatch):
     monkeypatch.setattr(pr_watcher, "pr_state", fail)
     r = client.post(f"/api/tasks/{task['id']}/pr-refresh")
     assert r.status_code == 502 and "offline" in r.json()["detail"]
+
+
+def test_task_model_roundtrip_and_edit(client):
+    task = _create(client, model="opus")
+    url = f"/api/tasks/{task['id']}"
+    assert task["model"] == "opus"
+    assert client.get(url).json()["model"] == "opus"
+    assert client.patch(url, json={"model": "sonnet"}).json()["model"] == "sonnet"
+    assert client.patch(url, json={"model": None}).json()["model"] is None
+    client.patch(url, json={"model": "opus"})
+    assert client.patch(url, json={"harness": "pi"}).json()["model"] is None
