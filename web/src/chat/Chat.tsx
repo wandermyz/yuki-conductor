@@ -217,15 +217,6 @@ function contextOf(msg: ChatMessage): ContextUse | null {
   return { tokens, window };
 }
 
-/** The newest turn that reported one: what the conversation is carrying now. */
-function latestContext(messages: ChatMessage[]): ContextUse | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const use = contextOf(messages[i]);
-    if (use) return use;
-  }
-  return null;
-}
-
 function contextPct(use: ContextUse): number {
   return Math.min(100, Math.round((use.tokens / use.window) * 100));
 }
@@ -240,24 +231,6 @@ function contextTitle(use: ContextUse): string {
 /** Colour says what the number is for: room left, nearly full, or full. */
 function contextLevel(pct: number): string {
   return pct >= 85 ? "high" : pct >= 60 ? "mid" : "low";
-}
-
-function ContextMeter({ use }: { use: ContextUse }) {
-  const pct = contextPct(use);
-  return (
-    <span
-      className={`ctx-meter ctx-${contextLevel(pct)}`}
-      title={contextTitle(use)}
-    >
-      <span className="ctx-bar" aria-hidden="true">
-        <span className="ctx-fill" style={{ width: `${Math.max(3, pct)}%` }} />
-      </span>
-      <span className="ctx-text">
-        {formatTokens(use.tokens)} / {formatTokens(use.window)}
-        <span className="ctx-pct">{pct}%</span>
-      </span>
-    </span>
-  );
 }
 
 function getStatus(statuses: Record<string, ConvStatus>, id: string): ConvStatus {
@@ -959,7 +932,6 @@ function ChatThread({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
-  const contextUse = latestContext(messages);
 
   // Steps belong to the turn that produced the last assistant message, so once
   // the run finishes that message renders below the trace rather than above it.
@@ -1008,7 +980,6 @@ function ChatThread({
         <h2 className="chat-thread-title">{conv.title || "New chat"}</h2>
         <HarnessMarker name={conv.harness} />
         <ModelPicker harness={harness} model={conv.model} onChange={onSetModel} />
-        {contextUse && <ContextMeter use={contextUse} />}
         <div className="menu-anchor">
           <button
             className="chat-list-menu-btn"

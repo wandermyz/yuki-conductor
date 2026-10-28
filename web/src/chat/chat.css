@@ -1189,41 +1189,6 @@
 
 /* ---- Context window occupation ---- */
 
-/* How full the model's context was at the end of the last reported turn. */
-.ctx-meter {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  font-size: 11px;
-  line-height: 1;
-}
-
-.ctx-bar {
-  display: inline-block;
-  width: 52px;
-  height: 5px;
-  border-radius: 3px;
-  background: var(--border);
-  overflow: hidden;
-}
-
-.ctx-fill {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-}
-
-.ctx-text {
-  font-family: var(--mono);
-  white-space: nowrap;
-}
-
-.ctx-pct {
-  margin-left: 4px;
-  opacity: 0.65;
-}
-
 /* The bar colour is the point; the numbers are just the read-out. */
 .ctx-low .ctx-fill { background: var(--accent); }
 .ctx-mid .ctx-fill { background: #d97706; }
@@ -1271,10 +1236,5 @@
   .bubble {
     max-width: 90%;
     font-size: 15px;
-  }
-
-  /* The bar alone still says "nearly full" without stealing header width. */
-  .chat-thread-header .ctx-text {
-    display: none;
   }
 }
