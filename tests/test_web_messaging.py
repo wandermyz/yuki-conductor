@@ -351,3 +351,36 @@ def test_chat_ws_answers_ping_with_pong(client):
     with client.websocket_connect("/ws/chat") as ws:
         ws.send_text("ping")
         assert ws.receive_json() == {"type": "pong"}
+
+
+def test_model_is_picked_per_conversation_and_used_for_its_turns(client, monkeypatch):
+    from yuki_conductor.harness.base import RunResult
+
+    conv = client.post("/api/conversations", json={"title": "m"}).json()
+    assert conv["model"] is None
+    r = client.patch(f"/api/conversations/{conv['id']}", json={"model": "sonnet"})
+    assert r.status_code == 200 and r.json()["model"] == "sonnet"
+    assert r.json()["title"] == "m"  # untouched
+
+    seen = []
+    monkeypatch.setattr(
+        "yuki_conductor.messaging.conversation.run_agent",
+        lambda harness, prompt, **kw: seen.append(kw["model"]) or RunResult(text="ok", session_id="s"),
+    )
+    client.post(f"/api/conversations/{conv['id']}/messages", json={"text": "hi"})
+    deadline = time.time() + 5
+    while not seen and time.time() < deadline:
+        time.sleep(0.05)
+    assert seen == ["sonnet"]
+
+    # A rename leaves the model alone; null returns to the harness default.
+    client.patch(f"/api/conversations/{conv['id']}", json={"title": "renamed"})
+    assert client.get(f"/api/conversations/{conv['id']}").json()["model"] == "sonnet"
+    client.patch(f"/api/conversations/{conv['id']}", json={"model": None})
+    assert client.get(f"/api/conversations/{conv['id']}").json()["model"] is None
+
+
+def test_harnesses_list_their_models(client):
+    [claude] = [h for h in client.get("/api/harnesses").json()["harnesses"] if h["name"] == "claude-code"]
+    assert claude["default_model"] == claude["models"][0]["id"]
+    assert {"id": "sonnet", "label": "sonnet"} in claude["models"]

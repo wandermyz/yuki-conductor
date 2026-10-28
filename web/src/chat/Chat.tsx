@@ -28,6 +28,7 @@ import type {
   ConversationUsage,
   ConvStatus,
   HarnessInfo,
+  ModelOption,
   Project,
   SearchHit,
   StreamStep,
@@ -674,6 +675,41 @@ function MessageBubble({
   );
 }
 
+/** Picks the model a conversation's next turns run on. Hidden when the
+ * harness offers no choice. Empty value: the harness's default. */
+function ModelPicker({
+  harness,
+  model,
+  onChange,
+}: {
+  harness: HarnessInfo | undefined;
+  model: string | null;
+  onChange: (model: string | null) => void;
+}) {
+  if (!harness || harness.models.length === 0) return null;
+  const options: ModelOption[] = [...harness.models];
+  // A model picked earlier that the harness no longer lists stays selectable.
+  if (model && !options.some((o) => o.id === model)) options.unshift({ id: model, label: model });
+  const fallback = harness.default_model;
+  const fallbackLabel = options.find((o) => o.id === fallback)?.label ?? fallback;
+  return (
+    <select
+      className="chat-model-picker"
+      value={model ?? ""}
+      onChange={(e) => onChange(e.target.value || null)}
+      title="Model for the next message"
+      aria-label="Model"
+    >
+      <option value="">{fallbackLabel ? `Default (${fallbackLabel})` : "Default"}</option>
+      {options.map((o) => (
+        <option key={o.id} value={o.id}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 /* ---------- Live step stream ---------- */
 
 /** What the UI calls the agent behind a conversation. */
@@ -886,6 +922,7 @@ function SearchResults({
 
 function ChatThread({
   conv,
+  harness,
   messages,
   processing,
   steps,
@@ -900,8 +937,10 @@ function ChatThread({
   onSetStatus,
   onArchive,
   onDelete,
+  onSetModel,
 }: {
   conv: Conversation;
+  harness: HarnessInfo | undefined;
   messages: ChatMessage[];
   processing: boolean;
   steps: StreamStep[];
@@ -916,6 +955,7 @@ function ChatThread({
   onSetStatus: (s: ConvStatus) => void;
   onArchive: () => void;
   onDelete: () => void;
+  onSetModel: (model: string | null) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
@@ -967,6 +1007,7 @@ function ChatThread({
         </button>
         <h2 className="chat-thread-title">{conv.title || "New chat"}</h2>
         <HarnessMarker name={conv.harness} />
+        <ModelPicker harness={harness} model={conv.model} onChange={onSetModel} />
         {contextUse && <ContextMeter use={contextUse} />}
         <div className="menu-anchor">
           <button
@@ -1293,6 +1334,20 @@ export default function Chat({
     }
   };
 
+  const setModel = async (id: string, model: string | null) => {
+    // Optimistic, like rename: the picker shows the choice at once.
+    const prevModel = conversations.find((c) => c.id === id)?.model ?? null;
+    setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, model } : c)));
+    try {
+      await updateConversation(id, { model });
+    } catch (e) {
+      console.error(e);
+      setConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, model: prevModel } : c)),
+      );
+    }
+  };
+
   const handleSend = async (convId: string, text: string, files: AttachmentRef[]) => {
     // Optimistically render the message immediately so nothing typed is lost,
     // even if the network request fails. A temp id lets us update/dedupe later.
@@ -1522,6 +1577,7 @@ export default function Chat({
           <ChatThread
             key={active.id}
             conv={active}
+            harness={harnesses.find((h) => h.name === active.harness)}
             messages={messagesByConv[active.id] || []}
             processing={processingConvs.has(active.id)}
             steps={stepsByConv[active.id] || []}
@@ -1536,6 +1592,7 @@ export default function Chat({
             onSetStatus={(s) => setStatus(active.id, s)}
             onArchive={() => archive(active.id)}
             onDelete={() => remove(active.id)}
+            onSetModel={(model) => setModel(active.id, model)}
           />
         ) : (
           <div className="chat-placeholder">

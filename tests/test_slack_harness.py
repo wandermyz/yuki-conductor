@@ -113,6 +113,17 @@ def test_reply_keeps_its_threads_harness_after_the_channel_changes(app, monkeypa
     assert slack_app.store.get_harness("1.0") == "pi"
 
 
+def test_channel_model_pin_only_reaches_claude_threads(app, monkeypatch):
+    """The pin is a Claude alias; pi would get `--model opus`, a name it doesn't know."""
+    slack_app.model_store = MagicMock(get=lambda c: "opus", list_all=lambda: [])
+    assert _post(app, monkeypatch).model == "opus"
+    slack_app.harness_store.set("C1", "pi")
+    assert _post(app, monkeypatch, ts="2.0").model is None
+    # A reply follows its thread's harness, not the channel's current one.
+    slack_app.store.set("3.0", "sess-3", channel_id="C1", harness="claude-code")
+    assert _post(app, monkeypatch, ts="4.0", thread_ts="3.0").model == "opus"
+
+
 # --------------------------------------------------------------------------
 # SLACK_COMMAND_PREFIX
 # --------------------------------------------------------------------------

@@ -59,6 +59,14 @@ class RunRequest:
 
 
 @dataclass
+class ModelOption:
+    """A model the web picker offers for a harness."""
+
+    id: str  # passed to the harness as RunRequest.model
+    label: str
+
+
+@dataclass
 class Launch:
     """A built command, plus temp files to remove once the run ends."""
 
@@ -96,6 +104,14 @@ class Harness(Protocol):
 
     def session_exists(self, session_id: str, cwd: str) -> bool:
         """Whether `session_id` can still be resumed from `cwd`."""
+        ...
+
+    def models(self) -> list[ModelOption]:
+        """Models a conversation may pick; empty when the harness offers no choice."""
+        ...
+
+    def default_model(self) -> str | None:
+        """The model a turn gets when none is picked, if known."""
         ...
 
 

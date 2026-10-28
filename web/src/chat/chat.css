@@ -1081,6 +1081,26 @@
   white-space: nowrap;
 }
 
+/* The model a conversation's next turns run on, beside its harness mark. */
+.chat-model-picker {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 180px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.chat-model-picker:hover {
+  color: var(--text-h);
+}
+
 /* ---- Harness choice in the new-chat picker ---- */
 
 /* ---- Project picker modal ---- */

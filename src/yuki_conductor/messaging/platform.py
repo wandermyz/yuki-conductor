@@ -27,6 +27,7 @@ class IncomingMessage:
     attachments: list[Attachment] = field(default_factory=list)
     is_thread_start: bool = False
     title_hint: str | None = None
+    # In the conversation's harness's own terms; None: its default model.
     model: str | None = None
     cwd: str | None = None
     # Harness for a *new* conversation; an existing one keeps its own.

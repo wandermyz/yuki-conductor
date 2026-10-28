@@ -17,6 +17,7 @@ from yuki_conductor.config import CLAUDE_BIN, CLAUDE_DEFAULT_MODEL
 from yuki_conductor.harness.base import (
     SUMMARY_LIMIT,
     Launch,
+    ModelOption,
     RunRequest,
     RunResult,
     StreamEvent,
@@ -26,6 +27,7 @@ from yuki_conductor.harness.base import (
     truncate,
 )
 from yuki_conductor.skills import skill_plugin_dirs, system_prompt
+from yuki_conductor.store import MODEL_ALIASES
 
 # ---------------------------------------------------------------------------
 # stream-json parsing
@@ -341,3 +343,14 @@ class ClaudeCodeHarness:
         config = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
         project = re.sub(r"[^A-Za-z0-9]", "-", str(Path(cwd).resolve()))
         return (config / "projects" / project / f"{session_id}.jsonl").is_file()
+
+    def models(self) -> list[ModelOption]:
+        # The aliases Slack's /<prefix>-model offers, which are the ones the
+        # gateway is known to route (see MODEL_ALIASES).
+        return [
+            ModelOption(id=model, label=model)
+            for model in dict.fromkeys([CLAUDE_DEFAULT_MODEL, *MODEL_ALIASES.values()])
+        ]
+
+    def default_model(self) -> str | None:
+        return CLAUDE_DEFAULT_MODEL

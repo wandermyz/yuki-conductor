@@ -266,6 +266,9 @@ def create_app() -> App:
         platform = SlackPlatform(client=client, bot_token=slack_bot_token())
         if is_thread_start:
             platform.mark_harness(conversation_key, harness)
+        # The channel's pin is a Claude alias; other harnesses keep their own default.
+        if (harness or store.get_harness(conversation_key) or default_harness()) != "claude-code":
+            model = None
         msg = IncomingMessage(
             platform=SESSION_TYPE,
             conversation_key=conversation_key,

@@ -30,6 +30,7 @@ from yuki_conductor.config import PI_BIN, PI_DEFAULT_MODEL
 from yuki_conductor.harness.base import (
     SUMMARY_LIMIT,
     Launch,
+    ModelOption,
     RunRequest,
     RunResult,
     StreamEvent,
@@ -343,3 +344,10 @@ class PiHarness:
         if not root.is_dir():
             return False
         return any(root.rglob(f"*{session_id}*"))
+
+    def models(self) -> list[ModelOption]:
+        # pi runs one local model; there is nothing to pick between.
+        return []
+
+    def default_model(self) -> str | None:
+        return PI_DEFAULT_MODEL

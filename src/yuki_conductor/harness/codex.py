@@ -19,14 +19,18 @@ Shapes were checked against real runs; see tests/fixtures/harness/codex.
 """
 
 import json
+import logging
 import os
 import shutil
+import subprocess
+import tomllib
 from pathlib import Path
 
 from yuki_conductor.config import CODEX_BIN, CODEX_DEFAULT_MODEL
 from yuki_conductor.harness.base import (
     SUMMARY_LIMIT,
     Launch,
+    ModelOption,
     RunRequest,
     RunResult,
     StreamEvent,
@@ -35,6 +39,8 @@ from yuki_conductor.harness.base import (
     truncate,
 )
 from yuki_conductor.skills import codex_prompt, skill_plugin_dirs
+
+logger = logging.getLogger(__name__)
 
 # What `codex exec resume` says for an id it has no rollout for.
 MISSING_SESSION_MARKER = "no rollout found for thread id"
@@ -62,6 +68,40 @@ def resolve_bin(name: str) -> str:
     for exe in sorted(vendor.glob("@openai/codex-win32-*/vendor/*/bin/codex.exe")):
         return str(exe)
     return found
+
+
+def model_catalog(bin_path: str) -> list[ModelOption]:
+    """The models Codex itself lists, from `codex debug models`.
+
+    Codex keeps a catalog of the models it knows how to drive; entries marked
+    `hide` are internal and left out, as Codex's own picker does. It doesn't
+    know which ones the configured provider actually serves.
+    """
+    try:
+        proc = subprocess.run(
+            [bin_path, "debug", "models"], capture_output=True, text=True,
+            encoding="utf-8", stdin=subprocess.DEVNULL, timeout=15,
+        )
+        catalog = json.loads(proc.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        logger.warning("Couldn't read the Codex model catalog", exc_info=True)
+        return []
+    entries = catalog.get("models") if isinstance(catalog, dict) else None
+    return [
+        ModelOption(id=m["slug"], label=m.get("display_name") or m["slug"])
+        for m in entries or []
+        if isinstance(m, dict) and m.get("slug") and m.get("visibility") != "hide"
+    ]
+
+
+def configured_model() -> str | None:
+    """The `model` in Codex's config.toml: what a turn gets with no `-m`."""
+    try:
+        with open(_codex_home() / "config.toml", "rb") as handle:
+            model = tomllib.load(handle).get("model")
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    return model if isinstance(model, str) else None
 
 
 def _toml_string(text: str) -> str:
@@ -308,3 +348,15 @@ class CodexHarness:
 
     def session_exists(self, session_id: str, cwd: str) -> bool:
         return _rollout_path(session_id) is not None
+
+    def models(self) -> list[ModelOption]:
+        options = model_catalog(resolve_bin(self.bin))
+        # The configured model may be one the catalog doesn't list (a proxy's
+        # own alias); offer it anyway, since it's what turns run on.
+        default = self.default_model()
+        if default and all(o.id != default for o in options):
+            options.insert(0, ModelOption(id=default, label=default))
+        return options
+
+    def default_model(self) -> str | None:
+        return CODEX_DEFAULT_MODEL or configured_model()

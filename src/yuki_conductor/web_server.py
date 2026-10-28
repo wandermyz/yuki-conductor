@@ -320,11 +320,11 @@ def create_api() -> FastAPI:
     class ConversationUpdate(BaseModel):
         title: str | None = None
         project: str | None = None
+        model: str | None = None  # only when sent; null returns to the harness default
 
     class MessageCreate(BaseModel):
         text: str = ""
         attachment_ids: list[str] = []
-        model: str | None = None
 
     def _conv_to_dict(c) -> dict:
         return {
@@ -334,6 +334,7 @@ def create_api() -> FastAPI:
             "project": c.project,
             "claude_session_id": c.claude_session_id,
             "harness": c.harness,
+            "model": c.model,
             "created_at": c.created_at,
             "updated_at": c.updated_at,
         }
@@ -363,7 +364,13 @@ def create_api() -> FastAPI:
         return {
             "default": default_harness(),
             "harnesses": [
-                {"name": h.name, "label": h.label, "available": shutil.which(h.bin) is not None}
+                {
+                    "name": h.name,
+                    "label": h.label,
+                    "available": shutil.which(h.bin) is not None,
+                    "default_model": h.default_model(),
+                    "models": [asdict(m) for m in h.models()],
+                }
                 for h in HARNESSES.values()
             ],
         }
@@ -389,10 +396,13 @@ def create_api() -> FastAPI:
 
     @api.patch("/api/conversations/{conv_id}")
     def update_conversation(conv_id: str, body: ConversationUpdate):
-        if not conv_store.update_conversation(
-            conv_id, title=body.title, project=body.project
-        ):
+        if conv_store.get_conversation(conv_id) is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
+        # The next turn runs on the new model; a resumed session carries on with it.
+        if "model" in body.model_fields_set:
+            conv_store.set_model(conv_id, (body.model or "").strip() or None)
+        if body.title is not None or body.project is not None:
+            conv_store.update_conversation(conv_id, title=body.title, project=body.project)
         # Mirror title into the legacy session store so the Sessions tab matches.
         if body.title and store.get(conv_id) is not None:
             store.set_title(conv_id, body.title)
@@ -492,7 +502,7 @@ def create_api() -> FastAPI:
             attachments=incoming_attachments,
             is_thread_start=is_thread_start,
             title_hint=user_msg.text[:80] if is_thread_start else None,
-            model=body.model,
+            model=conv.model,
             cwd=msg_cwd,
         )
 

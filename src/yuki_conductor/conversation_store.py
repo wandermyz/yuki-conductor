@@ -50,6 +50,7 @@ class StoredConversation:
     updated_at: float
     harness: str = "claude-code"  # fixed when the conversation is created
     archived_at: float | None = None  # set: hidden from the web UI, only reachable via SQL
+    model: str | None = None  # harness-native model id; None: the harness's default
 
 
 # Wraps each matched term in a search snippet. Control characters, so they
@@ -94,7 +95,8 @@ class ConversationStore:
                         updated_at REAL NOT NULL,
                         status TEXT NOT NULL DEFAULT 'read',
                         harness TEXT NOT NULL DEFAULT 'claude-code',
-                        archived_at REAL
+                        archived_at REAL,
+                        model TEXT
                     )
                     """
                 )
@@ -149,6 +151,8 @@ class ConversationStore:
                     )
                 if "archived_at" not in cols:
                     con.execute("ALTER TABLE conversations ADD COLUMN archived_at REAL")
+                if "model" not in cols:
+                    con.execute("ALTER TABLE conversations ADD COLUMN model TEXT")
                 usage_cols = {
                     row[1]
                     for row in con.execute("PRAGMA table_info(message_usage)").fetchall()
@@ -207,7 +211,7 @@ class ConversationStore:
             try:
                 row = con.execute(
                     "SELECT id, platform, title, project, claude_session_id, "
-                    "created_at, updated_at, harness, archived_at FROM conversations WHERE id = ?",
+                    "created_at, updated_at, harness, archived_at, model FROM conversations WHERE id = ?",
                     (conv_id,),
                 ).fetchone()
                 if not row:
@@ -224,14 +228,14 @@ class ConversationStore:
                 if platform is not None:
                     rows = con.execute(
                         "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at, harness, archived_at FROM conversations "
+                        "created_at, updated_at, harness, archived_at, model FROM conversations "
                         "WHERE platform = ? AND archived_at IS NULL ORDER BY updated_at DESC",
                         (platform,),
                     ).fetchall()
                 else:
                     rows = con.execute(
                         "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at, harness, archived_at FROM conversations "
+                        "created_at, updated_at, harness, archived_at, model FROM conversations "
                         "WHERE archived_at IS NULL ORDER BY updated_at DESC"
                     ).fetchall()
                 return [StoredConversation(*r) for r in rows]
@@ -268,6 +272,22 @@ class ConversationStore:
                 cur = con.execute(
                     f"UPDATE conversations SET {', '.join(sets)} WHERE id = ?",
                     tuple(args),
+                )
+                con.commit()
+                return cur.rowcount > 0
+            finally:
+                con.close()
+
+    def set_model(self, conv_id: str, model: str | None) -> bool:
+        """Pick the model for the conversation's next turns; None: the default.
+
+        Leaves `updated_at` alone, so switching models doesn't reorder the list.
+        """
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    "UPDATE conversations SET model = ? WHERE id = ?", (model, conv_id)
                 )
                 con.commit()
                 return cur.rowcount > 0
