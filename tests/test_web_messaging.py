@@ -385,7 +385,7 @@ def test_harnesses_list_their_models(client):
     harnesses = client.get("/api/harnesses").json()["harnesses"]
     [claude] = [h for h in harnesses if h["name"] == "claude-code"]
     [codex] = [h for h in harnesses if h["name"] == "codex"]
-    assert claude["default_label"] == "opus"
+    assert claude["default_label"] == "sonnet"
     assert codex["default_label"] == "sol"
     assert {"id": "sonnet", "label": "sonnet"} in claude["models"]
     assert {"id": "opus", "label": "opus"} in claude["models"]

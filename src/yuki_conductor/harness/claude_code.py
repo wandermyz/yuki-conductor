@@ -380,6 +380,5 @@ class ClaudeCodeHarness:
         return MODEL_ALIASES["default"]
 
     def default_label(self) -> str | None:
-        # CLAUDE_DEFAULT_MODEL is opus[1m]; it and bare `opus` resolve to the
-        # same model and window, so the picker just says "opus".
+        # Hide the context-window suffix in the picker label.
         return MODEL_ALIASES["default"].split("[", 1)[0]

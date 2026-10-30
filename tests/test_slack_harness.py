@@ -123,7 +123,7 @@ def _model_cmd(app, text, channel="C1"):
 
 def test_model_command_uses_the_channels_harness_aliases(app):
     # Claude Code (the default harness here): its own aliases.
-    assert "default (opus)" in _model_cmd(app, "")
+    assert "default (sonnet)" in _model_cmd(app, "")
     assert "switched to *sonnet*" in _model_cmd(app, "sonnet")
     assert "Unknown model `astra`" in _model_cmd(app, "astra")
     # Switch the channel to Codex: astra / sol, and the Claude pin is untouched.

@@ -494,4 +494,4 @@ def test_model_falls_back_to_the_usage_key_without_its_suffix():
 def test_picker_labels_the_default_without_its_suffix():
     from yuki_conductor.harness.claude_code import ClaudeCodeHarness
 
-    assert ClaudeCodeHarness().default_label() == "opus"
+    assert ClaudeCodeHarness().default_label() == "sonnet"

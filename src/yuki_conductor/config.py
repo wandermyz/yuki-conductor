@@ -79,14 +79,9 @@ CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 
 # Model passed to `claude --model` when a conversation pins nothing.
 #
-# This must be passed explicitly rather than omitted. Omitting the flag lets the
-# CLI resolve its own default, which is `opus[1m]` on a fresh run — but on a
-# `-r` resume it rehydrates the model from the session record instead, and that
-# record stores the *canonical* id (`claude-opus-5`), which has no `[1m]`
-# context-window suffix. Since almost every turn after the first is a resume,
-# omitting the flag means only the first message of a conversation ever gets the
-# 1M window.
-CLAUDE_DEFAULT_MODEL = os.environ.get("CLAUDE_DEFAULT_MODEL", "opus[1m]")
+# Pass this explicitly on every turn so resumed sessions use the configured
+# default too, rather than restoring the model from their session record.
+CLAUDE_DEFAULT_MODEL = os.environ.get("CLAUDE_DEFAULT_MODEL", "sonnet[1m]")
 
 # Agent harnesses enabled on this machine, comma-separated, in preference
 # order: the first one is the default for a new conversation that names none
