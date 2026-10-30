@@ -21,6 +21,7 @@ Shapes were checked against real runs; see tests/fixtures/harness/codex.
 import json
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 from yuki_conductor.config import CODEX_BIN, CODEX_DEFAULT_MODEL
@@ -35,6 +36,7 @@ from yuki_conductor.harness.base import (
     tool_label,
     truncate,
 )
+from yuki_conductor.harness.claude_code import write_temp_prompt
 from yuki_conductor.skills import codex_prompt, skill_plugin_dirs
 
 # What `codex exec resume` says for an id it has no rollout for.
@@ -300,13 +302,25 @@ class CodexHarness:
 
     def launch(self, req: RunRequest) -> Launch:
         # Codex lists its own skills but can't see yuki-conductor's plugins, so
-        # the prompt names those with their paths. It goes in as a config
-        # override: `exec` has no system-prompt flag.
+        # the prompt names those with their paths. A temporary config profile
+        # keeps the full developer instructions off the Windows command line
+        # while layering over the existing home (auth, models and sessions).
         instructions = codex_prompt(
             skill_plugin_dirs(), cwd=req.cwd,
             conversation_key=req.conversation_key, task_id=req.task_id,
         )
-        argv = [resolve_bin(self.bin), "exec"]
+        home = _codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        fd, profile_path = tempfile.mkstemp(prefix="yuki-", suffix=".config.toml", dir=home)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(f"developer_instructions={_toml_string(instructions)}\n")
+        try:
+            prompt_file = write_temp_prompt(req.prompt)
+        except OSError:
+            Path(profile_path).unlink(missing_ok=True)
+            raise
+        profile = Path(profile_path).name.removesuffix(".config.toml")
+        argv = [resolve_bin(self.bin), "exec", "--profile", profile]
         if req.session_id:
             argv.append("resume")
         argv.extend([
@@ -316,7 +330,6 @@ class CodexHarness:
             # Headless: nobody can approve a command, and without this every
             # shell call is rejected while the model carries on regardless.
             "--dangerously-bypass-approvals-and-sandbox",
-            "-c", f"developer_instructions={_toml_string(instructions)}",
         ])
         model = req.model or self.default_model()
         argv.extend(["-m", model])
@@ -324,8 +337,11 @@ class CodexHarness:
         argv.append("--")
         if req.session_id:
             argv.append(req.session_id)
-        argv.append(req.prompt)
-        return Launch(argv=argv, env=dict(os.environ))
+        argv.append("-")
+        return Launch(
+            argv=argv, env=dict(os.environ),
+            temp_files=[profile_path, prompt_file], stdin_file=prompt_file,
+        )
 
     def new_parser(self) -> CodexStreamParser:
         return CodexStreamParser()

@@ -8,6 +8,7 @@ provider refused; its error body rewritten to a generic one).
 
 import json
 import subprocess
+import tomllib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -60,30 +61,45 @@ def _launch(**kw):
                      conversation_key=None)
     for k, v in kw.items():
         setattr(req, k, v)
-    return CodexHarness().launch(req)
+    launch = CodexHarness().launch(req)
+    _launches.append(launch)
+    return launch
+
+
+_launches = []
+
+
+@pytest.fixture(autouse=True)
+def cleanup_launches():
+    yield
+    for launch in _launches:
+        for path in launch.temp_files:
+            Path(path).unlink(missing_ok=True)
+    _launches.clear()
 
 
 def _instructions(argv: list[str]) -> str:
-    for i, arg in enumerate(argv):
-        if arg == "-c" and argv[i + 1].startswith("developer_instructions="):
-            return json.loads(argv[i + 1].split("=", 1)[1])
-    raise AssertionError("no developer_instructions override")
+    profile = argv[argv.index("--profile") + 1]
+    path = codex_mod._codex_home() / f"{profile}.config.toml"
+    return tomllib.loads(path.read_text(encoding="utf-8"))["developer_instructions"]
 
 
 def test_new_conversation_command_line():
     argv = _launch().argv
-    assert argv[:3] == ["codex", "exec", "--json"]
+    assert argv[:2] == ["codex", "exec"]
+    assert "--json" in argv
     assert "resume" not in argv
     assert "--dangerously-bypass-approvals-and-sandbox" in argv
     assert "--skip-git-repo-check" in argv
     # The prompt comes after `--`, so one starting with "-" isn't read as a flag.
-    assert argv[-2:] == ["--", "hello"]
+    assert argv[-2:] == ["--", "-"]
 
 
 def test_resume_puts_the_session_before_the_prompt():
     argv = _launch(session_id="sess-1").argv
-    assert argv[:3] == ["codex", "exec", "resume"]
-    assert argv[-3:] == ["--", "sess-1", "hello"]
+    assert argv[:2] == ["codex", "exec"]
+    assert argv.index("--profile") < argv.index("resume")
+    assert argv[-3:] == ["--", "sess-1", "-"]
 
 
 def test_model_falls_back_to_the_sol_alias_unless_named(monkeypatch):
@@ -251,15 +267,16 @@ def _mock_popen(stdout: str, returncode: int = 0, stderr: str = ""):
     return proc
 
 
-def test_run_agent_streams_events_with_stdin_closed():
+def test_run_agent_streams_events_with_finite_prompt_input():
     seen = []
     proc = _mock_popen("".join(_lines("tool_turn")))
     with patch("subprocess.Popen", return_value=proc) as popen:
         result = run_agent(KNOWN_HARNESSES["codex"], "hi", cwd="/work", on_event=seen.append)
     assert result.session_id == TOOL_TURN_ID
     assert [e.kind for e in seen][:3] == ["init", "text", "tool_use"]
-    # Codex reads an open stdin as more prompt and would wait on it forever.
-    assert popen.call_args.kwargs["stdin"] is subprocess.DEVNULL
+    stdin = popen.call_args.kwargs["stdin"]
+    assert stdin.closed
+    assert not Path(stdin.name).exists()
 
 
 def test_run_agent_reports_the_failed_turn_not_the_exit_code():
@@ -305,3 +322,34 @@ def test_picker_labels_the_default_by_its_alias(monkeypatch):
     assert CodexHarness().default_label() == "sol"
     monkeypatch.setattr(codex_mod, "CODEX_DEFAULT_MODEL", "gpt-6-luna")
     assert CodexHarness().default_label() == "gpt-6-luna"
+
+
+@pytest.mark.parametrize("session_id", [None, "sess-1"])
+def test_large_instructions_and_prompt_stay_off_command_line(monkeypatch, session_id):
+    instructions = '\u6280\u80fd "quoted" \n' * 10000
+    prompt = '-task "quoted" \n' * 10000
+    monkeypatch.setattr(codex_mod, "codex_prompt", lambda *a, **kw: instructions)
+    launch = _launch(prompt=prompt, session_id=session_id)
+    assert len(subprocess.list2cmdline(launch.argv).encode("utf-16-le")) < 4000
+    assert _instructions(launch.argv) == instructions
+    assert Path(launch.stdin_file).read_text(encoding="utf-8") == prompt
+    assert launch.env["CODEX_HOME"] == str(codex_mod._codex_home())
+
+
+@pytest.mark.parametrize("failed_start", [False, True])
+def test_run_agent_cleans_profile_and_prompt(monkeypatch, failed_start):
+    launch = _launch()
+    monkeypatch.setattr(CodexHarness, "launch", lambda *a: launch)
+    proc = _mock_popen("".join(_lines("tool_turn")))
+
+    def start(*args, **kwargs):
+        assert kwargs["stdin"].read() == "hello"
+        assert all(Path(path).exists() for path in launch.temp_files)
+        if failed_start:
+            raise FileNotFoundError("missing executable")
+        return proc
+
+    with patch("subprocess.Popen", side_effect=start):
+        result = run_agent(CodexHarness(), "ignored", cwd="/work")
+    assert result.is_error == failed_start
+    assert all(not Path(path).exists() for path in launch.temp_files)

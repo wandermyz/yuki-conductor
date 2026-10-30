@@ -275,8 +275,12 @@ the workspace prompt, without the synthesized listing. Codex lists its own
 skills (`~/.codex/skills`) but has no `--plugin-dir` and ignores
 `.claude/skills`, so `skills.codex_prompt()` is `core_prompt()` plus the
 `YUKI` and `PROJECT` tiers, each named with its `SKILL.md` path for the model
-to read. It reaches Codex as `-c developer_instructions=…`, since `codex exec`
-has no system-prompt flag.
+to read. It reaches Codex as `developer_instructions` in a unique temporary
+`$CODEX_HOME/yuki-*.config.toml` profile, selected with `exec --profile`.
+The task prompt is a UTF-8 file supplied on stdin with `-` as the prompt
+argument. Both files are removed when the run ends (including launch failure).
+This keeps large instructions and task histories off the Windows command line
+while retaining the real Codex home for config, authentication and sessions.
 
 Finally, if `~/.yuki-conductor/workspace/system-prompt.md` exists, its contents
 are appended verbatim. That file is outside the repo, so it's where private
@@ -713,7 +717,8 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
 - **Codex exits 1 on a failed turn with nothing useful on stderr.** The reason
   is in the stream (`turn.failed`); `StreamParser.failure()` hands it to
   `run_agent`, which prefers it over stderr. Codex also reads an open stdin as
-  more prompt, so `run_agent` spawns every harness with stdin closed.
+  more prompt, so `run_agent` supplies a finite prompt file for Codex and
+  DEVNULL for other harnesses; stdin is never inherited.
 - **pi and the GPU:** pi usually runs on Strata, which shares the GPU with
   ComfyUI. That sharing is handled entirely outside this repo, by
   vhotseat (`~/Projects/vhotseat`). yuki-conductor never checks or switches the
