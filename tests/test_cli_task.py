@@ -27,6 +27,8 @@ def api(monkeypatch):
     monkeypatch.setattr(routes, "HARNESSES", enabled)
     monkeypatch.setattr(actions, "default_harness", lambda: "claude-code")
     monkeypatch.delenv("YUKI_TASK_ID", raising=False)
+    monkeypatch.delenv("YUKI_CONDUCTOR_HARNESS", raising=False)
+    monkeypatch.delenv("YUKI_CONDUCTOR_MODEL", raising=False)
     client = TestClient(web_server.create_api())
     sent = []
 
@@ -64,6 +66,22 @@ def test_create_reports_api_errors(api, capsys):
     with pytest.raises(SystemExit):
         main(["task", "create", "--project", "nope", "--title", "t"])
     assert "isn't registered" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("flags", "expected"), [
+    ([], ("codex", "gpt-6.1-sol")),
+    (["--model", "gpt-6-astra"], ("codex", "gpt-6-astra")),
+    (["--harness", "codex"], ("codex", "gpt-6.1-sol")),
+    (["--harness", "claude-code"], ("claude-code", None)),
+    (["--harness", "claude-code", "--model", "opus"], ("claude-code", "opus")),
+])
+def test_create_inherits_run_selection(api, monkeypatch, flags, expected):
+    actions.HARNESSES["codex"] = object()
+    monkeypatch.setenv("YUKI_CONDUCTOR_HARNESS", "codex")
+    monkeypatch.setenv("YUKI_CONDUCTOR_MODEL", "gpt-6.1-sol")
+    main(["task", "create", "--project", "proj", "--title", "Inherited", *flags])
+    task = taskboard.store.get(1)
+    assert (task.harness, task.model) == expected
 
 
 def test_comment_as_agent_defaults_to_own_task(api, monkeypatch):

@@ -197,6 +197,9 @@ def _run_agent(
     ))
     # Let injected skills locate the yuki-conductor project (e.g. to run its CLI).
     env = {**launch.env, "YUKI_CONDUCTOR_PROJECT": str(project_dir())}
+    # Task creation inherits this run's selection, including a configured default.
+    env["YUKI_CONDUCTOR_HARNESS"] = harness.name
+    env["YUKI_CONDUCTOR_MODEL"] = model or harness.default_model() or ""
     # Only a task turn has a task: an inherited id would make `send` and
     # `task comment` write to a task this run isn't working on.
     env.pop("YUKI_TASK_ID", None)
