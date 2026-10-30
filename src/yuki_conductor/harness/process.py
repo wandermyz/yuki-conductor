@@ -13,7 +13,7 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 from yuki_conductor.config import CLAUDE_TIMEOUT, CLAUDE_WORKING_DIR, project_dir
 from yuki_conductor.harness.base import (
@@ -208,24 +208,28 @@ def _run_agent(
     effective_timeout = timeout if timeout is not None else CLAUDE_TIMEOUT
 
     try:
-        proc = subprocess.Popen(
-            launch.argv,
-            # Nothing is ever typed into a run. An inherited stdin can block a
-            # CLI that reads it for more prompt (Codex does).
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            cwd=effective_cwd,
-            # Own process group, so `_kill_tree`'s killpg hits the agent and its
-            # children only. Inherited, the group is the daemon's: a cancel or
-            # idle timeout would SIGTERM the daemon itself. POSIX only; ignored
-            # on Windows, which kills the tree with taskkill.
-            start_new_session=True,
-        )
+        with (
+            open(launch.stdin_file, encoding="utf-8")
+            if launch.stdin_file else nullcontext(subprocess.DEVNULL)
+        ) as stdin:
+            proc = subprocess.Popen(
+                launch.argv,
+                # Input is always finite: a prompt file or DEVNULL, never the
+                # daemon's inherited stdin.
+                stdin=stdin,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                cwd=effective_cwd,
+                # Own process group, so `_kill_tree`'s killpg hits the agent and its
+                # children only. Inherited, the group is the daemon's: a cancel or
+                # idle timeout would SIGTERM the daemon itself. POSIX only; ignored
+                # on Windows, which kills the tree with taskkill.
+                start_new_session=True,
+            )
     except OSError as exc:
         _cleanup_temp_files(launch.temp_files)
         # Windows reports an over-long command line as WinError 206, which arrives

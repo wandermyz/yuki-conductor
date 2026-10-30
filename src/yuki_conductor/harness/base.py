@@ -76,6 +76,7 @@ class Launch:
     argv: list[str]
     env: dict[str, str]
     temp_files: list[str] = field(default_factory=list)
+    stdin_file: str | None = None  # finite UTF-8 prompt input, otherwise DEVNULL
 
 
 class StreamParser(Protocol):

@@ -1,5 +1,6 @@
 """Worktree creation against a real temp repo with a bare origin."""
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -67,7 +68,9 @@ def test_branch_survives_a_lost_worktree(repo):
     path, branch = ensure_worktree(task, str(repo))
     git(path, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "work")
     work = git(path, "rev-parse", "HEAD")
-    subprocess.run(["rm", "-rf", path], check=True)
+    lost_worktree = Path(path).resolve()
+    assert lost_worktree.is_relative_to(repo.resolve())
+    shutil.rmtree(lost_worktree)
     task = taskboard.store.update_fields(task.id, worktree_path=path, branch=branch)
     path2, _ = ensure_worktree(task, str(repo))
     assert git(path2, "rev-parse", "HEAD") == work
