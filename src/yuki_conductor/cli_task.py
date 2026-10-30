@@ -45,6 +45,7 @@ def register(sub) -> argparse.ArgumentParser:
     create.add_argument("--project", required=True)
     create.add_argument("--title", required=True)
     create.add_argument("--harness")
+    create.add_argument("--model", help="Harness-native model id (inherits the current run's model)")
     create.add_argument("--worktree", action="store_true", help="Work in a fresh git worktree")
     create.add_argument("--attach", "-a", action="append", default=[], metavar="PATH")
     create.add_argument("body", nargs="?", default="", help="Task body (Markdown; - for stdin)")
@@ -182,10 +183,16 @@ def handle(args) -> None:
         api_request("POST", f"/api/tasks/{task_id}/pr", {"url": url}, what="Register PR")
         print(f"Registered {url} on task #{task_id}")
     elif cmd == "create":
+        inherited_harness = os.environ.get("YUKI_CONDUCTOR_HARNESS")
+        harness = args.harness or inherited_harness
+        model = args.model
+        if model is None and harness == inherited_harness:
+            model = os.environ.get("YUKI_CONDUCTOR_MODEL") or None
         payload = {
             "title": args.title,
             "project": args.project,
-            "harness": args.harness,
+            "harness": harness,
+            "model": model,
             "use_worktree": args.worktree,
             "body": _text(args.body),
             "attachments": _files(args.attach),

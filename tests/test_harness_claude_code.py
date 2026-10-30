@@ -417,6 +417,18 @@ def test_no_task_env_outside_the_taskboard():
     assert "YUKI_TASK_ID" not in mock_cls.call_args.kwargs["env"]
 
 
+@pytest.mark.parametrize("model", [None, "opus"])
+def test_run_selection_replaces_inherited_env(monkeypatch, model):
+    monkeypatch.setenv("YUKI_CONDUCTOR_HARNESS", "codex")
+    monkeypatch.setenv("YUKI_CONDUCTOR_MODEL", "stale-model")
+    mock_proc = _mock_popen(stdout=_stream(_result_record()))
+    with patch("subprocess.Popen", return_value=mock_proc) as mock_cls:
+        run_agent(CLAUDE, "go", model=model)
+    env = mock_cls.call_args.kwargs["env"]
+    assert env["YUKI_CONDUCTOR_HARNESS"] == "claude-code"
+    assert env["YUKI_CONDUCTOR_MODEL"] == (model or CLAUDE.default_model() or "")
+
+
 def test_missing_session_is_flagged():
     mock_proc = _mock_popen(
         returncode=1, stderr="No conversation found with session ID: abc"

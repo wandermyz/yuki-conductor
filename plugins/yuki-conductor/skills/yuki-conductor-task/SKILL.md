@@ -117,7 +117,10 @@ yuki-conductor task create --project my-app --title "Add rate limiting" --worktr
   `yuki-conductor task list` to see which projects tasks already use.
 - `--worktree` gives the task its own branch and checkout. Use it for anything
   that changes code. Leave it off for read-only work like research or reports.
-- `--harness` picks the agent CLI. It defaults to the machine's default.
+- `--harness` picks the agent CLI and `--model` picks a harness-native model id.
+  Both inherit the current agent run's selection (conversation, cron, or task).
+  Outside an agent run, the machine's defaults apply. Changing `--harness`
+  clears the inherited model; pass `--model` to select one for that harness.
 - The body is Markdown. Pass `-` to read it from stdin.
 
 A task created from inside a task is linked to it as a follow-up. That link is
