@@ -131,12 +131,16 @@ def create_app() -> App:
             respond(f"*{name}* model reset to the default ({default}) for this channel.")
             return
 
-        if arg not in aliases:
+        selections = {label.casefold(): alias for label, alias in aliases.items()}
+        selections.update({alias: alias for alias in aliases.values()})
+        if arg not in selections:
             respond(f"Unknown model `{arg}` for *{name}*. Valid options: {options}")
             return
 
-        model_store.set(key, aliases[arg])
-        respond(f"*{name}* model switched to *{arg}* (`{aliases[arg]}`) for this channel.")
+        selected = selections[arg]
+        label = next(label for label, alias in aliases.items() if alias == selected)
+        model_store.set(key, selected)
+        respond(f"*{name}* model switched to *{label}* (`{selected}`) for this channel.")
 
     @app.command(f"/{prefix}-title")
     def handle_title_command(ack, command, respond):
@@ -281,9 +285,12 @@ def create_app() -> App:
         platform = SlackPlatform(client=client, bot_token=slack_bot_token())
         if is_thread_start:
             platform.mark_harness(conversation_key, harness)
-        # The channel's pin for the harness this thread runs on.
+        # An automation's thread pin wins over the channel's selection.
         thread_harness = harness or store.get_harness(conversation_key) or default_harness()
-        model = model_store.get(model_store.key(channel, thread_harness))
+        model = (
+            model_store.get(model_store.key(conversation_key, thread_harness))
+            or model_store.get(model_store.key(channel, thread_harness))
+        )
         msg = IncomingMessage(
             platform=SESSION_TYPE,
             conversation_key=conversation_key,

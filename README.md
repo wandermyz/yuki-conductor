@@ -113,6 +113,47 @@ alive with an external supervisor instead.
 
 For Slack setup, see [docs/slack-app-setup.md](docs/slack-app-setup.md).
 
+### Model aliases and connections
+
+Copy [models.example.yaml](models.example.yaml) to
+`~/.yuki-conductor/workspace/models.yaml`. Each entry under `harness` has its
+own `connections`, `aliases`, and `default` alias ID. Claude Code and Codex
+require an explicit configuration; pi continues using its own provider catalog.
+
+**Upgrading an existing machine:** complete the
+[model configuration migration](docs/migrations/model-alias-connections.md)
+before updating and restarting. It covers subscription and endpoint setups,
+stored selections, verification, and rollback.
+
+An alias names a literal `model`, a `connection`, and an optional display
+`label`. Conversations, tasks, Slack pins and cron's `model:` store the alias
+ID, so two aliases can run the same model on different endpoints. A null
+selection follows the configured default. A deleted alias fails with an error;
+it never falls back to another connection.
+
+Connections use `type: subscription` (the CLI's existing signed-in account) or
+`type: endpoint` with an explicit `base_url` and `api_key`. Claude endpoints
+must speak the Anthropic Messages API; Codex endpoints must speak the Responses
+API and often need `/v1` in the URL. No protocol translation is performed.
+Per-run overrides take precedence over the CLI's existing provider settings,
+while preserving its home directory, skills, authentication and session storage.
+
+API keys must be references: `api_key: {env: GATEWAY_API_KEY}` or
+`api_key: {file: ~/.yuki-conductor/.secrets/gateway-api-key}`. Exactly one is
+required for an endpoint; plaintext keys are rejected. Relative file paths
+resolve beside models.yaml. Keep secret files outside the synced workspace and
+repository, restrict Windows ACLs to your user, or use mode `600` on Unix.
+Environment references can use the daemon's private `.env`. Never put keys in
+URLs. Keys are read only at launch and passed through child environment variables;
+they are excluded from generated settings, command lines and picker responses,
+and redacted from surfaced results and live steps. Agent processes can access
+their own environment, so this is not a secret boundary against agent tools.
+
+Changes to models.yaml and secret files apply to subsequent turns without a
+daemon restart. Existing sessions resume on the selected route; switching a route
+sends that session's context to the newly selected endpoint.
+
+
 ## Web UI
 
 Four tabs, with state kept in the URL hash so a reload or a shared link lands in the
@@ -145,6 +186,9 @@ tasks:
       Summarize the git log from the past 24 hours and suggest
       the top 1-2 things to focus on today.
 ```
+
+Set `harness:` and `model:` to choose a harness and its configured alias ID;
+omit `model:` to follow that harness's default.
 
 When a task fires it opens a new thread, runs the prompt, and posts the result. Add
 `chat_app:` to pin a task to a particular surface; omit it and the first enabled

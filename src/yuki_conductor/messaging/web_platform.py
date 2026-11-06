@@ -285,6 +285,10 @@ class WebPlatform:
         conv = self._store.create_conversation(platform="web", title=title, harness=harness)
         return conv.id
 
+    def set_model(self, conversation_key: str, model: str, harness: str) -> None:
+        """Keep an automation's alias for replies to its reserved conversation."""
+        self._store.set_model(conversation_key, model)
+
     def discard_thread(self, conversation_key: str) -> bool:
         """Delete a reserved conversation, unless something has posted to it."""
         if self._store.list_messages(conversation_key, limit=1):

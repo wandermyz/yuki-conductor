@@ -9,6 +9,7 @@ import re
 
 from yuki_conductor import taskboard
 from yuki_conductor.harness import HARNESSES, default_harness
+from yuki_conductor.model_config import ModelConfigError, load_harness_models
 from yuki_conductor.store import ProjectStore
 from yuki_conductor.task_store import (
     DONE,
@@ -60,6 +61,14 @@ def _check_title(title: str) -> str:
     return title
 
 
+def _check_model(harness: str, model: str | None) -> None:
+    if model is not None and harness != "pi":
+        try:
+            load_harness_models(harness).resolve(model)
+        except ModelConfigError as exc:
+            raise BoardError(400, str(exc)) from None
+
+
 def create(
     *,
     title: str,
@@ -75,6 +84,7 @@ def create(
     title = _check_title(title)
     _check_project(project)
     _check_harness(harness)
+    _check_model(harness, model)
     if parent_task_id is not None:
         get(parent_task_id)
     task = taskboard.store.create(
@@ -104,6 +114,8 @@ def edit(task_id: int, **fields) -> Task:
         _check_harness(fields["harness"])
     if fields.get("harness", task.harness) != task.harness and "model" not in fields:
         fields["model"] = None
+    if "model" in fields:
+        _check_model(fields.get("harness", task.harness), fields["model"])
     if fields and not taskboard.store.edit_if_untouched(task_id, **fields):
         raise BoardError(409, "The task was picked up before the edit could be saved")
     _changed(task_id)

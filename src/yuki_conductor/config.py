@@ -31,9 +31,8 @@ def _load_claude_env() -> None:
     resulting environment instead of parsing it. Only this one file is
     sourced — not the rest of .zshenv.d, and not .zshrc.
 
-    The endpoint is deliberately absent here: ANTHROPIC_BASE_URL lives in
-    ~/.claude/settings.json under "env", so Claude Code picks it up itself no
-    matter who spawned it.
+    Connections in models.yaml override inherited routing at launch. An
+    explicit api_key.env reference may still use a variable loaded here.
     """
     if not CLAUDE_ENV_FILE.is_file():
         return
@@ -67,6 +66,7 @@ CRON_FILE = WORKSPACE_DIR / "cron.yaml"
 PLUGINS_FILE = WORKSPACE_DIR / "plugins.yaml"
 SYSTEM_PROMPT_FILE = WORKSPACE_DIR / "system-prompt.md"
 SKILLS_CONFIG_FILE = WORKSPACE_DIR / "skills.yaml"
+MODELS_FILE = WORKSPACE_DIR / "models.yaml"
 # Claude Code's user-scope skill directory, shared with interactive sessions.
 USER_SKILLS_DIR = Path.home() / ".claude" / "skills"
 ATTACHMENTS_DIR = WORKSPACE_DIR / "attachments"
@@ -76,12 +76,6 @@ WEB_UPLOADS_DIR = UPLOADS_DIR / "web"
 CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "1800"))
 CLAUDE_WORKING_DIR = os.path.expanduser(os.environ.get("CLAUDE_WORKING_DIR", "~/Projects/wandering-vibe"))
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
-
-# Model passed to `claude --model` when a conversation pins nothing.
-#
-# Pass this explicitly on every turn so resumed sessions use the configured
-# default too, rather than restoring the model from their session record.
-CLAUDE_DEFAULT_MODEL = os.environ.get("CLAUDE_DEFAULT_MODEL", "sonnet[1m]")
 
 # Agent harnesses enabled on this machine, comma-separated, in preference
 # order: the first one is the default for a new conversation that names none
@@ -130,11 +124,8 @@ def taskboard_limit(harness: str) -> int:
 PI_BIN = os.environ.get("PI_BIN", "pi")
 PI_DEFAULT_MODEL = os.environ.get("PI_DEFAULT_MODEL", "strata/qwen3.8-flash-next-iq2_xs")
 
-# Codex (https://github.com/openai/codex). CODEX_DEFAULT_MODEL overrides the
-# model a turn gets when a conversation pins none (harness.codex.MODEL_ALIASES
-# otherwise supplies it); its provider still lives in ~/.codex/config.toml.
+# Codex (https://github.com/openai/codex). Models and routes live in models.yaml.
 CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
-CODEX_DEFAULT_MODEL = os.environ.get("CODEX_DEFAULT_MODEL") or None
 
 def channels_override() -> list[str] | None:
     """Return the `CHANNELS` env override, or None when it isn't set.

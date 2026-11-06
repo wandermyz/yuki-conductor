@@ -462,7 +462,7 @@ class CronRunStore:
 
 
 class ModelStore(_SqliteKVStore):
-    """Maps a Slack channel + harness -> pinned model id.
+    """Maps a Slack channel or automation thread + harness -> model alias ID.
 
     Keyed `<channel>:<harness>`, since a model id only means something to
     the harness that runs it: pinning `astra` on Codex leaves the channel's

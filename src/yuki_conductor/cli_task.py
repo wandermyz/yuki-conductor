@@ -45,7 +45,7 @@ def register(sub) -> argparse.ArgumentParser:
     create.add_argument("--project", required=True)
     create.add_argument("--title", required=True)
     create.add_argument("--harness")
-    create.add_argument("--model", help="Harness-native model id (inherits the current run's model)")
+    create.add_argument("--model", help="Configured model alias ID (inherits the current run's alias)")
     create.add_argument("--worktree", action="store_true", help="Work in a fresh git worktree")
     create.add_argument("--attach", "-a", action="append", default=[], metavar="PATH")
     create.add_argument("body", nargs="?", default="", help="Task body (Markdown; - for stdin)")

@@ -195,8 +195,8 @@ export function ModelPicker({
 }) {
   if (!harness || harness.models.length === 0) return null;
   const options: ModelOption[] = [...harness.models];
-  // A model picked earlier that the harness no longer lists stays selectable.
-  if (model && !options.some((o) => o.id === model)) options.unshift({ id: model, label: model });
+  const unavailable = model && !options.some((o) => o.id === model);
+  if (unavailable) options.unshift({ id: model, label: `${model} (unavailable)` });
   const fallbackLabel = harness.default_label ?? harness.default_model;
   return (
     <select
@@ -208,7 +208,7 @@ export function ModelPicker({
     >
       <option value="">{fallbackLabel ? `Default (${fallbackLabel})` : "Default"}</option>
       {options.map((o) => (
-        <option key={o.id} value={o.id}>
+        <option key={o.id} value={o.id} disabled={Boolean(unavailable && o.id === model)}>
           {o.label}
         </option>
       ))}

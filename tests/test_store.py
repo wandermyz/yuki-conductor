@@ -80,15 +80,15 @@ def test_model_pins_are_per_harness(tmp_path: Path):
     """A model id only means something to one harness, so each keeps its own pin."""
     models = ModelStore(db_path=tmp_path / "test.db")
     models.set(ModelStore.key("C1", "claude-code"), "sonnet")
-    models.set(ModelStore.key("C1", "codex"), "gpt-6-astra")
+    models.set(ModelStore.key("C1", "codex"), "astra")
     assert models.get(ModelStore.key("C1", "claude-code")) == "sonnet"
-    assert models.get(ModelStore.key("C1", "codex")) == "gpt-6-astra"
+    assert models.get(ModelStore.key("C1", "codex")) == "astra"
     models.clear(ModelStore.key("C1", "codex"))
     assert models.get(ModelStore.key("C1", "claude-code")) == "sonnet"
 
 
 def test_model_clear_restores_default(tmp_path: Path):
-    """An unset channel returns None, which the Claude Code harness turns into CLAUDE_DEFAULT_MODEL."""
+    """An unset channel returns None, which the harness resolves to its configured default alias."""
     models = ModelStore(db_path=tmp_path / "test.db")
     assert models.get("C123") is None
 

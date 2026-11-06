@@ -102,14 +102,11 @@ def test_resume_puts_the_session_before_the_prompt():
     assert argv[-3:] == ["--", "sess-1", "-"]
 
 
-def test_model_falls_back_to_the_sol_alias_unless_named(monkeypatch):
+def test_model_falls_back_to_the_configured_default_unless_named():
     argv = _launch().argv
     assert argv[argv.index("-m") + 1] == "gpt-6.1-sol"
-    argv = _launch(model="gpt-6-sol").argv
-    assert argv[argv.index("-m") + 1] == "gpt-6-sol"
-    monkeypatch.setattr(codex_mod, "CODEX_DEFAULT_MODEL", "gpt-6-luna")
-    argv = _launch().argv
-    assert argv[argv.index("-m") + 1] == "gpt-6-luna"
+    argv = _launch(model="astra").argv
+    assert argv[argv.index("-m") + 1] == "gpt-6-astra"
 
 
 def test_instructions_carry_the_contract_and_yuki_skills():
@@ -303,25 +300,13 @@ def test_run_agent_flags_a_missing_session():
 # --------------------------------------------------------------------------
 
 
-def test_models_are_the_static_aliases(codex_home):
+def test_models_are_configured_alias_ids():
     codex = CodexHarness()
     assert [(m.id, m.label) for m in codex.models()] == [
-        ("gpt-6-astra", "astra"), ("gpt-6.1-sol", "sol"),
+        ("astra", "astra"), ("sol", "sol"),
     ]
-    assert codex.default_model() == "gpt-6.1-sol"
-
-
-def test_codex_default_model_env_overrides_the_alias(codex_home, monkeypatch):
-    monkeypatch.setattr(codex_mod, "CODEX_DEFAULT_MODEL", "gpt-6-luna")
-    assert CodexHarness().default_model() == "gpt-6-luna"
-    argv = _launch().argv
-    assert argv[argv.index("-m") + 1] == "gpt-6-luna"
-
-
-def test_picker_labels_the_default_by_its_alias(monkeypatch):
-    assert CodexHarness().default_label() == "sol"
-    monkeypatch.setattr(codex_mod, "CODEX_DEFAULT_MODEL", "gpt-6-luna")
-    assert CodexHarness().default_label() == "gpt-6-luna"
+    assert codex.default_model() == "sol"
+    assert codex.default_label() == "sol"
 
 
 @pytest.mark.parametrize("session_id", [None, "sess-1"])

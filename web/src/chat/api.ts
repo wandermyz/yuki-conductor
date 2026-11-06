@@ -6,7 +6,7 @@ export interface Conversation {
   claude_session_id: string | null;
   /** Agent harness, fixed when the conversation is created. */
   harness: string;
-  /** Model for its next turns, in the harness's terms; null: the harness default. */
+  /** Model alias ID for its next turns; null: the harness default. */
   model: string | null;
   created_at: number;
   updated_at: number;
@@ -32,7 +32,10 @@ export interface HarnessInfo {
 
 export async function listHarnesses(): Promise<{ default: string; harnesses: HarnessInfo[] }> {
   const r = await fetch("/api/harnesses");
-  if (!r.ok) throw new Error("Failed to list harnesses");
+  if (!r.ok) {
+    const body = await r.json().catch(() => null);
+    throw new Error(body?.detail ?? "Failed to list harnesses");
+  }
   return r.json();
 }
 

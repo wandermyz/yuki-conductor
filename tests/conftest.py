@@ -15,6 +15,37 @@ from yuki_conductor.store import CronRunStore  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def isolated_models(monkeypatch, tmp_path):
+    """Explicit subscription profiles, independent of this machine's routes."""
+    import yaml
+
+    from yuki_conductor import model_config
+
+    data = {"harness": {
+        "claude-code": {
+            "default": "sonnet",
+            "connections": {"subscription": {"type": "subscription"}},
+            "aliases": {
+                "sonnet": {"model": "sonnet", "connection": "subscription"},
+                "opus": {"model": "opus", "connection": "subscription"},
+            },
+        },
+        "codex": {
+            "default": "sol",
+            "connections": {"subscription": {"type": "subscription"}},
+            "aliases": {
+                "astra": {"model": "gpt-6-astra", "connection": "subscription"},
+                "sol": {"model": "gpt-6.1-sol", "connection": "subscription"},
+            },
+        },
+    }}
+    path = tmp_path / "models.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    monkeypatch.setattr(model_config, "MODELS_FILE", path)
+    return path
+
+
+@pytest.fixture(autouse=True)
 def isolated_cron_run_store(monkeypatch, tmp_path):
     """Keep cron run history out of the real workspace database.
 

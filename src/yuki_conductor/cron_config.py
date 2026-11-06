@@ -36,6 +36,7 @@ class CronTask:
     origin_conversation: str | None = None  # web conversation that created the task
     paused: bool = False  # when true the scheduler never fires it (manual runs still work)
     harness: str | None = None  # "claude-code" | "pi" | None (the default harness)
+    model: str | None = None  # alias ID from the selected harness in models.yaml
 
     @property
     def label(self) -> str:
@@ -188,6 +189,7 @@ def load_tasks(path=None) -> list[CronTask]:
                 origin_conversation=entry.get("origin_conversation"),
                 paused=bool(entry.get("paused", False)),
                 harness=entry.get("harness"),
+                model=entry.get("model"),
             )
             croniter(task.schedule)
         except (KeyError, ValueError, TypeError):

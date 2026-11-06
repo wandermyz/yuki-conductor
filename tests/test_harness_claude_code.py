@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from yuki_conductor.config import CLAUDE_DEFAULT_MODEL
 from yuki_conductor.harness.claude_code import ClaudeCodeHarness
 from yuki_conductor.harness.process import run_agent, running_runs
 
@@ -144,51 +143,26 @@ def test_usage_and_cost_from_result_record():
 
 
 def test_default_model_flag_when_unset():
-    """A channel with no pinned model must still get an explicit --model.
-
-    Omitting the flag lets the CLI resolve its own default, which is only
-    opus[1m] on a *fresh* run — a `-r` resume rehydrates the canonical id
-    instead and silently drops the 1M context window.
-    """
+    """Resolve the default alias explicitly, including on resumed turns."""
     mock_proc = _mock_popen(stdout=_stream(_result_record()))
     with patch("subprocess.Popen", return_value=mock_proc) as mock_cls:
         run_agent(CLAUDE, "hi", model=None)
 
     cmd = mock_cls.call_args[0][0]
-    assert cmd[cmd.index("--model") + 1] == CLAUDE_DEFAULT_MODEL
-
-
-def test_default_model_keeps_the_1m_window():
-    """The whole point of pinning a default: it must carry the [1m] suffix."""
-    assert CLAUDE_DEFAULT_MODEL.endswith("[1m]")
+    assert cmd[cmd.index("--model") + 1] == "sonnet"
 
 
 def test_model_flag_when_pinned():
-    """Bracketed values must reach the CLI intact — they select the 1M variants."""
     mock_proc = _mock_popen(stdout=_stream(_result_record()))
     with patch("subprocess.Popen", return_value=mock_proc) as mock_cls:
-        run_agent(CLAUDE, "hi", model="opus[1m]")
-
+        run_agent(CLAUDE, "hi", model="opus")
     cmd = mock_cls.call_args[0][0]
-    assert cmd[cmd.index("--model") + 1] == "opus[1m]"
+    assert cmd[cmd.index("--model") + 1] == "opus"
 
 
-def test_model_picker_offers_bare_aliases():
-    """The web picker's aliases, unlike CLAUDE_DEFAULT_MODEL, carry no [1m]
-    suffix: live `claude -p` runs on 2026-10-28 (fresh, resumed, and with no
-    --model flag at all) all reported modelUsage.contextWindow == 1_000_000
-    for both opus and sonnet, suffixed or not. The suffix only ever mattered
-    for CLAUDE_DEFAULT_MODEL's own comment about a stale assumption; the bare
-    forms are what the Anthropic API re-resolves to "latest" on every call.
-    """
-    from yuki_conductor.harness.claude_code import MODEL_ALIASES, ClaudeCodeHarness
-
-    assert MODEL_ALIASES == {
-        "default": CLAUDE_DEFAULT_MODEL, "sonnet": "sonnet", "opus": "opus",
-    }
-    harness = ClaudeCodeHarness()
-    assert harness.default_model() == CLAUDE_DEFAULT_MODEL
-    assert [(m.id, m.label) for m in harness.models()] == [
+def test_model_picker_offers_configured_aliases():
+    assert CLAUDE.default_model() == "sonnet"
+    assert [(m.id, m.label) for m in CLAUDE.models()] == [
         ("sonnet", "sonnet"), ("opus", "opus"),
     ]
 
