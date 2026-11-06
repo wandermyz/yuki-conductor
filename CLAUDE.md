@@ -618,6 +618,14 @@ Keep the code clean. **No backward compatibility is required.** This project has
 
 ## Harnesses
 
+Web conversations have an optional **Wait for MCP** checkbox in their menu
+(default off). It is stored as `conversations.wait_for_mcp` and applies to
+subsequent turns, including resumed sessions. Codex receives a shared 30-second
+optional-server startup grace; Claude receives blocking startup with a
+30-second connection join deadline. After the deadline, each CLI can continue
+with the available tools. This does not change tool execution timeouts or
+require servers to succeed.
+
 A turn runs on one **harness**, an agent CLI. `harness/__init__.py` knows these
 (`KNOWN_HARNESSES`):
 

@@ -469,3 +469,28 @@ def test_picker_labels_the_default_without_its_suffix():
     from yuki_conductor.harness.claude_code import ClaudeCodeHarness
 
     assert ClaudeCodeHarness().default_label() == "sonnet"
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("session_id", [None, "existing"])
+def test_wait_for_mcp_reaches_cli_settings(enabled, session_id):
+    from pathlib import Path
+
+    settings = {}
+    proc = _mock_popen(stdout=_stream(_result_record()))
+
+    def capture(argv, **kwargs):
+        settings.update(json.loads(Path(argv[argv.index("--settings") + 1]).read_text()))
+        return proc
+
+    with patch("subprocess.Popen", side_effect=capture):
+        run_agent(CLAUDE, "hi", wait_for_mcp=enabled, session_id=session_id)
+    env = settings["env"]
+    if enabled:
+        assert env["MCP_CONNECTION_NONBLOCKING"] == "0"
+        assert env["MCP_CONNECT_TIMEOUT_MS"] == "30000"
+        assert env["MCP_TIMEOUT"] == "30000"
+    else:
+        assert "MCP_CONNECTION_NONBLOCKING" not in env
+        assert "MCP_CONNECT_TIMEOUT_MS" not in env
+        assert "MCP_TIMEOUT" not in env

@@ -32,6 +32,7 @@ class IncomingMessage:
     cwd: str | None = None
     # Harness for a *new* conversation; an existing one keeps its own.
     harness: str | None = None
+    wait_for_mcp: bool = False
 
 
 @dataclass

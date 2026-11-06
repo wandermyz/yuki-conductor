@@ -338,3 +338,15 @@ def test_run_agent_cleans_profile_and_prompt(monkeypatch, failed_start):
         result = run_agent(CodexHarness(), "ignored", cwd="/work")
     assert result.is_error == failed_start
     assert all(not Path(path).exists() for path in launch.temp_files)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("session_id", [None, "existing"])
+def test_wait_for_mcp_uses_a_shared_30_second_budget(enabled, session_id):
+    launch = _launch(wait_for_mcp=enabled, session_id=session_id)
+    profile = next(Path(p) for p in launch.temp_files if p.endswith(".config.toml"))
+    config = tomllib.loads(profile.read_text())
+    if enabled:
+        assert config["mcp_optional_startup_grace_ms"] == 30000
+    else:
+        assert "mcp_optional_startup_grace_ms" not in config

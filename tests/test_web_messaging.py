@@ -434,3 +434,38 @@ def test_missing_models_config_returns_actionable_error(client, isolated_models)
     assert response.status_code == 503
     assert "models.example.yaml" in response.json()["detail"]
 
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_wait_for_mcp_is_saved_and_forwarded_to_turns(client, monkeypatch, enabled):
+    from yuki_conductor.harness.base import RunResult
+
+    conv = client.post("/api/conversations", json={"title": "MCP"}).json()
+    url = f"/api/conversations/{conv['id']}"
+    assert conv["wait_for_mcp"] is False
+    response = client.patch(url, json={"wait_for_mcp": enabled})
+    assert response.status_code == 200
+    assert response.json()["wait_for_mcp"] is enabled
+    client.patch(url, json={"title": "renamed"})
+    assert client.get(url).json()["wait_for_mcp"] is enabled
+    assert client.get("/api/conversations").json()[0]["wait_for_mcp"] is enabled
+
+    seen = []
+    monkeypatch.setattr(
+        "yuki_conductor.messaging.conversation.run_agent",
+        lambda harness, prompt, **kw: seen.append(kw["wait_for_mcp"])
+        or RunResult(text="ok", session_id="s"),
+    )
+    client.post(f"{url}/messages", json={"text": "hi"})
+    deadline = time.time() + 5
+    while not seen and time.time() < deadline:
+        time.sleep(0.01)
+    assert seen == [enabled]
+
+
+def test_wait_for_mcp_cannot_be_null(client):
+    conv = client.post("/api/conversations", json={}).json()
+    response = client.patch(
+        f"/api/conversations/{conv['id']}", json={"wait_for_mcp": None}
+    )
+    assert response.status_code == 422
