@@ -327,3 +327,20 @@ def test_fts_replaces_old_external_content_index(tmp_path: Path):
     con.close()
     s2.add_message(c.id, role="user", text="新消息")
     assert len(_fts_rowids(s2, '"新​​消"')) == 1
+
+
+def test_wait_for_mcp_persists_without_reordering(tmp_path):
+    path = tmp_path / "conversation.db"
+    store = ConversationStore(db_path=path)
+    first = store.create_conversation()
+    second = store.create_conversation()
+    assert not first.wait_for_mcp
+    assert store.set_wait_for_mcp(first.id, True)
+    reopened = ConversationStore(db_path=path)
+    assert reopened.get_conversation(first.id).wait_for_mcp
+    assert [c.id for c in reopened.list_conversations()] == [second.id, first.id]
+    reopened.update_conversation(first.id, title="renamed")
+    assert reopened.get_conversation(first.id).wait_for_mcp
+    assert reopened.set_wait_for_mcp(first.id, False)
+    assert not reopened.get_conversation(first.id).wait_for_mcp
+    assert not reopened.set_wait_for_mcp("missing", True)

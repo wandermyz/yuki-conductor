@@ -317,6 +317,10 @@ class CodexHarness(ConfiguredModels):
         home.mkdir(parents=True, exist_ok=True)
         fd, profile_path = tempfile.mkstemp(prefix="yuki-", suffix=".config.toml", dir=home)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            if req.wait_for_mcp:
+                # A shared deadline for optional servers, rather than a
+                # separate 30-second wait for each server.
+                handle.write("mcp_optional_startup_grace_ms=30000\n")
             handle.write(f"developer_instructions={_toml_string(instructions)}\n{route}")
         try:
             prompt_file = write_temp_prompt(req.prompt)

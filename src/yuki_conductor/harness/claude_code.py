@@ -323,6 +323,14 @@ class ClaudeCodeHarness(ConfiguredModels):
             "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "CLAUDE_CODE_USE_BEDROCK",
             "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
         )}
+        if req.wait_for_mcp:
+            # Bound the startup join, not individual tool calls. Connections
+            # that miss the deadline can continue in the background.
+            route_env.update({
+                "MCP_CONNECTION_NONBLOCKING": "0",
+                "MCP_CONNECT_TIMEOUT_MS": "30000",
+                "MCP_TIMEOUT": "30000",
+            })
         settings = {"env": route_env, "apiKeyHelper": ""}
         for name in route_env:
             env.pop(name, None)

@@ -358,6 +358,8 @@ function RenameModal({
 
 function ConvMenu({
   status,
+  waitForMcp,
+  onSetWaitForMcp,
   onShowSessionId,
   onRename,
   onSetStatus,
@@ -366,6 +368,8 @@ function ConvMenu({
   onClose,
 }: {
   status: ConvStatus;
+  waitForMcp: boolean;
+  onSetWaitForMcp: (enabled: boolean) => void;
   onShowSessionId: () => void;
   onRename: () => void;
   onSetStatus: (s: ConvStatus) => void;
@@ -395,6 +399,15 @@ function ConvMenu({
         onClick={(e) => { e.stopPropagation(); onShowSessionId(); onClose(); }}
       >
         Show Session ID
+      </button>
+      <button
+        className="conv-menu-item"
+        role="checkbox"
+        aria-checked={waitForMcp}
+        title="Wait up to 30 seconds for MCP tools before each turn"
+        onClick={(e) => { e.stopPropagation(); onSetWaitForMcp(!waitForMcp); onClose(); }}
+      >
+        <span aria-hidden="true">{waitForMcp ? "☑" : "☐"}</span> Wait for MCP
       </button>
       <div className="conv-menu-divider" />
       {/* Status moves one step at a time: unread <-> read <-> done. */}
@@ -889,6 +902,7 @@ function ChatThread({
   onArchive,
   onDelete,
   onSetModel,
+  onSetWaitForMcp,
 }: {
   conv: Conversation;
   harness: HarnessInfo | undefined;
@@ -907,6 +921,7 @@ function ChatThread({
   onArchive: () => void;
   onDelete: () => void;
   onSetModel: (model: string | null) => void;
+  onSetWaitForMcp: (enabled: boolean) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
@@ -970,6 +985,8 @@ function ChatThread({
           {headerMenuOpen && (
             <ConvMenu
               status={status}
+              waitForMcp={conv.wait_for_mcp}
+              onSetWaitForMcp={onSetWaitForMcp}
               onShowSessionId={onShowSessionId}
               onRename={onRename}
               onSetStatus={onSetStatus}
@@ -1283,6 +1300,16 @@ export default function Chat({
     }
   };
 
+  const setWaitForMcp = async (id: string, enabled: boolean) => {
+    try {
+      const updated = await updateConversation(id, { wait_for_mcp: enabled });
+      setConversations((prev) => prev.map((c) => c.id === id ? updated : c));
+    } catch (err) {
+      console.error("Failed to update MCP waiting", err);
+      alert("Could not save Wait for MCP. Please try again.");
+    }
+  };
+
   const setModel = async (id: string, model: string | null) => {
     // Optimistic, like rename: the picker shows the choice at once.
     const prevModel = conversations.find((c) => c.id === id)?.model ?? null;
@@ -1502,6 +1529,8 @@ export default function Chat({
                       {menuOpen === c.id && (
                         <ConvMenu
                           status={st}
+                          waitForMcp={c.wait_for_mcp}
+                          onSetWaitForMcp={(enabled) => setWaitForMcp(c.id, enabled)}
                           onShowSessionId={() => setSessionIdModal(c.claude_session_id || "(no session yet)")}
                           onRename={() => setRenaming(c.id)}
                           onSetStatus={(s) => setStatus(c.id, s)}
@@ -1542,6 +1571,7 @@ export default function Chat({
             onArchive={() => archive(active.id)}
             onDelete={() => remove(active.id)}
             onSetModel={(model) => setModel(active.id, model)}
+            onSetWaitForMcp={(enabled) => setWaitForMcp(active.id, enabled)}
           />
         ) : (
           <div className="chat-placeholder">

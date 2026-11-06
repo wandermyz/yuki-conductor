@@ -52,6 +52,7 @@ class StoredConversation:
     harness: str = "claude-code"  # fixed when the conversation is created
     archived_at: float | None = None  # set: hidden from the web UI, only reachable via SQL
     model: str | None = None  # harness-native model id; None: the harness's default
+    wait_for_mcp: bool = False
 
 
 # Wraps each matched term in a search snippet. Control characters, so they
@@ -97,7 +98,8 @@ class ConversationStore:
                         status TEXT NOT NULL DEFAULT 'read',
                         harness TEXT NOT NULL DEFAULT 'claude-code',
                         archived_at REAL,
-                        model TEXT
+                        model TEXT,
+                        wait_for_mcp INTEGER NOT NULL DEFAULT 0
                     )
                     """
                 )
@@ -155,6 +157,11 @@ class ConversationStore:
                     con.execute("ALTER TABLE conversations ADD COLUMN archived_at REAL")
                 if "model" not in cols:
                     con.execute("ALTER TABLE conversations ADD COLUMN model TEXT")
+                if "wait_for_mcp" not in cols:
+                    con.execute(
+                        "ALTER TABLE conversations ADD COLUMN "
+                        "wait_for_mcp INTEGER NOT NULL DEFAULT 0"
+                    )
                 usage_cols = {
                     row[1]
                     for row in con.execute("PRAGMA table_info(message_usage)").fetchall()
@@ -215,7 +222,7 @@ class ConversationStore:
             try:
                 row = con.execute(
                     "SELECT id, platform, title, project, claude_session_id, "
-                    "created_at, updated_at, harness, archived_at, model FROM conversations WHERE id = ?",
+                    "created_at, updated_at, harness, archived_at, model, wait_for_mcp FROM conversations WHERE id = ?",
                     (conv_id,),
                 ).fetchone()
                 if not row:
@@ -232,14 +239,14 @@ class ConversationStore:
                 if platform is not None:
                     rows = con.execute(
                         "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at, harness, archived_at, model FROM conversations "
+                        "created_at, updated_at, harness, archived_at, model, wait_for_mcp FROM conversations "
                         "WHERE platform = ? AND archived_at IS NULL ORDER BY updated_at DESC",
                         (platform,),
                     ).fetchall()
                 else:
                     rows = con.execute(
                         "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at, harness, archived_at, model FROM conversations "
+                        "created_at, updated_at, harness, archived_at, model, wait_for_mcp FROM conversations "
                         "WHERE archived_at IS NULL ORDER BY updated_at DESC"
                     ).fetchall()
                 return [StoredConversation(*r) for r in rows]
@@ -292,6 +299,20 @@ class ConversationStore:
             try:
                 cur = con.execute(
                     "UPDATE conversations SET model = ? WHERE id = ?", (model, conv_id)
+                )
+                con.commit()
+                return cur.rowcount > 0
+            finally:
+                con.close()
+
+    def set_wait_for_mcp(self, conv_id: str, enabled: bool) -> bool:
+        """Set startup waiting without reordering the conversation list."""
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    "UPDATE conversations SET wait_for_mcp = ? WHERE id = ?",
+                    (int(enabled), conv_id),
                 )
                 con.commit()
                 return cur.rowcount > 0

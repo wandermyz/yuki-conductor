@@ -327,6 +327,7 @@ def create_api() -> FastAPI:
         title: str | None = None
         project: str | None = None
         model: str | None = None  # only when sent; null returns to the harness default
+        wait_for_mcp: bool = False
 
     class MessageCreate(BaseModel):
         text: str = ""
@@ -341,6 +342,7 @@ def create_api() -> FastAPI:
             "claude_session_id": c.claude_session_id,
             "harness": c.harness,
             "model": c.model,
+            "wait_for_mcp": bool(c.wait_for_mcp),
             "created_at": c.created_at,
             "updated_at": c.updated_at,
         }
@@ -415,6 +417,8 @@ def create_api() -> FastAPI:
                 except ModelConfigError as exc:
                     raise HTTPException(status_code=400, detail=str(exc)) from None
             conv_store.set_model(conv_id, selected)
+        if "wait_for_mcp" in body.model_fields_set:
+            conv_store.set_wait_for_mcp(conv_id, body.wait_for_mcp)
         if body.title is not None or body.project is not None:
             conv_store.update_conversation(conv_id, title=body.title, project=body.project)
         # Mirror title into the legacy session store so the Sessions tab matches.
@@ -517,6 +521,7 @@ def create_api() -> FastAPI:
             is_thread_start=is_thread_start,
             title_hint=user_msg.text[:80] if is_thread_start else None,
             model=conv.model,
+            wait_for_mcp=bool(conv.wait_for_mcp),
             cwd=msg_cwd,
         )
 
