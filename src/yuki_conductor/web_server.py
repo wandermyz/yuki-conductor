@@ -22,7 +22,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 
 # Served file types a browser would run script in when opened directly.
 SCRIPTABLE_SUFFIXES = {".html", ".htm", ".xhtml", ".svg", ".xml"}
+MARKDOWN_SUFFIXES = {".md", ".markdown"}
 FILE_SANDBOX_CSP = "sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads"
 
 _receivers: list = []
@@ -769,10 +770,17 @@ def create_api() -> FastAPI:
             "mime_type": file.content_type,
         }
 
+    @api.get("/api/files/{file_id}/markdown")
+    def get_markdown_file(file_id: str):
+        path = resolve_file(file_id)
+        if path is None or path.suffix.lower() not in MARKDOWN_SUFFIXES:
+            raise HTTPException(status_code=404, detail="Markdown file not found")
+        return {"filename": path.name, "text": path.read_text(encoding="utf-8-sig", errors="replace")}
+
     @api.get("/api/files/{file_id}")
-    def get_file(file_id: str, download: bool = False):
-        """Serve an uploaded or attached file: inline by default, so the chat
-        can preview it, or as a download with `?download=1`.
+    def get_file(file_id: str, download: bool = False, raw: bool = False):
+        """Open Markdown in the document viewer; serve other files inline.
+        `?raw=1` serves the original and `?download=1` downloads it.
 
         Documents that can run script (HTML, SVG, XML) are served under a CSP
         sandbox, which gives them an opaque origin of their own: an agent's
@@ -781,6 +789,8 @@ def create_api() -> FastAPI:
         path = resolve_file(file_id)
         if path is None:
             raise HTTPException(status_code=404, detail="File not found")
+        if path.suffix.lower() in MARKDOWN_SUFFIXES and not (download or raw):
+            return RedirectResponse(url=f"/?file={file_id}", status_code=307)
         headers = {}
         if path.suffix.lower() in SCRIPTABLE_SUFFIXES:
             headers["Content-Security-Policy"] = FILE_SANDBOX_CSP

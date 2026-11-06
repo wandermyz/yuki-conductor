@@ -133,6 +133,32 @@ def test_html_file_is_sandboxed(client):
     assert "content-security-policy" not in client.get(txt["url"]).headers
 
 
+@pytest.mark.parametrize("filename", ["notes.md", "NOTES.MD", "notes.markdown"])
+def test_markdown_opens_document_page_and_preserves_source(client, filename):
+    text = "# Notes\n\n```mermaid\ngraph LR\n  A --> B\n```\n"
+    source = b"\xef\xbb\xbf" + text.encode()
+    url = client.post(
+        "/api/uploads", files={"file": (filename, source, "text/markdown")}
+    ).json()["url"]
+
+    response = client.get(url, follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == f"/?file={url.rsplit('/', 1)[1]}"
+    assert client.get(url + "/markdown").json() == {"filename": filename, "text": text}
+    assert client.get(url + "?raw=1").content == source
+    download = client.get(url + "?download=1")
+    assert download.content == source
+    assert download.headers["content-disposition"].startswith("attachment")
+
+
+def test_markdown_document_rejects_missing_and_other_files(client):
+    assert client.get("/api/files/missing/markdown").status_code == 404
+    url = client.post(
+        "/api/uploads", files={"file": ("page.html", b"<h1>hi</h1>", "text/html")}
+    ).json()["url"]
+    assert client.get(url + "/markdown").status_code == 404
+
+
 def test_post_message_rejects_unknown_attachment_id(client):
     conv = client.post("/api/conversations", json={"title": None}).json()
     r = client.post(

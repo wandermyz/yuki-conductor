@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import "./fileAttachment.css";
 
-export function isHtml(mime: string | null, filename: string): boolean {
+function isHtml(mime: string | null, filename: string): boolean {
   if (mime === "text/html" || mime === "application/xhtml+xml") return true;
   return /\.(html?|xhtml)$/i.test(filename);
 }
@@ -52,7 +52,7 @@ function SaveButton({ url, filename }: { url: string; filename: string }) {
     if (file.current) return share(file.current);
     setState("loading");
     try {
-      const res = await fetch(url);
+      const res = await fetch(downloadUrl(url));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
       file.current = new File([blob], filename, { type: blob.type });
