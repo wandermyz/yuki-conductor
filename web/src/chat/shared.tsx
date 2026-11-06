@@ -181,7 +181,7 @@ export function StepList({
 }
 
 /** Picks the model a conversation's next turns run on. Hidden when the
- * harness offers no choice. Empty value: the harness's default. */
+ * harness offers no choice. Null model: the harness's default. */
 export function ModelPicker({
   harness,
   model,
@@ -194,19 +194,19 @@ export function ModelPicker({
   onChange: (model: string | null) => void;
 }) {
   if (!harness || harness.models.length === 0) return null;
-  const options: ModelOption[] = [...harness.models];
+  const options: ModelOption[] = [...harness.models].sort(
+    (a, b) => Number(b.id === harness.default_model) - Number(a.id === harness.default_model),
+  );
   const unavailable = model && !options.some((o) => o.id === model);
-  if (unavailable) options.unshift({ id: model, label: `${model} (unavailable)` });
-  const fallbackLabel = harness.default_label ?? harness.default_model;
+  if (unavailable) options.push({ id: model, label: `${model} (unavailable)` });
   return (
     <select
       className="chat-model-picker"
-      value={model ?? ""}
-      onChange={(e) => onChange(e.target.value || null)}
+      value={model ?? harness.default_model ?? ""}
+      onChange={(e) => onChange(e.target.value === harness.default_model ? null : e.target.value)}
       title={title}
       aria-label="Model"
     >
-      <option value="">{fallbackLabel ? `Default (${fallbackLabel})` : "Default"}</option>
       {options.map((o) => (
         <option key={o.id} value={o.id} disabled={Boolean(unavailable && o.id === model)}>
           {o.label}
