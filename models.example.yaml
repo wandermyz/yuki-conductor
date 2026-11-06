@@ -1,0 +1,41 @@
+# Copy to ~/.yuki-conductor/workspace/models.yaml and edit for your machine.
+# Each harness owns its connections, aliases and default alias ID.
+# Never put an API key here. Use api_key.env or api_key.file (exactly one).
+harness:
+  claude-code:
+    default: sonnet
+    connections:
+      subscription:
+        type: subscription
+      gateway:
+        type: endpoint
+        base_url: http://localhost:4000
+        api_key:
+          file: ~/.yuki-conductor/.secrets/gateway-api-key
+    aliases:
+      sonnet:
+        model: sonnet
+        connection: subscription
+      sonnet-gateway:
+        label: sonnet (gateway)
+        model: claude-sonnet-5-5
+        connection: gateway
+  codex:
+    default: sol
+    connections:
+      subscription:
+        type: subscription
+      gateway:
+        type: endpoint
+        # Codex uses the Responses API; include /v1 when your gateway needs it.
+        base_url: http://localhost:4000/v1
+        api_key:
+          env: GATEWAY_API_KEY
+    aliases:
+      sol:
+        model: gpt-6.1-sol
+        connection: subscription
+      sol-gateway:
+        label: sol (gateway)
+        model: gpt-6.1-sol
+        connection: gateway

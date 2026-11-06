@@ -125,6 +125,8 @@ def _execute(
     if platform is not None and hasattr(platform, "reserve_thread"):
         try:
             reserved = platform.reserve_thread(title=title, harness=harness)
+            if task.model and hasattr(platform, "set_model"):
+                platform.set_model(reserved, task.model, harness)
         except Exception:
             logger.error(
                 f"Failed to reserve thread on platform={platform.name} for task={task.name}",
@@ -135,6 +137,7 @@ def _execute(
     result = run_agent(
         get_harness(harness),
         prefixed_prompt,
+        model=task.model,
         push_conversation_id=reserved,
         kind="automation",
     )
@@ -184,6 +187,8 @@ def _execute(
             conversation_key = reserved
         else:
             conversation_key = platform.start_thread(text, title=title, harness=harness)
+            if task.model and hasattr(platform, "set_model"):
+                platform.set_model(conversation_key, task.model, harness)
             if attachments:
                 platform.send(conversation_key, OutgoingMessage(text="", attachments=attachments))
     except Exception:
@@ -216,7 +221,7 @@ def _build_task_state(tasks: list[CronTask]) -> tuple[list[tuple[CronTask, croni
 def _tasks_changed(old: list[CronTask], new: list[CronTask]) -> bool:
     """Check if the task list has changed (by comparing as tuples)."""
     def to_tuple(t: CronTask) -> tuple:
-        return (t.name, t.schedule, t.description, t.prompt, t.chat_app, t.paused, t.harness)
+        return (t.name, t.schedule, t.description, t.prompt, t.chat_app, t.paused, t.harness, t.model)
     return [to_tuple(t) for t in old] != [to_tuple(t) for t in new]
 
 

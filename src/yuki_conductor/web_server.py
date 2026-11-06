@@ -22,7 +22,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -43,6 +43,7 @@ from yuki_conductor.messaging.web_platform import (
     resolve_file,
     serialize_message,
 )
+from yuki_conductor.model_config import ModelConfigError, load_harness_models
 from yuki_conductor.reader_page import render_reader_page
 from yuki_conductor.store import CronRunStore, ProjectStore, SessionStore
 
@@ -114,6 +115,10 @@ def create_api() -> FastAPI:
 
     api = FastAPI(title="Agent Conductor")
     api.include_router(taskboard_router)
+
+    @api.exception_handler(ModelConfigError)
+    async def model_config_error(request: Request, exc: ModelConfigError):
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     @api.get("/api/favicon")
     def favicon():
@@ -401,7 +406,14 @@ def create_api() -> FastAPI:
             raise HTTPException(status_code=404, detail="Conversation not found")
         # The next turn runs on the new model; a resumed session carries on with it.
         if "model" in body.model_fields_set:
-            conv_store.set_model(conv_id, (body.model or "").strip() or None)
+            selected = (body.model or "").strip() or None
+            conv = conv_store.get_conversation(conv_id)
+            if selected and conv.harness != "pi":
+                try:
+                    load_harness_models(conv.harness).resolve(selected)
+                except ModelConfigError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from None
+            conv_store.set_model(conv_id, selected)
         if body.title is not None or body.project is not None:
             conv_store.update_conversation(conv_id, title=body.title, project=body.project)
         # Mirror title into the legacy session store so the Sessions tab matches.

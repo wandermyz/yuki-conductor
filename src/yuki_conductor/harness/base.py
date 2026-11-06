@@ -55,7 +55,7 @@ class RunRequest:
 
     prompt: str
     session_id: str | None
-    model: str | None  # None: the harness's own default
+    model: str | None  # configured alias ID; None selects the harness default
     cwd: str
     conversation_key: str | None  # named in the system prompt for `yuki-conductor send`
     task_id: int | None = None  # taskboard task this turn works on, if any
@@ -74,9 +74,11 @@ class Launch:
     """A built command, plus temp files to remove once the run ends."""
 
     argv: list[str]
-    env: dict[str, str]
+    env: dict[str, str] = field(repr=False)
     temp_files: list[str] = field(default_factory=list)
     stdin_file: str | None = None  # finite UTF-8 prompt input, otherwise DEVNULL
+    secret_values: list[str] = field(default_factory=list, repr=False)
+    model_alias: str | None = None  # resolved once, also inherited by task creation
 
 
 class StreamParser(Protocol):
@@ -111,7 +113,7 @@ class Harness(Protocol):
         ...
 
     def model_aliases(self) -> dict[str, str]:
-        """Named picks -> model id passed to the CLI, `default` excluded.
+        """Display labels -> stored alias IDs, `default` excluded.
 
         The web picker and Slack's `/<prefix>-model` both offer these.
         """
@@ -122,7 +124,7 @@ class Harness(Protocol):
         ...
 
     def default_model(self) -> str | None:
-        """The model a turn gets when none is picked, if known."""
+        """The alias a turn gets when none is picked, if known."""
         ...
 
     def default_label(self) -> str | None:

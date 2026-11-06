@@ -15,6 +15,7 @@ reference fits (project config is loaded for trusted projects).
 src/yuki_conductor/
   cli.py            — argparse entry point (run, daemon, simulate)
   config.py         — env loading, path constants, CHANNELS override parsing
+  model_config.py   — per-harness aliases, connections and secret references
   plugins.py        — plugin identity, injection points, discovery + status
   plugin_config.py  — plugins.yaml parsing and surgical field edits
   store.py          — SQLite-backed session & model stores
@@ -77,6 +78,7 @@ Key files:
 - `~/.yuki-conductor/workspace/yuki-conductor.db` — SQLite database for session and model tracking
 - `~/.yuki-conductor/workspace/cron.yaml` — Cron task definitions (see `cron.example.yaml` for format)
 - `~/.yuki-conductor/workspace/plugins.yaml` — plugin registry: installed and enabled (see `plugins.example.yaml`)
+- `~/.yuki-conductor/workspace/models.yaml` — per-harness model aliases, connections and defaults (see `models.example.yaml`)
 - `~/.yuki-conductor/workspace/skills.yaml` — promotes user-scope skills to "always available" (see `skills.example.yaml` and Skill Discovery)
 - `~/.yuki-conductor/workspace/system-prompt.md` — optional personal system prompt appended to every spawned Claude run (see Skill Discovery)
 - `~/.yuki-conductor/workspace/attachments/`, `uploads/` — runtime file storage
@@ -623,7 +625,7 @@ A turn runs on one **harness**, an agent CLI. `harness/__init__.py` knows these
 | --- | --- | --- |
 | `claude-code` | `claude -p --output-format stream-json --verbose …` | Windows shims; skill listing synthesized (see Skill Discovery) |
 | `pi` | `pi --mode json --no-approve --model <provider/id> …` | `PI_BIN`, `PI_DEFAULT_MODEL` (`strata/qwen3.8-flash-next-iq2_xs`); providers live in `~/.pi/agent`, not here |
-| `codex` | `codex exec [resume] --json --dangerously-bypass-approvals-and-sandbox …` | `CODEX_BIN`; provider and model live in `~/.codex/config.toml`, `CODEX_DEFAULT_MODEL` overrides the model. On Windows the npm `.cmd` shim is skipped for the vendored `codex.exe`, since cmd.exe mangles a multi-line argument |
+| `codex` | `codex exec [resume] --json --dangerously-bypass-approvals-and-sandbox …` | `CODEX_BIN`; aliases and connections live in `workspace/models.yaml`. On Windows the npm `.cmd` shim is skipped for the vendored `codex.exe`, since cmd.exe mangles a multi-line argument |
 
 **Which exist on a machine is the `HARNESSES` setting** in
 `~/.yuki-conductor/.env`, e.g. `HARNESSES=claude-code,pi`. It's a
@@ -678,32 +680,32 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
   `<channel>:<harness>`, so switching harness never carries a model id to a
   CLI that doesn't know it, and each harness keeps its own pin. A thread uses
   the pin for the harness *it* runs on; pi offers no picks.
-- **The web picker's model is per conversation, for every harness.** A
-  conversation's `model` column (`conversations.model`, `PATCH
-  /api/conversations/{id}`) is what `IncomingMessage.model` carries on every
-  turn; `None` means the harness's own default. `GET /api/harnesses` adds each
-  harness's `default_model()` and `models()` (`ModelOption(id, label)`) for the
-  picker to render — empty for a harness with nothing to choose (pi). Each
-  harness keeps its own small, hand-maintained `MODEL_ALIASES` table (named
-  pick → literal model id passed to the CLI), exposed as `model_aliases()` and
-  shared by the web picker and Slack's `/<prefix>-model`:
-  - **Claude Code**: `sonnet` / `opus`, bare (no `[1m]` suffix) — the
-    Anthropic API re-resolves a bare alias to whatever snapshot is current on
-    every single request, which a live check on 2026-10-28 confirmed also
-    carries the 1M context window already (`modelUsage.contextWindow` was
-    1,000,000 for a fresh run, a resume, and even with no `--model` flag at
-    all). `CLAUDE_DEFAULT_MODEL`'s own `[1m]` suffix is untouched — it
-    predates this check and still works — but nothing about the suffix is
-    required for the picker's aliases.
-  - **Codex**: `astra` / `sol`, mapped to today's literal GPT slug
-    (`gpt-6-astra` / `gpt-6.1-sol`). Unlike Claude's bare aliases, a GPT slug
-    *is* the resolved version already — OpenAI has no live "latest Sol" for
-    anything to resolve per request — so there is nothing to ask the CLI or
-    the provider for at runtime; the table is bumped by hand when a new
-    generation ships. (`codex debug models` can print Codex's own bundled
-    catalog, but that's what Codex knows how to drive, not what a provider
-    actually serves, so it isn't used here.)
-  - **pi** offers no named picks, only its own configured default.
+- **Model selection is a per-harness alias ID**, stored on conversations,
+  tasks, Slack pins and cron's optional `model:` field. The model reported in
+  message usage is still the actual model that answered. `model_config.py`
+  reads `workspace/models.yaml`, with a top-level `harness` mapping. Each
+  harness has `connections`, `aliases` and a `default` alias ID. An alias
+  names `model`, `connection` and optional display `label`. `ConfiguredModels`
+  (`harness/models.py`) supplies the picker and Slack's label-to-ID mapping.
+  There are no hardcoded alias tables or Claude/Codex model-default env vars.
+- **Connections** are `subscription` (the CLI's signed-in account) or `endpoint`
+  (`base_url` and `api_key: {env: NAME}` or `{file: PATH}`). Never store literal
+  keys in YAML, argv or generated files. Credentials are resolved at launch,
+  passed via the child's environment and redacted from surfaced stream events
+  and results. Claude uses an explicit settings file and an `apiKeyHelper`
+  reading the child env; Codex layers a provider into its unique temporary
+  profile. Both override inherited routing without editing permanent CLI
+  settings or changing the CLI home/session directory. Endpoint protocols are
+  Anthropic Messages for Claude and Responses for Codex; URLs are used exactly
+  as configured. Missing aliases/keys fail without a route fallback.
+- **Config edits** apply on subsequent launches; listing models never reads key
+  values. A null selection follows the configured default. Existing stored
+  selections must be updated in place when changing alias IDs; there are no
+  legacy model-ID fallbacks. A deleted alias is marked unavailable in the UI.
+  pi continues to use its own provider catalog.
+- **Automation replies** keep an explicit cron alias on the reserved web
+  conversation or a Slack thread pin (`ModelStore` key `<thread>:<harness>`),
+  which takes precedence over that Slack channel's pin.
 - **Slack shows the harness** two ways: the shimmering status is tagged
   `(<label>) is thinking...`, and every thread's root message (user-started
   or cron's `start_thread`) gets a reaction from `HARNESS_EMOJI` in

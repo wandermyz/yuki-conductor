@@ -151,6 +151,10 @@ class ReservingPlatform(FakePlatform):
         super().__init__(name)
         self.reserved: list[str] = []
         self.discarded: list[str] = []
+        self.model_writes = []
+
+    def set_model(self, key, model, harness):
+        self.model_writes.append((key, model, harness))
 
     def reserve_thread(self, title=None, harness="claude-code"):
         key = f"{self.name}-reserved-{len(self.reserved)}"
@@ -415,3 +419,27 @@ def test_cron_task_harness_is_read_from_yaml(tmp_path):
         encoding="utf-8",
     )
     assert [t.harness for t in load_tasks(path)] == ["pi", None]
+
+
+def test_cron_alias_is_run_and_kept_for_followups():
+    platform = ReservingPlatform()
+    task = _task()
+    task.model = "sonnet"
+    result = RunResult(text="done <notify>", session_id="sess-1")
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=result) as run:
+        _run_cron_task(task, {"web": platform})
+    assert run.call_args.kwargs["model"] == "sonnet"
+    assert platform.model_writes == [("web-reserved-0", "sonnet", "claude-code")]
+
+
+def test_cron_model_changes_trigger_reload_and_parse(tmp_path):
+    from dataclasses import replace
+
+    from yuki_conductor.cron_config import load_tasks
+
+    path = tmp_path / "cron.yaml"
+    path.write_text("tasks:\n  - name: a\n    schedule: '* * * * *'\n"
+                    "    prompt: hi\n    harness: codex\n    model: sol\n", encoding="utf-8")
+    [task] = load_tasks(path)
+    assert task.model == "sol"
+    assert _tasks_changed([task], [replace(task, model="astra")])

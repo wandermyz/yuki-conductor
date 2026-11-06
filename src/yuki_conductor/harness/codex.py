@@ -24,11 +24,10 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from yuki_conductor.config import CODEX_BIN, CODEX_DEFAULT_MODEL
+from yuki_conductor.config import CODEX_BIN
 from yuki_conductor.harness.base import (
     SUMMARY_LIMIT,
     Launch,
-    ModelOption,
     RunRequest,
     RunResult,
     StreamEvent,
@@ -37,6 +36,7 @@ from yuki_conductor.harness.base import (
     truncate,
 )
 from yuki_conductor.harness.claude_code import write_temp_prompt
+from yuki_conductor.harness.models import ConfiguredModels
 from yuki_conductor.skills import codex_prompt, skill_plugin_dirs
 
 # What `codex exec resume` says for an id it has no rollout for.
@@ -65,20 +65,6 @@ def resolve_bin(name: str) -> str:
     for exe in sorted(vendor.glob("@openai/codex-win32-*/vendor/*/bin/codex.exe")):
         return str(exe)
     return found
-
-
-# Named picks the web model picker offers, mapped to today's literal model
-# slug. Unlike Claude's bare aliases (which the Anthropic API re-resolves to
-# whatever is current on every request), a GPT slug is the resolved version
-# already — OpenAI has no live "latest Sol" the way `opus` means "latest
-# Opus" — so there is nothing to ask the CLI or the provider for. This table
-# is the only way yuki-conductor knows, and it must be bumped by hand when a
-# new generation ships (see MODEL_ALIASES, the same approach for Claude Code).
-MODEL_ALIASES = {
-    "default": "gpt-6.1-sol",
-    "astra": "gpt-6-astra",
-    "sol": "gpt-6.1-sol",
-}
 
 
 def _toml_string(text: str) -> str:
@@ -294,7 +280,7 @@ class CodexStreamParser:
         )
 
 
-class CodexHarness:
+class CodexHarness(ConfiguredModels):
     name = "codex"
     label = "Codex"
     bin = CODEX_BIN
@@ -305,6 +291,24 @@ class CodexHarness:
         # the prompt names those with their paths. A temporary config profile
         # keeps the full developer instructions off the Windows command line
         # while layering over the existing home (auth, models and sessions).
+        selection = self.resolve_model(req.model)
+        key = selection.connection.api_key()
+        env = dict(os.environ)
+        for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY", "YUKI_MODEL_API_KEY"):
+            env.pop(name, None)
+        if key is None:
+            route = ('model_provider="openai"\nforced_login_method="chatgpt"\n'
+                     'openai_base_url="https://api.openai.com/v1"\n'
+                     'chatgpt_base_url="https://chatgpt.com/backend-api"\n')
+        else:
+            env["YUKI_MODEL_API_KEY"] = key
+            route = (
+                'model_provider="yuki"\nforced_login_method="api"\n'
+                '[model_providers.yuki]\nname="Yuki endpoint"\n'
+                f'base_url={_toml_string(selection.connection.base_url)}\n'
+                'env_key="YUKI_MODEL_API_KEY"\nwire_api="responses"\n'
+                'requires_openai_auth=false\n'
+            )
         instructions = codex_prompt(
             skill_plugin_dirs(), cwd=req.cwd,
             conversation_key=req.conversation_key, task_id=req.task_id,
@@ -313,7 +317,7 @@ class CodexHarness:
         home.mkdir(parents=True, exist_ok=True)
         fd, profile_path = tempfile.mkstemp(prefix="yuki-", suffix=".config.toml", dir=home)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(f"developer_instructions={_toml_string(instructions)}\n")
+            handle.write(f"developer_instructions={_toml_string(instructions)}\n{route}")
         try:
             prompt_file = write_temp_prompt(req.prompt)
         except OSError:
@@ -331,16 +335,17 @@ class CodexHarness:
             # shell call is rejected while the model carries on regardless.
             "--dangerously-bypass-approvals-and-sandbox",
         ])
-        model = req.model or self.default_model()
-        argv.extend(["-m", model])
+        argv.extend(["-m", selection.model])
         # `--` so a prompt starting with "-" isn't read as a flag.
         argv.append("--")
         if req.session_id:
             argv.append(req.session_id)
         argv.append("-")
         return Launch(
-            argv=argv, env=dict(os.environ),
+            argv=argv, env=env,
             temp_files=[profile_path, prompt_file], stdin_file=prompt_file,
+            secret_values=[key] if key else [],
+            model_alias=selection.id,
         )
 
     def new_parser(self) -> CodexStreamParser:
@@ -348,17 +353,3 @@ class CodexHarness:
 
     def session_exists(self, session_id: str, cwd: str) -> bool:
         return _rollout_path(session_id) is not None
-
-    def model_aliases(self) -> dict[str, str]:
-        return {name: slug for name, slug in MODEL_ALIASES.items() if name != "default"}
-
-    def models(self) -> list[ModelOption]:
-        return [ModelOption(id=slug, label=name) for name, slug in self.model_aliases().items()]
-
-    def default_model(self) -> str | None:
-        return CODEX_DEFAULT_MODEL or MODEL_ALIASES["default"]
-
-    def default_label(self) -> str | None:
-        default = self.default_model()
-        names = [name for name, slug in MODEL_ALIASES.items() if slug == default and name != "default"]
-        return names[0] if names else default

@@ -389,7 +389,22 @@ def test_harnesses_list_their_models(client):
     assert codex["default_label"] == "sol"
     assert {"id": "sonnet", "label": "sonnet"} in claude["models"]
     assert {"id": "opus", "label": "opus"} in claude["models"]
-    assert codex["default_model"] == "gpt-6.1-sol"
-    assert {"id": "gpt-6-astra", "label": "astra"} in codex["models"]
-    assert {"id": "gpt-6.1-sol", "label": "sol"} in codex["models"]
+    assert codex["default_model"] == "sol"
+    assert {"id": "astra", "label": "astra"} in codex["models"]
+    assert {"id": "sol", "label": "sol"} in codex["models"]
+
+
+def test_unknown_model_alias_is_rejected(client):
+    conv = client.post("/api/conversations", json={"title": "test"}).json()
+    response = client.patch(f"/api/conversations/{conv['id']}", json={"model": "deleted-alias"})
+    assert response.status_code == 400
+    assert "Unknown model alias" in response.json()["detail"]
+    assert client.get(f"/api/conversations/{conv['id']}").json()["model"] is None
+
+
+def test_missing_models_config_returns_actionable_error(client, isolated_models):
+    isolated_models.unlink()
+    response = client.get("/api/harnesses")
+    assert response.status_code == 503
+    assert "models.example.yaml" in response.json()["detail"]
 

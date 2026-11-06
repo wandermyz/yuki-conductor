@@ -129,9 +129,9 @@ def test_model_command_uses_the_channels_harness_aliases(app):
     # Switch the channel to Codex: astra / sol, and the Claude pin is untouched.
     _harness_cmd(app, "codex")
     assert "default (sol)" in _model_cmd(app, "")
-    assert "switched to *astra* (`gpt-6-astra`)" in _model_cmd(app, "astra")
+    assert "switched to *astra* (`astra`)" in _model_cmd(app, "astra")
     assert "*astra*" in _model_cmd(app, "")
-    assert slack_app.model_store.get(ModelStore.key("C1", "codex")) == "gpt-6-astra"
+    assert slack_app.model_store.get(ModelStore.key("C1", "codex")) == "astra"
     assert slack_app.model_store.get(ModelStore.key("C1", "claude-code")) == "sonnet"
     assert "reset to the default (sol)" in _model_cmd(app, "default")
     assert slack_app.model_store.get(ModelStore.key("C1", "claude-code")) == "sonnet"
@@ -144,15 +144,38 @@ def test_model_command_on_a_harness_without_choices(app):
 
 def test_thread_gets_the_pin_for_its_own_harness(app, monkeypatch):
     slack_app.model_store.set(ModelStore.key("C1", "claude-code"), "sonnet")
-    slack_app.model_store.set(ModelStore.key("C1", "codex"), "gpt-6-astra")
+    slack_app.model_store.set(ModelStore.key("C1", "codex"), "astra")
     assert _post(app, monkeypatch).model == "sonnet"
     slack_app.harness_store.set("C1", "codex")
-    assert _post(app, monkeypatch, ts="2.0").model == "gpt-6-astra"
+    assert _post(app, monkeypatch, ts="2.0").model == "astra"
     slack_app.harness_store.set("C1", "pi")
     assert _post(app, monkeypatch, ts="3.0").model is None
     # A reply follows its thread's harness, not the channel's current one.
     slack_app.store.set("4.0", "sess-4", channel_id="C1", harness="claude-code")
     assert _post(app, monkeypatch, ts="5.0", thread_ts="4.0").model == "sonnet"
+
+
+def test_automation_thread_keeps_its_alias_over_the_channel_pin(app, monkeypatch):
+    slack_app.store.set("4.0", "sess-4", channel_id="C1", harness="codex")
+    slack_app.model_store.set(ModelStore.key("C1", "codex"), "sol")
+    slack_app.model_store.set(ModelStore.key("4.0", "codex"), "astra")
+    assert _post(app, monkeypatch, ts="5.0", thread_ts="4.0").model == "astra"
+    assert slack_app.model_store.get(ModelStore.key("C1", "codex")) == "sol"
+
+
+def test_model_command_stores_alias_identity_for_duplicate_model_ids(app, isolated_models):
+    import yaml
+
+    data = yaml.safe_load(isolated_models.read_text())
+    data["harness"]["codex"]["aliases"]["sol-green"] = {
+        "label": "sol (green)", "model": "gpt-6.1-sol", "connection": "subscription",
+    }
+    isolated_models.write_text(yaml.safe_dump(data))
+    _harness_cmd(app, "codex")
+    assert "switched to *sol (green)*" in _model_cmd(app, "sol (green)")
+    assert slack_app.model_store.get(ModelStore.key("C1", "codex")) == "sol-green"
+    assert "*sol (green)*" in _model_cmd(app, "")
+    assert "switched to *sol (green)*" in _model_cmd(app, "sol-green")
 
 
 # --------------------------------------------------------------------------

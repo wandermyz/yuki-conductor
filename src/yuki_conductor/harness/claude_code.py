@@ -9,15 +9,17 @@ status line. `parse_stream_line` turns a raw line into zero or more
 import json
 import os
 import re
+import shlex
 import shutil
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
-from yuki_conductor.config import CLAUDE_BIN, CLAUDE_DEFAULT_MODEL
+from yuki_conductor.config import CLAUDE_BIN
 from yuki_conductor.harness.base import (
     SUMMARY_LIMIT,
     Launch,
-    ModelOption,
     RunRequest,
     RunResult,
     StreamEvent,
@@ -26,18 +28,8 @@ from yuki_conductor.harness.base import (
     tool_summary,
     truncate,
 )
+from yuki_conductor.harness.models import ConfiguredModels
 from yuki_conductor.skills import skill_plugin_dirs, system_prompt
-
-# Named picks the web model picker offers. Bare aliases, not Slack's suffixed
-# forms (MODEL_ALIASES in store.py): the Anthropic API resolves `opus`/`sonnet`
-# to whatever snapshot is current on every request — no "[1m]" is needed to
-# keep the 1M window, verified live against a fresh run, a resume, and with no
-# --model flag at all (modelUsage.contextWindow was 1,000,000 all three ways).
-MODEL_ALIASES = {
-    "default": CLAUDE_DEFAULT_MODEL,
-    "sonnet": "sonnet",
-    "opus": "opus",
-}
 
 # ---------------------------------------------------------------------------
 # stream-json parsing
@@ -312,13 +304,38 @@ def write_temp_prompt(text: str) -> str:
     return path
 
 
-class ClaudeCodeHarness:
+class ClaudeCodeHarness(ConfiguredModels):
     name = "claude-code"
     label = "Claude Code"
     bin = CLAUDE_BIN
     missing_session_marker = "No conversation found with session ID"
 
     def launch(self, req: RunRequest) -> Launch:
+        selection = self.resolve_model(req.model)
+        key = selection.connection.api_key()
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+        # Explicit settings outrank user/project env and apiKeyHelper settings.
+        # The helper reads the key from the child env; no secret goes in argv
+        # or the temporary settings file.
+        route_env = {name: "" for name in (
+            "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+            "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+            "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
+        )}
+        settings = {"env": route_env, "apiKeyHelper": ""}
+        for name in route_env:
+            env.pop(name, None)
+        env.pop("YUKI_MODEL_API_KEY", None)
+        if key is not None:
+            env["YUKI_MODEL_API_KEY"] = key
+            route_env["ANTHROPIC_BASE_URL"] = selection.connection.base_url
+            helper = [sys.executable, "-c", "import os; print(os.environ['YUKI_MODEL_API_KEY'])"]
+            settings["apiKeyHelper"] = (
+                subprocess.list2cmdline(helper) if os.name == "nt" else shlex.join(helper)
+            )
+        else:
+            settings["forceLoginMethod"] = "claudeai"
         plugin_dirs = skill_plugin_dirs()
         # The synthesized skills listing runs to tens of KB in skill-heavy
         # projects. Passing it inline blows Windows' 32767-char command-line
@@ -331,7 +348,13 @@ class ClaudeCodeHarness:
                 task_id=req.task_id,
             )
         )
+        try:
+            settings_file = write_temp_prompt(json.dumps(settings))
+        except OSError:
+            Path(prompt_file).unlink(missing_ok=True)
+            raise
         args = [
+            "--settings", settings_file,
             "-p",
             "--dangerously-skip-permissions",
             "--output-format", "stream-json",
@@ -344,7 +367,7 @@ class ClaudeCodeHarness:
         ]
         for plugin_dir in plugin_dirs:
             args.extend(["--plugin-dir", plugin_dir])
-        args.extend(["--model", req.model or CLAUDE_DEFAULT_MODEL])
+        args.extend(["--model", selection.model])
         if req.session_id:
             args.extend(["-r", req.session_id])
         args.append(req.prompt)
@@ -356,9 +379,8 @@ class ClaudeCodeHarness:
         else:
             argv = [self.bin, *args]
 
-        # Unset CLAUDECODE to avoid nested session errors.
-        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-        return Launch(argv=argv, env=env, temp_files=[prompt_file])
+        return Launch(argv=argv, env=env, temp_files=[prompt_file, settings_file],
+                      secret_values=[key] if key else [], model_alias=selection.id)
 
     def new_parser(self) -> ClaudeStreamParser:
         return ClaudeStreamParser()
@@ -369,16 +391,3 @@ class ClaudeCodeHarness:
         config = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
         project = re.sub(r"[^A-Za-z0-9]", "-", str(Path(cwd).resolve()))
         return (config / "projects" / project / f"{session_id}.jsonl").is_file()
-
-    def model_aliases(self) -> dict[str, str]:
-        return {name: slug for name, slug in MODEL_ALIASES.items() if name != "default"}
-
-    def models(self) -> list[ModelOption]:
-        return [ModelOption(id=slug, label=name) for name, slug in self.model_aliases().items()]
-
-    def default_model(self) -> str | None:
-        return MODEL_ALIASES["default"]
-
-    def default_label(self) -> str | None:
-        # Hide the context-window suffix in the picker label.
-        return MODEL_ALIASES["default"].split("[", 1)[0]

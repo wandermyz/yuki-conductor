@@ -292,6 +292,13 @@ class SlackPlatform:
 
         return SessionStore().get_harness(conversation_key)
 
+    def set_model(self, conversation_key: str, model: str, harness: str) -> None:
+        """Pin an automation's alias to its thread without changing the channel."""
+        from yuki_conductor.store import ModelStore
+
+        store = ModelStore()
+        store.set(store.key(conversation_key, harness), model)
+
     def set_session_id(
         self,
         conversation_key: str,

@@ -41,6 +41,8 @@ tasks:
     prompt: >
       The prompt yuki-conductor will send to a fresh Claude Code run when the
       task fires. Write it as an instruction to Claude.
+    harness: claude-code             # optional; an enabled harness
+    model: sonnet                    # optional; alias ID in workspace/models.yaml
     chat_app: slack                  # optional; where to post the result
     origin_conversation: <conv-id>   # optional; conversation that set this up
     paused: true                     # optional; suspend the schedule without deleting
@@ -57,6 +59,10 @@ Field notes:
 - `description` — short human-readable label shown in the chat app.
 - `prompt` — the instruction Claude runs when the task fires. Each firing opens a
   fresh thread; follow-up replies in that thread continue the conversation.
+- `harness` — optional enabled harness; omitted uses the machine default.
+- `model` — optional alias ID under that harness in `workspace/models.yaml`.
+  Read that file to choose a valid alias; never copy a key value into cron.yaml.
+  Omit to use the harness default. An explicit alias is kept for follow-up replies.
 - `chat_app` — optional. Which chat surface receives the result. Omit to use the
   first enabled platform. If you name one that isn't enabled, the task is
   skipped with a warning, so only set it when you know the value is enabled.

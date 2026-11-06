@@ -23,6 +23,7 @@ from yuki_conductor.harness.base import (
     StreamEvent,
     StreamParser,
 )
+from yuki_conductor.model_config import ModelConfigError
 
 logger = logging.getLogger(__name__)
 
@@ -168,10 +169,13 @@ def run_agent(
             reported by `running_runs()`.
     """
     with _track_run(kind):
-        return _run_agent(
-            harness, prompt, session_id, timeout, model, conversation_key, cwd,
-            push_conversation_id, on_event, task_id,
-        )
+        try:
+            return _run_agent(
+                harness, prompt, session_id, timeout, model, conversation_key, cwd,
+                push_conversation_id, on_event, task_id,
+            )
+        except ModelConfigError as exc:
+            return RunResult(text=str(exc), session_id=session_id, is_error=True)
 
 
 def _run_agent(
@@ -195,11 +199,27 @@ def _run_agent(
         conversation_key=push_conversation_id,
         task_id=task_id,
     ))
+
+    def redact(value):
+        if isinstance(value, str):
+            for secret in launch.secret_values:
+                value = value.replace(secret, "[redacted]")
+            return value
+        if isinstance(value, dict):
+            return {redact(k): redact(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [redact(v) for v in value]
+        return value
+
+    def safe_event(event):
+        if on_event:
+            on_event(StreamEvent(event.kind, redact(event.label), redact(event.detail)))
+
     # Let injected skills locate the yuki-conductor project (e.g. to run its CLI).
     env = {**launch.env, "YUKI_CONDUCTOR_PROJECT": str(project_dir())}
     # Task creation inherits this run's selection, including a configured default.
     env["YUKI_CONDUCTOR_HARNESS"] = harness.name
-    env["YUKI_CONDUCTOR_MODEL"] = model or harness.default_model() or ""
+    env["YUKI_CONDUCTOR_MODEL"] = launch.model_alias or model or harness.default_model() or ""
     # Only a task turn has a task: an inherited id would make `send` and
     # `task comment` write to a task this run isn't working on.
     env.pop("YUKI_TASK_ID", None)
@@ -247,7 +267,7 @@ def _run_agent(
             )
         else:
             text = f"Failed to start {harness.bin}: {exc}"
-        return RunResult(text=text, session_id=None, is_error=True)
+        return RunResult(text=redact(text), session_id=None, is_error=True)
 
     if conversation_key:
         register_process(conversation_key, proc)
@@ -255,7 +275,7 @@ def _run_agent(
     parser = harness.new_parser()
     try:
         raw_stdout, stderr, timed_out = _consume_stream(
-            proc, effective_timeout, parser, on_event
+            proc, effective_timeout, parser, safe_event if on_event else None
         )
     finally:
         _cleanup_temp_files(launch.temp_files)
@@ -286,13 +306,14 @@ def _run_agent(
             or f"{harness.bin} exited with code {proc.returncode}"
         )
         return RunResult(
-            text=error_text,
+            text=redact(error_text),
             session_id=session_id,
             is_error=True,
             session_missing=_reports_missing_session(harness, session_id, error_text),
         )
 
     result = parser.finish(raw_stdout, session_id)
+    result.text = redact(result.text)
     if result.is_error and _reports_missing_session(harness, session_id, result.text):
         result.session_missing = True
     return result
