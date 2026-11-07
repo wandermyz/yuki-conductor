@@ -94,7 +94,7 @@ def test_concurrent_routes_are_isolated_and_never_serialize_keys(endpoints, harn
                 assert config["model_providers"]["yuki"]["base_url"] == f"http://localhost:{port}/v1"
                 assert config["model_providers"]["yuki"]["env_key"] == "YUKI_MODEL_API_KEY"
                 assert config["model_providers"]["yuki"]["requires_openai_auth"] is False
-                assert config["forced_login_method"] == "api"
+                assert "forced_login_method" not in config
                 assert "resume" in launch.argv
             assert secret not in repr(launch)
             assert secret not in " ".join(launch.argv)
@@ -110,7 +110,7 @@ def test_concurrent_routes_are_isolated_and_never_serialize_keys(endpoints, harn
 def test_subscription_overrides_inherited_routing(endpoints, monkeypatch, harness, alias):
     for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
                  "CLAUDE_CODE_USE_BEDROCK", "OPENAI_API_KEY", "OPENAI_BASE_URL",
-                 "YUKI_MODEL_API_KEY"):
+                 "YUKI_MODEL_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"):
         monkeypatch.setenv(name, "wrong-route")
     launch = _launch(harness, alias)
     try:
@@ -121,14 +121,106 @@ def test_subscription_overrides_inherited_routing(endpoints, monkeypatch, harnes
             assert config["forceLoginMethod"] == "claudeai"
             assert config["env"]["ANTHROPIC_BASE_URL"] == ""
             assert "ANTHROPIC_AUTH_TOKEN" not in launch.env
+            assert "CLAUDE_CODE_OAUTH_TOKEN" not in launch.env
+            assert config["env"]["CLAUDE_CODE_OAUTH_TOKEN"] == ""
         else:
             config = _profile(launch)
             assert config["model_provider"] == "openai"
             assert config["forced_login_method"] == "chatgpt"
-            assert config["openai_base_url"] == "https://api.openai.com/v1"
+            assert config["openai_base_url"] == "https://chatgpt.com/backend-api/codex"
             assert "OPENAI_BASE_URL" not in launch.env
     finally:
         _cleanup(launch)
+
+
+@pytest.fixture
+def subscription_token(endpoints):
+    token_file = endpoints.parent / "subscription-token"
+    token_file.write_text("subscription-test-token\n", encoding="utf-8")
+    data = yaml.safe_load(endpoints.read_text())
+    section = data["harness"]["claude-code"]
+    connection = section["aliases"]["sonnet"]["connection"]
+    section["connections"][connection]["oauth_token"] = {"file": token_file.name}
+    endpoints.write_text(yaml.safe_dump(data))
+    return token_file
+
+
+def test_subscription_token_is_private_and_does_not_leak_to_endpoint(subscription_token, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "wrong-inherited-token")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "wrong-api-key")
+    parent = dict(os.environ)
+    launch = _launch(ClaudeCodeHarness(), "sonnet", "existing-session")
+    try:
+        secret = "subscription-test-token"
+        assert launch.env["CLAUDE_CODE_OAUTH_TOKEN"] == secret
+        assert launch.secret_values == [secret]
+        assert "ANTHROPIC_API_KEY" not in launch.env
+        assert "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR" not in launch.env
+        assert "YUKI_MODEL_API_KEY" not in launch.env
+        config = _settings(launch)
+        assert config["forceLoginMethod"] == "claudeai"
+        assert config["apiKeyHelper"] == ""
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in config["env"]
+        assert "-r" in launch.argv
+        assert secret not in repr(launch)
+        assert secret not in " ".join(launch.argv)
+        for path in launch.temp_files:
+            assert secret not in Path(path).read_text(encoding="utf-8")
+        assert dict(os.environ) == parent
+    finally:
+        _cleanup(launch)
+    launch = _launch(ClaudeCodeHarness(), "same-gh")
+    try:
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in launch.env
+        assert _settings(launch)["env"]["CLAUDE_CODE_OAUTH_TOKEN"] == ""
+    finally:
+        _cleanup(launch)
+
+
+@pytest.mark.parametrize("contents", [None, "", " \n", "first\nsecond", "first\0second", b"\xff"])
+def test_invalid_subscription_token_fails_before_launch(subscription_token, contents):
+    if contents is None:
+        subscription_token.unlink()
+    elif isinstance(contents, bytes):
+        subscription_token.write_bytes(contents)
+    else:
+        subscription_token.write_text(contents)
+    # Pickers must not read credentials.
+    assert ClaudeCodeHarness().models()
+    with patch("subprocess.Popen") as popen:
+        result = run_agent(ClaudeCodeHarness(), "hello", model="sonnet")
+    popen.assert_not_called()
+    assert result.is_error and "token" in result.text.lower()
+    assert "first" not in result.text
+
+
+def test_subscription_token_is_reread_each_launch(subscription_token):
+    subscription_token.write_text("rotated-token\n")
+    launch = _launch(ClaudeCodeHarness(), "sonnet")
+    try:
+        assert launch.env["CLAUDE_CODE_OAUTH_TOKEN"] == "rotated-token"
+    finally:
+        _cleanup(launch)
+
+
+@pytest.mark.parametrize("harness,connection,token", [
+    ("claude-code", "gh", {"file": "token"}),
+    ("codex", "subscription", {"file": "token"}),
+    ("claude-code", "subscription", "plaintext-secret"),
+    ("claude-code", "subscription", {"env": "TOKEN"}),
+    ("claude-code", "subscription", {"file": ""}),
+])
+def test_invalid_subscription_token_config(endpoints, harness, connection, token):
+    data = yaml.safe_load(endpoints.read_text())
+    section = data["harness"][harness]
+    if connection == "subscription":
+        alias = "sonnet" if harness == "claude-code" else "sol"
+        connection = section["aliases"][alias]["connection"]
+    section["connections"][connection]["oauth_token"] = token
+    endpoints.write_text(yaml.safe_dump(data))
+    with pytest.raises(ModelConfigError) as error:
+        load_harness_models(harness)
+    assert "plaintext-secret" not in str(error.value)
 
 
 def test_listing_does_not_read_keys_but_launch_requires_them(endpoints, monkeypatch):
@@ -189,6 +281,24 @@ def test_credentials_are_redacted_from_streams_and_results(endpoints, returncode
     proc = _mock_popen(stdout=output, stderr=secret, returncode=returncode)
     with patch("subprocess.Popen", return_value=proc):
         result = run_agent(ClaudeCodeHarness(), "hello", on_event=events.append)
+    assert secret not in result.text
+    assert secret not in repr(events)
+    assert "[redacted]" in result.text
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_subscription_token_is_redacted_from_streams_and_results(subscription_token, returncode):
+    from tests.test_harness_claude_code import _mock_popen, _result_record, _stream
+
+    secret = "subscription-test-token"
+    output = _stream(
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": secret}]}},
+        _result_record(secret),
+    )
+    events = []
+    proc = _mock_popen(stdout=output, stderr=secret, returncode=returncode)
+    with patch("subprocess.Popen", return_value=proc):
+        result = run_agent(ClaudeCodeHarness(), "hello", model="sonnet", on_event=events.append)
     assert secret not in result.text
     assert secret not in repr(events)
     assert "[redacted]" in result.text

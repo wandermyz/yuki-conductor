@@ -313,6 +313,7 @@ class ClaudeCodeHarness(ConfiguredModels):
     def launch(self, req: RunRequest) -> Launch:
         selection = self.resolve_model(req.model)
         key = selection.connection.api_key()
+        token = selection.connection.oauth_token()
         env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
         # Explicit settings outrank user/project env and apiKeyHelper settings.
         # The helper reads the key from the child env; no secret goes in argv
@@ -344,6 +345,11 @@ class ClaudeCodeHarness(ConfiguredModels):
             )
         else:
             settings["forceLoginMethod"] = "claudeai"
+            if token is not None:
+                # Keep the token out of argv and settings files. An empty
+                # settings override would hide the token in the child env.
+                route_env.pop("CLAUDE_CODE_OAUTH_TOKEN")
+                env["CLAUDE_CODE_OAUTH_TOKEN"] = token
         plugin_dirs = skill_plugin_dirs()
         # The synthesized skills listing runs to tens of KB in skill-heavy
         # projects. Passing it inline blows Windows' 32767-char command-line
@@ -388,7 +394,8 @@ class ClaudeCodeHarness(ConfiguredModels):
             argv = [self.bin, *args]
 
         return Launch(argv=argv, env=env, temp_files=[prompt_file, settings_file],
-                      secret_values=[key] if key else [], model_alias=selection.id)
+                      secret_values=[secret for secret in (key, token) if secret],
+                      model_alias=selection.id)
 
     def new_parser(self) -> ClaudeStreamParser:
         return ClaudeStreamParser()

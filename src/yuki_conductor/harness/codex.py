@@ -297,13 +297,19 @@ class CodexHarness(ConfiguredModels):
         for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY", "YUKI_MODEL_API_KEY"):
             env.pop(name, None)
         if key is None:
+            # An explicit API base URL overrides Codex's automatic ChatGPT
+            # routing even with OAuth credentials. Pin the subscription route
+            # to ChatGPT so inherited API routing cannot take precedence.
             route = ('model_provider="openai"\nforced_login_method="chatgpt"\n'
-                     'openai_base_url="https://api.openai.com/v1"\n'
+                     'openai_base_url="https://chatgpt.com/backend-api/codex"\n'
                      'chatgpt_base_url="https://chatgpt.com/backend-api"\n')
         else:
             env["YUKI_MODEL_API_KEY"] = key
+            # The provider's env_key authenticates endpoint requests independently
+            # of the saved OpenAI login. Forcing API login here would log out a
+            # saved ChatGPT account and delete its credentials from the real home.
             route = (
-                'model_provider="yuki"\nforced_login_method="api"\n'
+                'model_provider="yuki"\n'
                 '[model_providers.yuki]\nname="Yuki endpoint"\n'
                 f'base_url={_toml_string(selection.connection.base_url)}\n'
                 'env_key="YUKI_MODEL_API_KEY"\nwire_api="responses"\n'
