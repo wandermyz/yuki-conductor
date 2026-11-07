@@ -125,6 +125,10 @@ require an explicit configuration; pi continues using its own provider catalog.
 before updating and restarting. It covers subscription and endpoint setups,
 stored selections, verification, and rollback.
 
+**Setting up subscriptions on another computer:** follow the
+[subscription login guide](docs/subscription-login-setup.md) for Claude Code
+token files, Codex ChatGPT login, unattended macOS operation, and verification.
+
 An alias names a literal `model`, a `connection`, and an optional display
 `label`. Conversations, tasks, Slack pins and cron's `model:` store the alias
 ID, so two aliases can run the same model on different endpoints. A null
