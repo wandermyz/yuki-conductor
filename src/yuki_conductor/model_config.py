@@ -25,6 +25,24 @@ class Connection:
     base_url: str | None = None
     key_env: str | None = None
     key_file: Path | None = None
+    oauth_token_file: Path | None = None
+
+    def oauth_token(self) -> str | None:
+        if self.oauth_token_file is None:
+            return None
+        try:
+            value = self.oauth_token_file.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeError):
+            raise ModelConfigError(
+                f"Cannot read subscription OAuth token file {self.oauth_token_file}"
+            ) from None
+        if not value:
+            raise ModelConfigError(
+                f"Subscription OAuth token file {self.oauth_token_file} is empty"
+            )
+        if any(c in value for c in "\r\n\0"):
+            raise ModelConfigError("Subscription OAuth token must be a single line")
+        return value
 
     def api_key(self) -> str | None:
         if self.type == "subscription":
@@ -82,17 +100,27 @@ def _text(value, location: str) -> str:
     return value.strip()
 
 
-def _connection(raw, location: str, config_dir: Path) -> Connection:
-    raw = _mapping(raw, location, {"type", "base_url", "api_key"})
+def _connection(raw, location: str, config_dir: Path, harness: str) -> Connection:
+    raw = _mapping(raw, location, {"type", "base_url", "api_key", "oauth_token"})
     kind = raw.get("type")
     if kind == "subscription":
-        if raw.keys() != {"type"}:
+        if raw.keys() - {"type", "oauth_token"}:
             raise ModelConfigError(
                 f"{location}: subscription connections cannot define endpoint settings"
             )
-        return Connection(type=kind)
+        if "oauth_token" not in raw:
+            return Connection(type=kind)
+        if harness != "claude-code":
+            raise ModelConfigError(f"{location}.oauth_token is only supported for Claude Code")
+        token = _mapping(raw["oauth_token"], f"{location}.oauth_token", {"file"})
+        path = Path(_text(token.get("file"), f"{location}.oauth_token.file")).expanduser()
+        if not path.is_absolute():
+            path = config_dir / path
+        return Connection(type=kind, oauth_token_file=path)
     if kind != "endpoint":
         raise ModelConfigError(f"{location}.type must be subscription or endpoint")
+    if "oauth_token" in raw:
+        raise ModelConfigError(f"{location}: endpoint connections cannot define subscription tokens")
     base_url = _text(raw.get("base_url"), f"{location}.base_url").rstrip("/")
     try:
         url = urlsplit(base_url)
@@ -131,7 +159,7 @@ def load_harness_models(harness: str, path: Path | None = None) -> HarnessModels
                        {"default", "connections", "aliases"})
     raw_connections = _mapping(section.get("connections"), "connections")
     connections = {
-        name: _connection(raw, f"connections.{name}", path.parent)
+        name: _connection(raw, f"connections.{name}", path.parent, harness)
         for name, raw in raw_connections.items()
     }
     aliases = {}

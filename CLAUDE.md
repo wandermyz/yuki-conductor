@@ -697,13 +697,26 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
   (`harness/models.py`) supplies the picker and Slack's label-to-ID mapping.
   There are no hardcoded alias tables or Claude/Codex model-default env vars.
 - **Connections** are `subscription` (the CLI's signed-in account) or `endpoint`
-  (`base_url` and `api_key: {env: NAME}` or `{file: PATH}`). Never store literal
+  (`base_url` and `api_key: {env: NAME}` or `{file: PATH}`). Claude subscription
+  connections may set `oauth_token: {file: PATH}` for a `claude setup-token`
+  token, enabling unattended launches without Keychain access. The token is
+  read at launch, passed as `CLAUDE_CODE_OAUTH_TOKEN` in the child environment,
+  and redacted from results and live events. A missing or invalid token file
+  fails the launch without falling back to saved login. Codex subscription
+  credentials use the CLI's own storage (`cli_auth_credentials_store = "file"`
+  avoids Keychain access). Codex subscription launches pin the built-in OpenAI
+  provider to `https://chatgpt.com/backend-api/codex`; an explicit
+  `https://api.openai.com/v1` override would send OAuth credentials to the API
+  endpoint rather than use subscription routing. Never store literal
   keys in YAML, argv or generated files. Credentials are resolved at launch,
   passed via the child's environment and redacted from surfaced stream events
   and results. Claude uses an explicit settings file and an `apiKeyHelper`
   reading the child env; Codex layers a provider into its unique temporary
   profile. Both override inherited routing without editing permanent CLI
-  settings or changing the CLI home/session directory. Endpoint protocols are
+  settings or changing the CLI home/session directory. Endpoint requests are
+  authenticated independently of the saved subscription login: Codex endpoint
+  launches must not set `forced_login_method = "api"`, which logs out a saved
+  ChatGPT account and deletes its credentials. Endpoint protocols are
   Anthropic Messages for Claude and Responses for Codex; URLs are used exactly
   as configured. Missing aliases/keys fail without a route fallback.
 - **Config edits** apply on subsequent launches; listing models never reads key
