@@ -33,6 +33,7 @@ class IncomingMessage:
     # Harness for a *new* conversation; an existing one keeps its own.
     harness: str | None = None
     wait_for_mcp: bool = False
+    skip_permissions: bool = False
 
 
 @dataclass

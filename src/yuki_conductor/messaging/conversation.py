@@ -141,6 +141,7 @@ def handle_incoming_message(
                 session_id=session_id,
                 model=model,
                 wait_for_mcp=msg.wait_for_mcp,
+                skip_permissions=msg.skip_permissions,
                 conversation_key=msg.conversation_key,
                 cwd=msg.cwd,
                 # Only keys `/api/push` can route are advertised.

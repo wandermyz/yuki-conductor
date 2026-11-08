@@ -359,7 +359,9 @@ function RenameModal({
 function ConvMenu({
   status,
   waitForMcp,
+  skipPermissions,
   onSetWaitForMcp,
+  onSetSkipPermissions,
   onShowSessionId,
   onRename,
   onSetStatus,
@@ -369,7 +371,9 @@ function ConvMenu({
 }: {
   status: ConvStatus;
   waitForMcp: boolean;
+  skipPermissions: boolean;
   onSetWaitForMcp: (enabled: boolean) => void;
+  onSetSkipPermissions: (enabled: boolean) => void;
   onShowSessionId: () => void;
   onRename: () => void;
   onSetStatus: (s: ConvStatus) => void;
@@ -400,6 +404,7 @@ function ConvMenu({
       >
         Show Session ID
       </button>
+      <div className="conv-menu-divider" />
       <button
         className="conv-menu-item"
         role="checkbox"
@@ -408,6 +413,15 @@ function ConvMenu({
         onClick={(e) => { e.stopPropagation(); onSetWaitForMcp(!waitForMcp); onClose(); }}
       >
         <span aria-hidden="true">{waitForMcp ? "☑" : "☐"}</span> Wait for MCP
+      </button>
+      <button
+        className="conv-menu-item"
+        role="checkbox"
+        aria-checked={skipPermissions}
+        title="Skip approval checks instead of automatic review on subsequent turns"
+        onClick={(e) => { e.stopPropagation(); onSetSkipPermissions(!skipPermissions); onClose(); }}
+      >
+        <span aria-hidden="true">{skipPermissions ? "☑" : "☐"}</span> Skip Permissions
       </button>
       <div className="conv-menu-divider" />
       {/* Status moves one step at a time: unread <-> read <-> done. */}
@@ -903,6 +917,7 @@ function ChatThread({
   onDelete,
   onSetModel,
   onSetWaitForMcp,
+  onSetSkipPermissions,
 }: {
   conv: Conversation;
   harness: HarnessInfo | undefined;
@@ -922,6 +937,7 @@ function ChatThread({
   onDelete: () => void;
   onSetModel: (model: string | null) => void;
   onSetWaitForMcp: (enabled: boolean) => void;
+  onSetSkipPermissions: (enabled: boolean) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
@@ -986,7 +1002,9 @@ function ChatThread({
             <ConvMenu
               status={status}
               waitForMcp={conv.wait_for_mcp}
+              skipPermissions={conv.skip_permissions}
               onSetWaitForMcp={onSetWaitForMcp}
+              onSetSkipPermissions={onSetSkipPermissions}
               onShowSessionId={onShowSessionId}
               onRename={onRename}
               onSetStatus={onSetStatus}
@@ -1310,6 +1328,16 @@ export default function Chat({
     }
   };
 
+  const setSkipPermissions = async (id: string, enabled: boolean) => {
+    try {
+      const updated = await updateConversation(id, { skip_permissions: enabled });
+      setConversations((prev) => prev.map((c) => c.id === id ? updated : c));
+    } catch (err) {
+      console.error("Failed to update permission bypass", err);
+      alert("Could not save Skip Permissions. Please try again.");
+    }
+  };
+
   const setModel = async (id: string, model: string | null) => {
     // Optimistic, like rename: the picker shows the choice at once.
     const prevModel = conversations.find((c) => c.id === id)?.model ?? null;
@@ -1530,7 +1558,9 @@ export default function Chat({
                         <ConvMenu
                           status={st}
                           waitForMcp={c.wait_for_mcp}
+                          skipPermissions={c.skip_permissions}
                           onSetWaitForMcp={(enabled) => setWaitForMcp(c.id, enabled)}
+                          onSetSkipPermissions={(enabled) => setSkipPermissions(c.id, enabled)}
                           onShowSessionId={() => setSessionIdModal(c.claude_session_id || "(no session yet)")}
                           onRename={() => setRenaming(c.id)}
                           onSetStatus={(s) => setStatus(c.id, s)}
@@ -1572,6 +1602,7 @@ export default function Chat({
             onDelete={() => remove(active.id)}
             onSetModel={(model) => setModel(active.id, model)}
             onSetWaitForMcp={(enabled) => setWaitForMcp(active.id, enabled)}
+            onSetSkipPermissions={(enabled) => setSkipPermissions(active.id, enabled)}
           />
         ) : (
           <div className="chat-placeholder">

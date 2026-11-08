@@ -618,7 +618,19 @@ Keep the code clean. **No backward compatibility is required.** This project has
 
 ## Harnesses
 
-Web conversations have an optional **Wait for MCP** checkbox in their menu
+Claude Code turns default to `--permission-mode auto`; Codex turns default to
+`--approve-for-me` (automatic review with a workspace-write sandbox), including
+headless and resumed turns. Web conversations can enable **Skip Permissions** in
+their menu to use Claude's `bypassPermissions` or Codex's
+`--dangerously-bypass-approvals-and-sandbox` on subsequent turns. The setting
+is stored as `conversations.skip_permissions`, defaults off, and never changes
+a turn already running. Unavailable review models or reviewer denials do not
+fall back to bypass. LiteLLM must serve Claude's classifier model as well as
+the conversation model (currently `claude-sonnet-5` by default). It must also
+serve `codex-auto-review` when Codex advertises that dedicated reviewer; otherwise
+Codex's custom provider uses the conversation model for review.
+
+Web conversations have an optional **Wait for MCP** checkbox in the same separated menu section
 (default off). It is stored as `conversations.wait_for_mcp` and applies to
 subsequent turns, including resumed sessions. Codex receives a shared 30-second
 optional-server startup grace; Claude receives blocking startup with a
@@ -631,9 +643,9 @@ A turn runs on one **harness**, an agent CLI. `harness/__init__.py` knows these
 
 | Name | CLI | Notes |
 | --- | --- | --- |
-| `claude-code` | `claude -p --output-format stream-json --verbose …` | Windows shims; skill listing synthesized (see Skill Discovery) |
+| `claude-code` | `claude -p --permission-mode auto --output-format stream-json --verbose …` | Windows shims; skill listing synthesized (see Skill Discovery) |
 | `pi` | `pi --mode json --no-approve --model <provider/id> …` | `PI_BIN`, `PI_DEFAULT_MODEL` (`strata/qwen3.8-flash-next-iq2_xs`); providers live in `~/.pi/agent`, not here |
-| `codex` | `codex exec [resume] --json --dangerously-bypass-approvals-and-sandbox …` | `CODEX_BIN`; aliases and connections live in `workspace/models.yaml`. On Windows the npm `.cmd` shim is skipped for the vendored `codex.exe`, since cmd.exe mangles a multi-line argument |
+| `codex` | `codex exec --approve-for-me [resume] --json …` | `CODEX_BIN`; aliases and connections live in `workspace/models.yaml`. On Windows the npm `.cmd` shim is skipped for the vendored `codex.exe`, since cmd.exe mangles a multi-line argument |
 
 **Which exist on a machine is the `HARNESSES` setting** in
 `~/.yuki-conductor/.env`, e.g. `HARNESSES=claude-code,pi`. It's a

@@ -53,6 +53,7 @@ class StoredConversation:
     archived_at: float | None = None  # set: hidden from the web UI, only reachable via SQL
     model: str | None = None  # harness-native model id; None: the harness's default
     wait_for_mcp: bool = False
+    skip_permissions: bool = False
 
 
 # Wraps each matched term in a search snippet. Control characters, so they
@@ -99,7 +100,8 @@ class ConversationStore:
                         harness TEXT NOT NULL DEFAULT 'claude-code',
                         archived_at REAL,
                         model TEXT,
-                        wait_for_mcp INTEGER NOT NULL DEFAULT 0
+                        wait_for_mcp INTEGER NOT NULL DEFAULT 0,
+                        skip_permissions INTEGER NOT NULL DEFAULT 0
                     )
                     """
                 )
@@ -162,6 +164,11 @@ class ConversationStore:
                         "ALTER TABLE conversations ADD COLUMN "
                         "wait_for_mcp INTEGER NOT NULL DEFAULT 0"
                     )
+                if "skip_permissions" not in cols:
+                    con.execute(
+                        "ALTER TABLE conversations ADD COLUMN "
+                        "skip_permissions INTEGER NOT NULL DEFAULT 0"
+                    )
                 usage_cols = {
                     row[1]
                     for row in con.execute("PRAGMA table_info(message_usage)").fetchall()
@@ -222,7 +229,7 @@ class ConversationStore:
             try:
                 row = con.execute(
                     "SELECT id, platform, title, project, claude_session_id, "
-                    "created_at, updated_at, harness, archived_at, model, wait_for_mcp FROM conversations WHERE id = ?",
+                    "created_at, updated_at, harness, archived_at, model, wait_for_mcp, skip_permissions FROM conversations WHERE id = ?",
                     (conv_id,),
                 ).fetchone()
                 if not row:
@@ -239,14 +246,14 @@ class ConversationStore:
                 if platform is not None:
                     rows = con.execute(
                         "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at, harness, archived_at, model, wait_for_mcp FROM conversations "
+                        "created_at, updated_at, harness, archived_at, model, wait_for_mcp, skip_permissions FROM conversations "
                         "WHERE platform = ? AND archived_at IS NULL ORDER BY updated_at DESC",
                         (platform,),
                     ).fetchall()
                 else:
                     rows = con.execute(
                         "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at, harness, archived_at, model, wait_for_mcp FROM conversations "
+                        "created_at, updated_at, harness, archived_at, model, wait_for_mcp, skip_permissions FROM conversations "
                         "WHERE archived_at IS NULL ORDER BY updated_at DESC"
                     ).fetchall()
                 return [StoredConversation(*r) for r in rows]
@@ -312,6 +319,20 @@ class ConversationStore:
             try:
                 cur = con.execute(
                     "UPDATE conversations SET wait_for_mcp = ? WHERE id = ?",
+                    (int(enabled), conv_id),
+                )
+                con.commit()
+                return cur.rowcount > 0
+            finally:
+                con.close()
+
+    def set_skip_permissions(self, conv_id: str, enabled: bool) -> bool:
+        """Set permission bypass without reordering the conversation list."""
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    "UPDATE conversations SET skip_permissions = ? WHERE id = ?",
                     (int(enabled), conv_id),
                 )
                 con.commit()

@@ -53,7 +53,8 @@ def test_basic_call():
     cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
     assert "claude" in cmd_str
     assert "-p" in cmd_str
-    assert "--dangerously-skip-permissions" in cmd_str
+    assert "--permission-mode auto" in cmd_str
+    assert "--dangerously-skip-permissions" not in cmd_str
     assert "--output-format" in cmd_str
     assert "stream-json" in cmd_str
     assert "--verbose" in cmd_str
@@ -494,3 +495,16 @@ def test_wait_for_mcp_reaches_cli_settings(enabled, session_id):
         assert "MCP_CONNECTION_NONBLOCKING" not in env
         assert "MCP_CONNECT_TIMEOUT_MS" not in env
         assert "MCP_TIMEOUT" not in env
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("session_id", [None, "sess-1"])
+def test_permission_mode_is_explicit_for_new_and_resumed_turns(enabled, session_id):
+    mock_proc = _mock_popen(stdout=_stream(_result_record()))
+    with patch("subprocess.Popen", return_value=mock_proc) as mock_cls:
+        run_agent(CLAUDE, "hi", skip_permissions=enabled, session_id=session_id)
+    argv = mock_cls.call_args[0][0]
+    assert argv[argv.index("--permission-mode") + 1] == (
+        "bypassPermissions" if enabled else "auto"
+    )
+    assert argv[argv.index("--permission-prompts") + 1] == "none"

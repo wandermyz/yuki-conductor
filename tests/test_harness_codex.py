@@ -89,7 +89,8 @@ def test_new_conversation_command_line():
     assert argv[:2] == ["codex", "exec"]
     assert "--json" in argv
     assert "resume" not in argv
-    assert "--dangerously-bypass-approvals-and-sandbox" in argv
+    assert "--approve-for-me" in argv
+    assert "--dangerously-bypass-approvals-and-sandbox" not in argv
     assert "--skip-git-repo-check" in argv
     # The prompt comes after `--`, so one starting with "-" isn't read as a flag.
     assert argv[-2:] == ["--", "-"]
@@ -350,3 +351,17 @@ def test_wait_for_mcp_uses_a_shared_30_second_budget(enabled, session_id):
         assert config["mcp_optional_startup_grace_ms"] == 30000
     else:
         assert "mcp_optional_startup_grace_ms" not in config
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("session_id", [None, "sess-1"])
+def test_permission_mode_replaces_resumed_reviewer(enabled, session_id):
+    argv = _launch(skip_permissions=enabled, session_id=session_id).argv
+    assert ("--dangerously-bypass-approvals-and-sandbox" in argv) is enabled
+    assert ("--approve-for-me" in argv) is not enabled
+    assert ('approvals_reviewer="user"' if enabled
+            else 'approvals_reviewer="auto_review"') in argv
+    if session_id:
+        assert argv.index("-c") < argv.index("resume")
+        if not enabled:
+            assert argv.index("--approve-for-me") < argv.index("resume")
