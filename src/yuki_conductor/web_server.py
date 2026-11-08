@@ -328,6 +328,7 @@ def create_api() -> FastAPI:
         project: str | None = None
         model: str | None = None  # only when sent; null returns to the harness default
         wait_for_mcp: bool = False
+        skip_permissions: bool = False
 
     class MessageCreate(BaseModel):
         text: str = ""
@@ -343,6 +344,7 @@ def create_api() -> FastAPI:
             "harness": c.harness,
             "model": c.model,
             "wait_for_mcp": bool(c.wait_for_mcp),
+            "skip_permissions": bool(c.skip_permissions),
             "created_at": c.created_at,
             "updated_at": c.updated_at,
         }
@@ -419,6 +421,8 @@ def create_api() -> FastAPI:
             conv_store.set_model(conv_id, selected)
         if "wait_for_mcp" in body.model_fields_set:
             conv_store.set_wait_for_mcp(conv_id, body.wait_for_mcp)
+        if "skip_permissions" in body.model_fields_set:
+            conv_store.set_skip_permissions(conv_id, body.skip_permissions)
         if body.title is not None or body.project is not None:
             conv_store.update_conversation(conv_id, title=body.title, project=body.project)
         # Mirror title into the legacy session store so the Sessions tab matches.
@@ -522,6 +526,7 @@ def create_api() -> FastAPI:
             title_hint=user_msg.text[:80] if is_thread_start else None,
             model=conv.model,
             wait_for_mcp=bool(conv.wait_for_mcp),
+            skip_permissions=bool(conv.skip_permissions),
             cwd=msg_cwd,
         )
 

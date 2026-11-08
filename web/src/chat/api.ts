@@ -9,6 +9,7 @@ export interface Conversation {
   /** Model alias ID for its next turns; null: the harness default. */
   model: string | null;
   wait_for_mcp: boolean;
+  skip_permissions: boolean;
   created_at: number;
   updated_at: number;
 }
@@ -145,7 +146,7 @@ export async function archiveConversation(id: string): Promise<void> {
 
 export async function updateConversation(
   id: string,
-  patch: { title?: string; project?: string; model?: string | null; wait_for_mcp?: boolean },
+  patch: { title?: string; project?: string; model?: string | null; wait_for_mcp?: boolean; skip_permissions?: boolean },
 ): Promise<Conversation> {
   const r = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
     method: "PATCH",

@@ -370,7 +370,9 @@ class ClaudeCodeHarness(ConfiguredModels):
         args = [
             "--settings", settings_file,
             "-p",
-            "--dangerously-skip-permissions",
+            "--permission-mode", "bypassPermissions" if req.skip_permissions else "auto",
+            # No SDK host is attached to answer the remaining human-only prompts.
+            "--permission-prompts", "none",
             "--output-format", "stream-json",
             "--verbose",
             # Without this, a headless run loads no settings at all, so neither

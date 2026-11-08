@@ -335,16 +335,20 @@ class CodexHarness(ConfiguredModels):
             raise
         profile = Path(profile_path).name.removesuffix(".config.toml")
         argv = [resolve_bin(self.bin), "exec", "--profile", profile]
+        # These overrides also replace a resumed thread's previous reviewer.
+        argv.extend(["-c", 'approvals_reviewer="user"' if req.skip_permissions
+                     else 'approvals_reviewer="auto_review"'])
+        if not req.skip_permissions:
+            argv.append("--approve-for-me")
         if req.session_id:
             argv.append("resume")
         argv.extend([
             "--json",
             # Not every cwd is a git repo, and nobody is there to trust one.
             "--skip-git-repo-check",
-            # Headless: nobody can approve a command, and without this every
-            # shell call is rejected while the model carries on regardless.
-            "--dangerously-bypass-approvals-and-sandbox",
         ])
+        if req.skip_permissions:
+            argv.append("--dangerously-bypass-approvals-and-sandbox")
         argv.extend(["-m", selection.model])
         # `--` so a prompt starting with "-" isn't read as a flag.
         argv.append("--")

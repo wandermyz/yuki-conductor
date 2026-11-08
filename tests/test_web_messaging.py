@@ -436,24 +436,25 @@ def test_missing_models_config_returns_actionable_error(client, isolated_models)
 
 
 
+@pytest.mark.parametrize("field", ["wait_for_mcp", "skip_permissions"])
 @pytest.mark.parametrize("enabled", [False, True])
-def test_wait_for_mcp_is_saved_and_forwarded_to_turns(client, monkeypatch, enabled):
+def test_turn_options_are_saved_and_forwarded(client, monkeypatch, enabled, field):
     from yuki_conductor.harness.base import RunResult
 
     conv = client.post("/api/conversations", json={"title": "MCP"}).json()
     url = f"/api/conversations/{conv['id']}"
-    assert conv["wait_for_mcp"] is False
-    response = client.patch(url, json={"wait_for_mcp": enabled})
+    assert conv[field] is False
+    response = client.patch(url, json={field: enabled})
     assert response.status_code == 200
-    assert response.json()["wait_for_mcp"] is enabled
+    assert response.json()[field] is enabled
     client.patch(url, json={"title": "renamed"})
-    assert client.get(url).json()["wait_for_mcp"] is enabled
-    assert client.get("/api/conversations").json()[0]["wait_for_mcp"] is enabled
+    assert client.get(url).json()[field] is enabled
+    assert client.get("/api/conversations").json()[0][field] is enabled
 
     seen = []
     monkeypatch.setattr(
         "yuki_conductor.messaging.conversation.run_agent",
-        lambda harness, prompt, **kw: seen.append(kw["wait_for_mcp"])
+        lambda harness, prompt, **kw: seen.append(kw[field])
         or RunResult(text="ok", session_id="s"),
     )
     client.post(f"{url}/messages", json={"text": "hi"})
@@ -463,9 +464,10 @@ def test_wait_for_mcp_is_saved_and_forwarded_to_turns(client, monkeypatch, enabl
     assert seen == [enabled]
 
 
-def test_wait_for_mcp_cannot_be_null(client):
+@pytest.mark.parametrize("field", ["wait_for_mcp", "skip_permissions"])
+def test_turn_options_cannot_be_null(client, field):
     conv = client.post("/api/conversations", json={}).json()
     response = client.patch(
-        f"/api/conversations/{conv['id']}", json={"wait_for_mcp": None}
+        f"/api/conversations/{conv['id']}", json={field: None}
     )
     assert response.status_code == 422

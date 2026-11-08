@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from yuki_conductor.conversation_store import (
     SNIPPET_MARK,
     ConversationStore,
@@ -329,18 +331,19 @@ def test_fts_replaces_old_external_content_index(tmp_path: Path):
     assert len(_fts_rowids(s2, '"新​​消"')) == 1
 
 
-def test_wait_for_mcp_persists_without_reordering(tmp_path):
+@pytest.mark.parametrize("field", ["wait_for_mcp", "skip_permissions"])
+def test_turn_options_persist_without_reordering(tmp_path, field):
     path = tmp_path / "conversation.db"
     store = ConversationStore(db_path=path)
     first = store.create_conversation()
     second = store.create_conversation()
-    assert not first.wait_for_mcp
-    assert store.set_wait_for_mcp(first.id, True)
+    assert not getattr(first, field)
+    assert getattr(store, "set_" + field)(first.id, True)
     reopened = ConversationStore(db_path=path)
-    assert reopened.get_conversation(first.id).wait_for_mcp
+    assert getattr(reopened.get_conversation(first.id), field)
     assert [c.id for c in reopened.list_conversations()] == [second.id, first.id]
     reopened.update_conversation(first.id, title="renamed")
-    assert reopened.get_conversation(first.id).wait_for_mcp
-    assert reopened.set_wait_for_mcp(first.id, False)
-    assert not reopened.get_conversation(first.id).wait_for_mcp
-    assert not reopened.set_wait_for_mcp("missing", True)
+    assert getattr(reopened.get_conversation(first.id), field)
+    assert getattr(reopened, "set_" + field)(first.id, False)
+    assert not getattr(reopened.get_conversation(first.id), field)
+    assert not getattr(reopened, "set_" + field)("missing", True)

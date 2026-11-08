@@ -60,6 +60,7 @@ class RunRequest:
     conversation_key: str | None  # named in the system prompt for `yuki-conductor send`
     task_id: int | None = None  # taskboard task this turn works on, if any
     wait_for_mcp: bool = False  # wait up to 30 seconds for MCP startup
+    skip_permissions: bool = False
 
 
 @dataclass

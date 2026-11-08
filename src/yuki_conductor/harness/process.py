@@ -141,6 +141,7 @@ def run_agent(
     task_id: int | None = None,
     kind: str = "chat",
     wait_for_mcp: bool = False,
+    skip_permissions: bool = False,
 ) -> RunResult:
     """Run one turn of `harness` and return its result.
 
@@ -167,6 +168,7 @@ def run_agent(
             to the system prompt and `YUKI_TASK_ID` to the env, which the
             `yuki-conductor task` commands default to.
         wait_for_mcp: Wait up to 30 seconds for MCP tools at startup.
+        skip_permissions: Bypass approval checks instead of automatic review.
         kind: What the run is for — "chat", "task" or "automation" — as
             reported by `running_runs()`.
     """
@@ -174,7 +176,7 @@ def run_agent(
         try:
             return _run_agent(
                 harness, prompt, session_id, timeout, model, conversation_key, cwd,
-                push_conversation_id, on_event, task_id, wait_for_mcp,
+                push_conversation_id, on_event, task_id, wait_for_mcp, skip_permissions,
             )
         except ModelConfigError as exc:
             return RunResult(text=str(exc), session_id=session_id, is_error=True)
@@ -192,6 +194,7 @@ def _run_agent(
     on_event: Callable[[StreamEvent], None] | None,
     task_id: int | None,
     wait_for_mcp: bool,
+    skip_permissions: bool,
 ) -> RunResult:
     effective_cwd = cwd or CLAUDE_WORKING_DIR
     launch = harness.launch(RunRequest(
@@ -202,6 +205,7 @@ def _run_agent(
         conversation_key=push_conversation_id,
         task_id=task_id,
         wait_for_mcp=wait_for_mcp,
+        skip_permissions=skip_permissions,
     ))
 
     def redact(value):
