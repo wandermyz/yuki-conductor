@@ -16,7 +16,7 @@ from yuki_conductor.store import CronRunStore  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def isolated_models(monkeypatch, tmp_path):
-    """Explicit subscription profiles, independent of this machine's routes."""
+    """Explicit subscription profiles (and pi on PATH), independent of this machine's routes."""
     import yaml
 
     from yuki_conductor import model_config
@@ -36,6 +36,13 @@ def isolated_models(monkeypatch, tmp_path):
             "aliases": {
                 "astra": {"model": "gpt-6-astra", "connection": "subscription"},
                 "sol": {"model": "gpt-6.1-sol", "connection": "subscription"},
+            },
+        },
+        "pi": {
+            "default": "strata",
+            "connections": {"local": {"type": "cli"}},
+            "aliases": {
+                "strata": {"model": "strata/qwen3.8-flash-next-iq2_xs", "connection": "local"},
             },
         },
     }}

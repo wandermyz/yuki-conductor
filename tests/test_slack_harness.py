@@ -137,9 +137,12 @@ def test_model_command_uses_the_channels_harness_aliases(app):
     assert slack_app.model_store.get(ModelStore.key("C1", "claude-code")) == "sonnet"
 
 
-def test_model_command_on_a_harness_without_choices(app):
+def test_model_command_on_pi_uses_its_aliases(app):
     _harness_cmd(app, "pi")
-    assert "no models to pick from" in _model_cmd(app, "astra")
+    assert "default (strata)" in _model_cmd(app, "")
+    assert "Unknown model `astra` for *pi*" in _model_cmd(app, "astra")
+    assert "switched to *strata*" in _model_cmd(app, "strata")
+    assert slack_app.model_store.get(ModelStore.key("C1", "pi")) == "strata"
 
 
 def test_thread_gets_the_pin_for_its_own_harness(app, monkeypatch):
