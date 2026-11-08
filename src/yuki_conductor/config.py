@@ -122,7 +122,6 @@ def taskboard_limit(harness: str) -> int:
 # ~/.pi/agent/models.json, which is personal machine config: yuki-conductor
 # only names the model, as `provider/id`.
 PI_BIN = os.environ.get("PI_BIN", "pi")
-PI_DEFAULT_MODEL = os.environ.get("PI_DEFAULT_MODEL", "strata/qwen3.8-flash-next-iq2_xs")
 
 # Codex (https://github.com/openai/codex). Models and routes live in models.yaml.
 CODEX_BIN = os.environ.get("CODEX_BIN", "codex")

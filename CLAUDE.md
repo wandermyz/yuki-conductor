@@ -644,7 +644,7 @@ A turn runs on one **harness**, an agent CLI. `harness/__init__.py` knows these
 | Name | CLI | Notes |
 | --- | --- | --- |
 | `claude-code` | `claude -p --permission-mode auto --output-format stream-json --verbose …` | Windows shims; skill listing synthesized (see Skill Discovery) |
-| `pi` | `pi --mode json --no-approve --model <provider/id> …` | `PI_BIN`, `PI_DEFAULT_MODEL` (`strata/qwen3.8-flash-next-iq2_xs`); providers live in `~/.pi/agent`, not here |
+| `pi` | `pi --mode json --no-approve --model <provider/id> …` | label `Pi`; `PI_BIN`; aliases in `workspace/models.yaml` pick the `<provider/id>` and, through a `cli` connection's `bin`, the executable (e.g. a sandbox wrapper). Providers and keys live in `~/.pi/agent`, not here |
 | `codex` | `codex exec --approve-for-me [resume] --json …` | `CODEX_BIN`; aliases and connections live in `workspace/models.yaml`. On Windows the npm `.cmd` shim is skipped for the vendored `codex.exe`, since cmd.exe mangles a multi-line argument |
 
 **Which exist on a machine is the `HARNESSES` setting** in
@@ -699,7 +699,7 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
   `/yuki-model astra` on a Codex one. `ModelStore` keys pins
   `<channel>:<harness>`, so switching harness never carries a model id to a
   CLI that doesn't know it, and each harness keeps its own pin. A thread uses
-  the pin for the harness *it* runs on; pi offers no picks.
+  the pin for the harness *it* runs on.
 - **Model selection is a per-harness alias ID**, stored on conversations,
   tasks, Slack pins and cron's optional `model:` field. The model reported in
   message usage is still the actual model that answered. `model_config.py`
@@ -709,7 +709,11 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
   (`harness/models.py`) supplies the picker and Slack's label-to-ID mapping.
   There are no hardcoded alias tables or Claude/Codex model-default env vars.
 - **Connections** are `subscription` (the CLI's signed-in account) or `endpoint`
-  (`base_url` and `api_key: {env: NAME}` or `{file: PATH}`). Claude subscription
+  (`base_url` and `api_key: {env: NAME}` or `{file: PATH}`) for Claude Code and
+  Codex. pi takes only `cli` connections, since pi reads providers and keys from
+  its own `~/.pi/agent`: a `cli` connection's optional `bin` (`~` expanded) is the
+  executable launched with pi's arguments instead of `PI_BIN`, e.g.
+  `pi-sandboxed`; the alias's `model` is pi's `<provider/id>`. Claude subscription
   connections may set `oauth_token: {file: PATH}` for a `claude setup-token`
   token, enabling unattended launches without Keychain access. The token is
   read at launch, passed as `CLAUDE_CODE_OAUTH_TOKEN` in the child environment,
@@ -735,7 +739,6 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
   values. A null selection follows the configured default. Existing stored
   selections must be updated in place when changing alias IDs; there are no
   legacy model-ID fallbacks. A deleted alias is marked unavailable in the UI.
-  pi continues to use its own provider catalog.
 - **Automation replies** keep an explicit cron alias on the reserved web
   conversation or a Slack thread pin (`ModelStore` key `<thread>:<harness>`),
   which takes precedence over that Slack channel's pin.

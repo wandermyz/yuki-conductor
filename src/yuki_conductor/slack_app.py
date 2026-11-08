@@ -111,10 +111,6 @@ def create_app() -> App:
         key = model_store.key(channel, name)
         default = harness.default_label() or harness.default_model() or "its own default"
 
-        if not aliases:
-            respond(f"*{name}* has no models to pick from here; it runs {default}.")
-            return
-
         options = ", ".join([DEFAULT_MODEL_ARG, *aliases])
         if not arg:
             pinned = model_store.get(key)

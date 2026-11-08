@@ -26,6 +26,7 @@ class Connection:
     key_env: str | None = None
     key_file: Path | None = None
     oauth_token_file: Path | None = None
+    bin: str | None = None  # `cli` only: the executable to launch instead of the harness's own
 
     def oauth_token(self) -> str | None:
         if self.oauth_token_file is None:
@@ -45,7 +46,7 @@ class Connection:
         return value
 
     def api_key(self) -> str | None:
-        if self.type == "subscription":
+        if self.type != "endpoint":
             return None
         if self.key_env:
             value = os.environ.get(self.key_env, "").strip()
@@ -101,8 +102,22 @@ def _text(value, location: str) -> str:
 
 
 def _connection(raw, location: str, config_dir: Path, harness: str) -> Connection:
-    raw = _mapping(raw, location, {"type", "base_url", "api_key", "oauth_token"})
+    raw = _mapping(raw, location, {"type", "base_url", "api_key", "oauth_token", "bin"})
     kind = raw.get("type")
+    # pi reads providers and keys from its own config; a connection only says
+    # which executable to launch (e.g. a sandboxing wrapper around pi).
+    if harness == "pi":
+        if kind != "cli":
+            raise ModelConfigError(f"{location}.type must be cli for pi")
+        if raw.keys() - {"type", "bin"}:
+            raise ModelConfigError(f"{location}: cli connections only take bin")
+        if "bin" not in raw:
+            return Connection(type=kind)
+        return Connection(type=kind, bin=os.path.expanduser(_text(raw["bin"], f"{location}.bin")))
+    if kind == "cli":
+        raise ModelConfigError(f"{location}: cli connections are only supported for pi")
+    if "bin" in raw:
+        raise ModelConfigError(f"{location}.bin is only supported for pi")
     if kind == "subscription":
         if raw.keys() - {"type", "oauth_token"}:
             raise ModelConfigError(

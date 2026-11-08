@@ -413,7 +413,7 @@ def create_api() -> FastAPI:
         if "model" in body.model_fields_set:
             selected = (body.model or "").strip() or None
             conv = conv_store.get_conversation(conv_id)
-            if selected and conv.harness != "pi":
+            if selected:
                 try:
                     load_harness_models(conv.harness).resolve(selected)
                 except ModelConfigError as exc:

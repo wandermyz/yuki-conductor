@@ -43,3 +43,23 @@ harness:
         label: sol (gateway)
         model: gpt-6.1-sol
         connection: gateway
+  pi:
+    # pi reads providers and keys from its own ~/.pi/agent; a connection only
+    # picks the executable. `bin` is launched with pi's arguments (default:
+    # PI_BIN, else `pi` on PATH), e.g. a wrapper that runs pi in a sandbox.
+    default: sandboxed
+    connections:
+      sandboxed:
+        type: cli
+        bin: ~/.local/bin/pi-sandboxed
+      local:
+        type: cli
+    aliases:
+      sandboxed:
+        label: Pi Sandboxed
+        model: strata/qwen3.8-flash-next-iq2_xs
+        connection: sandboxed
+      pi:
+        label: Pi
+        model: strata/qwen3.8-flash-next-iq2_xs
+        connection: local

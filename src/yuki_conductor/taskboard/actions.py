@@ -62,7 +62,7 @@ def _check_title(title: str) -> str:
 
 
 def _check_model(harness: str, model: str | None) -> None:
-    if model is not None and harness != "pi":
+    if model is not None:
         try:
             load_harness_models(harness).resolve(model)
         except ModelConfigError as exc:

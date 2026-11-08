@@ -258,6 +258,37 @@ def test_invalid_connections_fail_without_echoing_secret_source(endpoints, chang
     assert "plaintext-secret" not in str(error.value)
 
 
+@pytest.mark.parametrize("harness, connection, message", [
+    # pi brings its own providers: its connections only choose an executable.
+    ("pi", {"type": "subscription"}, "must be cli for pi"),
+    ("pi", {"type": "endpoint", "base_url": "http://localhost:4000",
+            "api_key": {"env": "ROUTE_GH"}}, "must be cli for pi"),
+    ("pi", {"type": "cli", "base_url": "http://localhost:4000"}, "only take bin"),
+    ("pi", {"type": "cli", "bin": ""}, "nonempty string"),
+    ("codex", {"type": "cli"}, "only supported for pi"),
+    ("claude-code", {"type": "subscription", "bin": "/usr/bin/claude"}, "only supported for pi"),
+])
+def test_cli_connections_are_pi_only(isolated_models, harness, connection, message):
+    data = yaml.safe_load(isolated_models.read_text())
+    section = data["harness"][harness]
+    section["connections"]["other"] = connection
+    isolated_models.write_text(yaml.safe_dump(data))
+    with pytest.raises(ModelConfigError, match=message):
+        load_harness_models(harness)
+
+
+def test_cli_connection_bin_expands_home_and_needs_no_key(isolated_models):
+    data = yaml.safe_load(isolated_models.read_text())
+    data["harness"]["pi"]["connections"]["sandbox"] = {"type": "cli", "bin": "~/bin/pi-wrap"}
+    data["harness"]["pi"]["aliases"]["wrapped"] = {"model": "strata/x", "connection": "sandbox"}
+    isolated_models.write_text(yaml.safe_dump(data))
+    models = load_harness_models("pi")
+    wrapped = models.resolve("wrapped").connection
+    assert wrapped.bin == os.path.expanduser("~/bin/pi-wrap")
+    assert wrapped.api_key() is None
+    assert models.resolve(None).connection.bin is None
+
+
 def test_missing_and_malformed_config_are_actionable_and_do_not_echo_source(endpoints):
     endpoints.write_text('harness: [ plaintext-secret: {')
     with pytest.raises(ModelConfigError, match="models.example.yaml") as error:

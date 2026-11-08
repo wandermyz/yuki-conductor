@@ -11,8 +11,10 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+import yaml
+
 from yuki_conductor import skills
-from yuki_conductor.config import PI_DEFAULT_MODEL
 from yuki_conductor.harness import KNOWN_HARNESSES
 from yuki_conductor.harness.base import RunRequest
 from yuki_conductor.harness.pi import (
@@ -23,6 +25,7 @@ from yuki_conductor.harness.pi import (
     model_context_window,
 )
 from yuki_conductor.harness.process import run_agent
+from yuki_conductor.model_config import ModelConfigError
 
 FIXTURES = Path(__file__).parent / "fixtures" / "harness" / "pi"
 
@@ -59,16 +62,47 @@ def test_new_conversation_command_line():
     argv = launch.argv
     assert argv[:3] == ["pi", "--mode", "json"]
     assert "--no-approve" in argv
-    assert argv[argv.index("--model") + 1] == PI_DEFAULT_MODEL
+    # No alias picked: the configured default's model.
+    assert argv[argv.index("--model") + 1] == "strata/qwen3.8-flash-next-iq2_xs"
+    assert launch.model_alias == "strata"
     assert "--session-id" not in argv
     # The prompt comes after `--`, so one starting with "-" isn't read as a flag.
     assert argv[-2:] == ["--", "hello"]
 
 
-def test_resume_and_model_override():
-    argv = _launch(session_id="sess-1", model="strata/other").argv
+@pytest.fixture
+def sandboxed(isolated_models):
+    """A second pi alias whose connection launches a wrapper instead of pi."""
+    data = yaml.safe_load(isolated_models.read_text())
+    pi = data["harness"]["pi"]
+    pi["connections"]["sandbox"] = {"type": "cli", "bin": "~/.local/bin/pi-sandboxed"}
+    pi["aliases"]["sandboxed"] = {
+        "label": "Pi Sandboxed", "model": "strata/other", "connection": "sandbox",
+    }
+    isolated_models.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def test_resume_and_alias_with_its_own_bin(sandboxed):
+    launch = _launch(session_id="sess-1", model="sandboxed")
+    argv = launch.argv
+    assert argv[0] == os.path.expanduser("~/.local/bin/pi-sandboxed")
+    assert argv[1:3] == ["--mode", "json"]
     assert argv[argv.index("--session-id") + 1] == "sess-1"
     assert argv[argv.index("--model") + 1] == "strata/other"
+    assert launch.model_alias == "sandboxed"
+
+
+def test_picker_lists_configured_aliases(sandboxed):
+    harness = PiHarness()
+    assert harness.label == "Pi"
+    assert harness.model_aliases() == {"strata": "strata", "Pi Sandboxed": "sandboxed"}
+    assert harness.default_model() == "strata"
+    assert harness.default_label() == "strata"
+
+
+def test_unknown_alias_never_launches():
+    with pytest.raises(ModelConfigError, match="Unknown model alias"):
+        _launch(model="strata/qwen3.8-flash-next-iq2_xs")
 
 
 def test_system_prompt_is_the_core_prompt_only(tmp_path):

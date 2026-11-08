@@ -26,11 +26,10 @@ import os
 import time
 from pathlib import Path
 
-from yuki_conductor.config import PI_BIN, PI_DEFAULT_MODEL
+from yuki_conductor.config import PI_BIN
 from yuki_conductor.harness.base import (
     SUMMARY_LIMIT,
     Launch,
-    ModelOption,
     RunRequest,
     RunResult,
     StreamEvent,
@@ -40,6 +39,7 @@ from yuki_conductor.harness.base import (
     truncate,
 )
 from yuki_conductor.harness.claude_code import write_temp_prompt
+from yuki_conductor.harness.models import ConfiguredModels
 from yuki_conductor.skills import core_prompt
 
 # Live tool output is cumulative and arrives up to every 100 ms. Each step the
@@ -181,7 +181,7 @@ class PiStreamParser:
         if etype == "session":
             self.session_id = data.get("id") or self.session_id
             return [StreamEvent(
-                kind="init", label="Starting (pi)…",
+                kind="init", label="Starting (Pi)…",
                 detail={"session_id": self.session_id or ""},
             )]
         if etype == "message_end":
@@ -301,26 +301,28 @@ class PiStreamParser:
         return None
 
 
-class PiHarness:
+class PiHarness(ConfiguredModels):
     name = "pi"
-    label = "pi"
+    label = "Pi"
     bin = PI_BIN
     # `--session-id` creates a session it doesn't have, so a resume never
     # fails; `session_exists` is the only way to notice the history is gone.
     missing_session_marker = None
 
     def launch(self, req: RunRequest) -> Launch:
+        selection = self.resolve_model(req.model)
         # pi lists skills natively, so it gets only the harness-neutral part.
         prompt_file = write_temp_prompt(
             core_prompt(conversation_key=req.conversation_key, task_id=req.task_id)
         )
         argv = [
-            self.bin,
+            # A connection's `bin` (e.g. a sandbox wrapper) takes pi's arguments.
+            selection.connection.bin or self.bin,
             "--mode", "json",
             # Headless runs can't answer pi's project-trust prompt; ignore
             # project-local .pi/ files rather than wait on it.
             "--no-approve",
-            "--model", req.model or PI_DEFAULT_MODEL,
+            "--model", selection.model,
             "--append-system-prompt", prompt_file,
         ]
         # pi creates a session with this id if it doesn't exist, so a new
@@ -329,7 +331,8 @@ class PiHarness:
             argv.extend(["--session-id", req.session_id])
         # `--` so a prompt starting with "-" isn't read as a flag.
         argv.extend(["--", req.prompt])
-        return Launch(argv=argv, env=dict(os.environ), temp_files=[prompt_file])
+        return Launch(argv=argv, env=dict(os.environ), temp_files=[prompt_file],
+                      model_alias=selection.id)
 
     def new_parser(self) -> PiStreamParser:
         return PiStreamParser()
@@ -347,16 +350,3 @@ class PiHarness:
         if not root.is_dir():
             return False
         return any(root.rglob(f"*{session_id}*"))
-
-    def model_aliases(self) -> dict[str, str]:
-        return {}
-
-    def models(self) -> list[ModelOption]:
-        # pi runs one local model; there is nothing to pick between.
-        return []
-
-    def default_model(self) -> str | None:
-        return PI_DEFAULT_MODEL
-
-    def default_label(self) -> str | None:
-        return PI_DEFAULT_MODEL
