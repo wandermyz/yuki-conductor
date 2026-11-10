@@ -400,6 +400,26 @@ class ConversationStore:
             finally:
                 con.close()
 
+    def reopen_if_done(self, conv_id: str, role: str) -> str | None:
+        """Take a done conversation out of done because a message arrived.
+
+        A user message makes it read (they're the one writing it); an
+        assistant message makes it unread. Returns the new status, or None
+        when the conversation wasn't done.
+        """
+        status = "read" if role == "user" else "unread"
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    "UPDATE conversations SET status = ? WHERE id = ? AND status = 'done'",
+                    (status, conv_id),
+                )
+                con.commit()
+                return status if cur.rowcount > 0 else None
+            finally:
+                con.close()
+
     def add_message(
         self,
         conv_id: str,

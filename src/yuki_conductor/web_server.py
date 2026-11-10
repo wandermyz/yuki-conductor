@@ -528,6 +528,9 @@ def create_api() -> FastAPI:
         ws_manager.broadcast(
             conv_id, {"type": "message", "message": serialize_message(user_msg)}
         )
+        reopened = conv_store.reopen_if_done(conv_id, "user")
+        if reopened:
+            ws_manager.broadcast(conv_id, {"type": "status", "status": reopened})
 
         # Auto-title the conversation from the first message.
         is_thread_start = conv.claude_session_id is None

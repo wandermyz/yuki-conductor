@@ -1135,21 +1135,24 @@ export default function Chat({
             listConversations().then(setConversations).catch(console.error);
             return prev;
           });
-          // Mark as unread if this is an assistant message and the conversation is not currently selected
+          // Mark as unread if this is an assistant message and the conversation
+          // is not currently selected. A done conversation comes out of done.
           if (e.message.role === "assistant" && selectedRef.current !== cid) {
             setStatuses((prev) => {
-              if (prev[cid] === "done") return prev; // don't override "done"
               const next = { ...prev, [cid]: "unread" as ConvStatus };
               setConvStatus(cid, "unread").catch(console.error);
               return next;
             });
           }
         } else if (e.type === "status") {
-          // Server-driven status change (e.g. an out-of-band push marking the
-          // conversation unread). Trust it only while the user isn't looking at
-          // the thread — otherwise it would un-read what they're reading.
+          // Server-driven status change (an out-of-band push marking the
+          // conversation unread, or a new message taking it out of done). In
+          // the thread the user is looking at it only clears a stale "done":
+          // it mustn't un-read what they're reading.
           if (selectedRef.current !== cid) {
             setStatuses((prev) => ({ ...prev, [cid]: e.status }));
+          } else {
+            setStatuses((prev) => (prev[cid] === "done" ? { ...prev, [cid]: "read" } : prev));
           }
         } else if (e.type === "step") {
           // Steps are ephemeral progress for the in-flight turn. Dedupe by seq

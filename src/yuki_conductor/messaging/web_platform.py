@@ -210,6 +210,9 @@ class WebPlatform:
             # The status change has to reach browsers too, or the conversation
             # only looks unread after a reload.
             self._manager.broadcast(conversation_key, {"type": "status", "status": "unread"})
+        elif self._store.reopen_if_done(conversation_key, "assistant"):
+            # A reply takes a done conversation out of done, like a push.
+            self._manager.broadcast(conversation_key, {"type": "status", "status": "unread"})
         self._notify(conversation_key, pushed=msg.pushed)
 
     def set_processing(self, conversation_key: str, message_id: str, on: bool) -> None:

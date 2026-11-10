@@ -305,6 +305,51 @@ def test_push_to_new_conversation_broadcasts_status(client, monkeypatch):
     assert sent[0]["pushed"] is True
 
 
+def test_new_messages_take_a_done_conversation_out_of_done(client, monkeypatch):
+    """A user message makes a done conversation read; a reply makes it unread."""
+    from yuki_conductor.harness.base import RunResult
+    from yuki_conductor.messaging.platform import OutgoingMessage
+    from yuki_conductor.messaging.web_platform import WebPlatform
+
+    monkeypatch.setattr(
+        "yuki_conductor.messaging.conversation.run_agent",
+        lambda *a, **k: RunResult(text="ok", session_id="s"),
+    )
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        web_server.ws_manager, "broadcast", lambda cid, payload: sent.append(payload)
+    )
+    conv = client.post("/api/conversations", json={"title": "finished"}).json()
+    status_url = f"/api/chat/conversations/{conv['id']}/status"
+
+    def status():
+        return client.get("/api/chat/conversations/statuses").json()[conv["id"]]
+
+    client.put(status_url, json={"status": "done"})
+    client.post(f"/api/conversations/{conv['id']}/messages", json={"text": "one more"})
+    assert {"type": "status", "status": "read"} in sent
+    deadline = time.time() + 5
+    while len(client.get(f"/api/conversations/{conv['id']}/messages").json()) < 2:
+        assert time.time() < deadline, "no reply"
+        time.sleep(0.02)
+    # The reply landed on a read conversation, so it stays read.
+    assert status() == "read"
+
+    client.put(status_url, json={"status": "done"})
+    sent.clear()
+    platform = WebPlatform(web_server.conv_store, web_server.ws_manager)
+    platform.send(conv["id"], OutgoingMessage(text="later"))
+    assert status() == "unread"
+    assert sent[-1] == {"type": "status", "status": "unread"}
+
+    # Not done: a reply leaves the status to the browser.
+    client.put(status_url, json={"status": "read"})
+    sent.clear()
+    platform.send(conv["id"], OutgoingMessage(text="again"))
+    assert status() == "read"
+    assert [p["type"] for p in sent] == ["message"]
+
+
 def test_reader_page_renders_reply_as_article(client):
     conv = client.post("/api/conversations", json={"title": "Voices"}).json()
     first = web_server.conv_store.add_message(
