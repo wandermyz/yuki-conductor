@@ -1,5 +1,6 @@
 /** Typed client for the taskboard API (src/yuki_conductor/taskboard/routes.py). */
 import type { StreamStep } from "../chat/api";
+import type { Heartbeat } from "../heartbeat/api";
 
 export type TaskStatus = "todo" | "in_progress" | "needs_input" | "ready_for_review" | "done";
 
@@ -54,6 +55,8 @@ export interface Task {
   started_at: number | null;
   done_at: number | null;
   comment_count: number | null;
+  /** Its recurring wake-up, if it has one. */
+  heartbeat: Heartbeat | null;
 }
 
 export interface TaskComment {
@@ -130,7 +133,13 @@ export const searchTasks = (q: string) =>
 
 export const getTask = (id: number) => call<TaskDetail>("GET", `/api/tasks/${id}`);
 
-export const createTask = (input: TaskInput & { attachment_ids: string[] }) =>
+/** Start the task with a heartbeat (only when creating it). */
+export interface HeartbeatInput {
+  heartbeat_prompt?: string;
+  heartbeat_interval_s?: number;
+}
+
+export const createTask = (input: TaskInput & HeartbeatInput & { attachment_ids: string[] }) =>
   call<Task>("POST", "/api/tasks", input);
 
 export const editTask = (id: number, fields: Partial<TaskInput> & { attachment_ids?: string[] }) =>

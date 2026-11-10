@@ -2,9 +2,12 @@
 
 import logging
 import re
+import threading
 
+from yuki_conductor import heartbeat_store
 from yuki_conductor.config import ATTACHMENTS_DIR
 from yuki_conductor.harness import HARNESSES, default_harness, get_harness
+from yuki_conductor.harness.base import RunResult
 from yuki_conductor.harness.process import run_agent
 from yuki_conductor.messaging.platform import (
     Attachment,
@@ -28,6 +31,48 @@ def _build_prompt(text: str, attachments: list[Attachment]) -> str:
 
 # Platforms whose conversation keys `/api/push` can route back to.
 PUSHABLE_PLATFORMS = ("web", "slack")
+
+# Appended to a heartbeat tick's reply, so a wake-up the user didn't ask for
+# reads differently from a reply to something they said (cf. PUSH_MARKER).
+HEARTBEAT_MARKER = "_♡ Heartbeat_"
+
+NOTIFY_TAG = "<notify>"
+SILENCE_TAG = "<silence>"
+
+
+def strip_tags(text: str) -> str:
+    """The reply without its <notify>/<silence> tags."""
+    return text.replace(NOTIFY_TAG, "").replace(SILENCE_TAG, "").strip()
+
+
+# One turn per conversation at a time. Without it two turns could resume the
+# same session in parallel: a user message arriving during a heartbeat tick
+# waits for the tick instead.
+_turn_locks: dict[str, threading.Lock] = {}
+_turn_locks_guard = threading.Lock()
+
+
+def _turn_lock(key: str) -> threading.Lock:
+    with _turn_locks_guard:
+        return _turn_locks.setdefault(key, threading.Lock())
+
+
+def try_begin(key: str) -> bool:
+    """Claim the conversation for a turn without waiting. False: one is running."""
+    return _turn_lock(key).acquire(blocking=False)
+
+
+def begin(key: str) -> None:
+    """Claim the conversation for a turn, waiting for a running one to end."""
+    _turn_lock(key).acquire()
+
+
+def end(key: str) -> None:
+    _turn_lock(key).release()
+
+
+def busy(key: str) -> bool:
+    return _turn_lock(key).locked()
 
 
 def split_response(text: str) -> tuple[str, list[Attachment]]:
@@ -108,83 +153,115 @@ def resolve_harness(platform: MessagingPlatform, msg: IncomingMessage) -> str:
 def handle_incoming_message(
     platform: MessagingPlatform,
     msg: IncomingMessage,
-) -> None:
-    """Run the conversation's agent for an incoming message and send the reply.
+) -> RunResult:
+    """Run the conversation's agent for a user's message and send the reply.
+
+    Waits for any turn already running on the conversation (a heartbeat
+    tick), showing the conversation as busy meanwhile. Returns the result.
+    """
+    platform.set_processing(msg.conversation_key, msg.message_id, on=True)
+    try:
+        begin(msg.conversation_key)
+        try:
+            return run_claimed(platform, msg)
+        finally:
+            end(msg.conversation_key)
+            # The agent just had a turn: the next heartbeat tick is one
+            # interval from now.
+            heartbeat_store.store.postpone(heartbeat_store.CONVERSATION, msg.conversation_key)
+    finally:
+        platform.set_processing(msg.conversation_key, msg.message_id, on=False)
+
+
+def run_claimed(platform: MessagingPlatform, msg: IncomingMessage) -> RunResult:
+    """One turn, on a conversation the caller has claimed (`begin`/`try_begin`).
 
     This is the only place that knows about session resolution, attachment
     plumbing, and the run_agent contract. Platforms own their own session-id
     persistence (Slack via SessionStore, web via ConversationStore).
+
+    A heartbeat tick (`msg.kind == "heartbeat"`) shows no progress, and its
+    reply is only delivered if it contains <notify>; failures are left to the
+    caller to report.
     """
-    platform.set_processing(msg.conversation_key, msg.message_id, on=True)
+    heartbeat = msg.kind == "heartbeat"
+    session_id = (
+        None if msg.is_thread_start else platform.get_session_id(msg.conversation_key)
+    )
+
     try:
-        session_id = (
-            None if msg.is_thread_start else platform.get_session_id(msg.conversation_key)
-        )
-
-        try:
-            harness = resolve_harness(platform, msg)
-        except HarnessUnavailable as exc:
-            logger.warning("%s: %s", msg.conversation_key, exc)
+        harness = resolve_harness(platform, msg)
+    except HarnessUnavailable as exc:
+        logger.warning("%s: %s", msg.conversation_key, exc)
+        if not heartbeat:
             platform.send(msg.conversation_key, OutgoingMessage(text=str(exc)))
-            return
-        prompt = _build_prompt(msg.text, msg.attachments)
-        # Native to the conversation's harness; None: the harness's default.
-        model = msg.model
-        logger.info(
-            "Running %s for %s (session=%s, model=%s)",
-            harness, msg.conversation_key, session_id, model,
+        return RunResult(text=str(exc), session_id=session_id, is_error=True)
+    prompt = _build_prompt(msg.text, msg.attachments)
+    # Native to the conversation's harness; None: the harness's default.
+    model = msg.model
+    logger.info(
+        "Running %s for %s (%s, session=%s, model=%s)",
+        harness, msg.conversation_key, msg.kind, session_id, model,
+    )
+    try:
+        result = run_agent(
+            get_harness(harness),
+            prompt,
+            session_id=session_id,
+            model=model,
+            wait_for_mcp=msg.wait_for_mcp,
+            skip_permissions=msg.skip_permissions,
+            conversation_key=msg.conversation_key,
+            cwd=msg.cwd,
+            # Only keys `/api/push` can route are advertised.
+            push_conversation_id=(
+                msg.conversation_key if msg.platform in PUSHABLE_PLATFORMS else None
+            ),
+            # A heartbeat tick is invisible unless it notifies.
+            on_event=None if heartbeat else _event_sink(platform, msg.conversation_key),
+            kind="heartbeat" if heartbeat else "chat",
         )
-        try:
-            result = run_agent(
-                get_harness(harness),
-                prompt,
-                session_id=session_id,
-                model=model,
-                wait_for_mcp=msg.wait_for_mcp,
-                skip_permissions=msg.skip_permissions,
-                conversation_key=msg.conversation_key,
-                cwd=msg.cwd,
-                # Only keys `/api/push` can route are advertised.
-                push_conversation_id=(
-                    msg.conversation_key if msg.platform in PUSHABLE_PLATFORMS else None
-                ),
-                on_event=_event_sink(platform, msg.conversation_key),
-            )
-        except Exception:
-            logger.error(
-                "%s invocation failed for %s", harness, msg.conversation_key, exc_info=True,
-            )
-            raise
-        logger.info(
-            "%s finished for %s (tokens: %s in / %s out, cost: $%s)",
-            harness, msg.conversation_key,
-            result.input_tokens, result.output_tokens, result.cost_usd,
+    except Exception:
+        logger.error(
+            "%s invocation failed for %s", harness, msg.conversation_key, exc_info=True,
+        )
+        raise
+    logger.info(
+        "%s finished for %s (tokens: %s in / %s out, cost: $%s)",
+        harness, msg.conversation_key,
+        result.input_tokens, result.output_tokens, result.cost_usd,
+    )
+
+    if result.session_id:
+        platform.set_session_id(
+            msg.conversation_key,
+            result.session_id,
+            title_hint=msg.title_hint if msg.is_thread_start else None,
+            harness=harness,
         )
 
-        if result.session_id:
-            platform.set_session_id(
-                msg.conversation_key,
-                result.session_id,
-                title_hint=msg.title_hint if msg.is_thread_start else None,
-                harness=harness,
-            )
-
-        reply_text, reply_attachments = split_response(result.text)
-        outgoing = OutgoingMessage(
-            text=reply_text,
-            attachments=reply_attachments,
-            input_tokens=result.input_tokens,
-            output_tokens=result.output_tokens,
-            cost_usd=result.cost_usd,
-            context_tokens=result.context_tokens,
-            context_window=result.context_window,
-            model=result.model,
-        )
-        logger.info(
-            "Sending reply for %s (%d chars, %d attachments)",
-            msg.conversation_key, len(reply_text), len(reply_attachments),
-        )
-        platform.send(msg.conversation_key, outgoing)
-        logger.info("Reply sent for %s", msg.conversation_key)
-    finally:
-        platform.set_processing(msg.conversation_key, msg.message_id, on=False)
+    text = result.text
+    if heartbeat:
+        if result.is_error or NOTIFY_TAG not in text:
+            return result
+        text = f"{strip_tags(text)}\n\n{HEARTBEAT_MARKER}"
+    reply_text, reply_attachments = split_response(text)
+    outgoing = OutgoingMessage(
+        text=reply_text,
+        attachments=reply_attachments,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cost_usd=result.cost_usd,
+        context_tokens=result.context_tokens,
+        context_window=result.context_window,
+        model=result.model,
+        # No turn bookends a tick's reply: deliver it like a push.
+        pushed=heartbeat,
+    )
+    logger.info(
+        "Sending reply for %s (%d chars, %d attachments)",
+        msg.conversation_key, len(reply_text), len(reply_attachments),
+    )
+    platform.send(msg.conversation_key, outgoing)
+    logger.info("Reply sent for %s", msg.conversation_key)
+    return result

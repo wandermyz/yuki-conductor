@@ -7,6 +7,8 @@ description: >
   morning", "run this every Monday", "schedule a daily check"). This session is
   driven by yuki-conductor, which has its OWN cron scheduler — do NOT use the
   system crontab, Claude Code's built-in scheduling, or any external scheduler.
+  To keep watching something in this conversation or task, use heartbeat
+  (yuki-conductor-heartbeat), not cron.
 ---
 
 # Scheduling recurring tasks (yuki-conductor cron)
@@ -15,6 +17,12 @@ This Claude Code session was spawned by **yuki-conductor**, a personal daemon
 that runs scheduled tasks and reports results back to the user's chat app. When
 the user wants something to run on a schedule, add it to yuki-conductor's cron
 config — never touch the OS crontab or any built-in scheduler.
+
+A cron task runs in a **fresh, isolated session** each time. If the recurring
+check needs the context of the current conversation or task ("keep an eye on
+this PR", "tell me once my access is granted"), use the
+`yuki-conductor-heartbeat` skill instead: it resumes this session on an
+interval.
 
 ## Where tasks live
 

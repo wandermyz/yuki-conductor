@@ -33,6 +33,10 @@ src/yuki_conductor/
     pr_watcher.py      — `gh` check of Ready for Review PRs, run when the Tasks tab opens
     cleanup.py         — removes a Done task's worktree + branches
   cli_task.py       — `yuki-conductor task …` (show/list/comment/ask/pr/create)
+  heartbeat.py      — heartbeats: scheduler loop, conversation ticks, lifecycle, API actions
+  heartbeat_store.py — SQLite `heartbeats` + `heartbeat_ticks`
+  heartbeat_routes.py — /api/heartbeats/{kind}/{id}
+  cli_heartbeat.py  — `yuki-conductor heartbeat …` (set/status/pause/resume/stop)
   cli_search.py     — `yuki-conductor search` + `conversation show`, with web UI links
   cli_http.py       — CLI → daemon HTTP helper (shared with `send`)
   harness/          — the agent CLIs a turn can run on (see Harnesses)
@@ -57,9 +61,10 @@ src/yuki_conductor/
   updater.py        — self-update: git fetch + rebase onto upstream (see Self-update)
 web/                — React + Vite frontend (pnpm, TypeScript)
   src/tasks/          — the Tasks tab (list, detail, form)
+  src/heartbeat/      — heartbeat chip + dialog, shared by Chat and Tasks
   src/Markdown.tsx    — shared Markdown renderer; ```mermaid via pele
 plugins/
-  yuki-conductor/   — bundled skill plugin, injected into every session (cron, send, task skills)
+  yuki-conductor/   — bundled skill plugin, injected into every session (cron, send, task, heartbeat skills)
   slack/            — bundled channel plugin (Slack Socket Mode)
 examples/
   echo-plugin/      — reference plugin: manifest, channel, skill dir
@@ -453,6 +458,56 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
   Preview and the timeline show it; `prompts.py` rewrites those URLs to the
   file's path on disk before the agent sees the text.
 
+## Heartbeat
+
+A recurring wake-up attached to **one** conversation (web or Slack) or task,
+which resumes that target's own session with a prompt; cron, by contrast,
+runs a fresh session each time. Design: `docs/plans/2026-11-10-heartbeat.md`.
+
+- **Rows**: `heartbeats` (one per `(target_kind, target_id)`) and
+  `heartbeat_ticks` (last 50 per target), via `heartbeat_store.store`
+  (rebound by the autouse `isolated_heartbeats` fixture). Interval default
+  270s (keeps the prompt cache warm), minimum 60s. Expiry is a hard 7-day cap:
+  `lifetime_s`/`--for` may only be shorter, and renewing means setting it
+  again, which restarts the clock. The next tick is one interval after the
+  previous tick *or turn* ended (`postpone`), so ticks never overlap.
+- **Scheduler** (`heartbeat.start`, from `runtime.start()`): every 15s or on
+  `wake()` it deletes expired rows (with a note on the target) and fires due
+  conversation ticks. Overdue rows are spread over 0–60s at startup. Three
+  errors in a row pause a heartbeat with a note; failures are always
+  surfaced.
+- **Turn guard**: `messaging.conversation.begin/try_begin/end` — one turn per
+  conversation. A user message waits for a running tick
+  (`handle_incoming_message` shows it as processing meanwhile); a tick never
+  waits (`try_begin` fails → it stays due). Ticks call `run_claimed` with
+  `IncomingMessage(kind="heartbeat")`, so harness, model, cwd and the
+  MCP/permission settings resolve like a user turn. A tick shows no live steps
+  or Slack status; its prompt isn't stored; only a reply containing
+  `<notify>` is delivered, as a push tagged `HEARTBEAT_MARKER`.
+- **Task ticks** go through the **harvester** (`Harvester._heartbeats`, after
+  the To Do queue), so concurrency limits and the board pause apply. Only
+  Needs Input / Ready for Review tasks are claimed, by the quiet
+  `transitions.claim_heartbeat`, which records `tasks.heartbeat_return_status`
+  (cleared by any other status write). The runner uses `prompts.heartbeat`;
+  `resolve_outcome` is unchanged up to `task ask`/`task done`, then `<notify>`
+  → Ready for Review (notified), else a `quiet` transition back to the return
+  status with no comment. `recover()` returns an interrupted tick to its
+  return status instead of To Do. An ordinary turn's end postpones the next
+  tick (`heartbeat.on_task_transition`), which also deletes the heartbeat on
+  Done. Archive deletes it too; reopening doesn't bring it back.
+- **Targets** for the CLI: `YUKI_TASK_ID`, else `YUKI_CONVERSATION_ID` (set
+  by `run_agent` from `push_conversation_id`), else `-c`/`--task`. The CLI
+  warns on 5–30 minute intervals (cache-cold every tick). The user can stop
+  any heartbeat from the UI; the agent isn't told.
+- **UI** (`web/src/heartbeat/`): chip `♡ 4m30s · next in 2m · last: quiet` in
+  the chat header and task meta (icon-only in a phone's chat header), a
+  "Heartbeat…" chat menu item / task "Heartbeat" button, and a dialog with
+  interval, prompt, pause/stop and the tick log. The task form can create a
+  task with one (`heartbeat_prompt` / `heartbeat_interval_s` on
+  `POST /api/tasks`, `task create --heartbeat`). Conversation changes are
+  broadcast as `{"type": "heartbeat"}`; task ones as task changes.
+- Not yet: the Slack `/<prefix>-heartbeat` command.
+
 ## Key Commands
 
 - `uv run pytest` — run all tests
@@ -462,6 +517,7 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
 - `uv run yuki-conductor simulate message "test"` — test without Slack
 - `uv run yuki-conductor send -c <conv-id> "text"` — push a message (and `--attach` files) into a web or Slack conversation (see Outbound Messages)
 - `uv run yuki-conductor task show|list|comment|ask|done|pr|create` — the taskboard from a shell (see Taskboard)
+- `uv run yuki-conductor heartbeat set|status|pause|resume|stop` — wake this conversation or task on an interval (see Heartbeat)
 - `uv run yuki-conductor search [--conversations|--tasks] TERMS` / `conversation show <id>` — find and read past work (see Conversation search)
 - `uv run yuki-conductor web rebuild` — rebuild frontend + auto-reload connected browsers
 - `cd web && pnpm dev` — start frontend dev server (proxies /api to port 2333)
@@ -782,4 +838,5 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
 - `test_harness_pi.py` — pi command line, plus its parser against real recorded runs in `tests/fixtures/harness/pi/` (system prompt scrubbed)
 - `test_harness_codex.py` — Codex command line, parser against real runs in `tests/fixtures/harness/codex/`, rollout-file context, `run_agent` end to end
 - `test_cli_simulate.py` — integration tests via simulate commands
+- `test_heartbeat.py` — heartbeats: store, turn guard, conversation ticks through the web API, task ticks through a real harvester and runner (fake `run_agent`), API, CLI
 - `test_task_store.py`, `test_taskboard_*.py`, `test_tasks_api.py`, `test_cli_task.py` — the taskboard: store, state machine, harvester, runner (fake `run_agent`), worktrees and cleanup against a temp repo with a bare origin, PR watcher with `gh` mocked, API, CLI end to end through the API. The autouse `no_stray_harvester` fixture fails any test that leaves a real board loop running.

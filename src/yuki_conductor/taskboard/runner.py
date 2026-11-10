@@ -12,11 +12,14 @@ import subprocess
 import threading
 from dataclasses import dataclass
 
-from yuki_conductor import taskboard
+from yuki_conductor import heartbeat, taskboard
+from yuki_conductor import heartbeat_store as hs
 from yuki_conductor.harness import get_harness
 from yuki_conductor.harness.base import RunResult
 from yuki_conductor.harness.process import cancel_process, run_agent
+from yuki_conductor.heartbeat_store import ERROR, NOTIFIED, QUIET, TASK, Heartbeat
 from yuki_conductor.messaging import split_response
+from yuki_conductor.messaging.conversation import NOTIFY_TAG, strip_tags
 from yuki_conductor.store import ProjectStore
 from yuki_conductor.task_store import DONE, NEEDS_INPUT, READY_FOR_REVIEW, TODO, Task
 from yuki_conductor.taskboard import live, prompts
@@ -68,12 +71,23 @@ class Outcome:
     status: str
     reason: str
     notify: bool
+    quiet: bool = False  # no system comment: a heartbeat tick that found nothing
 
 
 def resolve_outcome(
-    task: Task, result: RunResult, *, cancelled: bool, has_new_comments: bool
+    task: Task,
+    result: RunResult,
+    *,
+    cancelled: bool,
+    has_new_comments: bool,
+    heartbeat_tick: bool = False,
 ) -> Outcome:
-    """Where a task goes when its turn ends. First match wins (see the PRD)."""
+    """Where a task goes when its turn ends. First match wins (see the PRD).
+
+    A heartbeat tick ends like any turn up to the agent's own `task ask` /
+    `task done`. After that, a <notify> reply goes to Ready for Review and a
+    quiet one back to where the tick found the task, without a word.
+    """
     if has_new_comments:
         return Outcome(TODO, "new comment during the turn", notify=False)
     if cancelled:
@@ -84,6 +98,10 @@ def resolve_outcome(
         return Outcome(NEEDS_INPUT, "the agent asked for input", notify=True)
     if task.done_requested:
         return Outcome(DONE, "the agent marked it done", notify=False)
+    if heartbeat_tick:
+        if NOTIFY_TAG in result.text:
+            return Outcome(READY_FOR_REVIEW, "heartbeat", notify=True)
+        return Outcome(task.heartbeat_return_status, "heartbeat", notify=False, quiet=True)
     if task.pr_url:
         return Outcome(READY_FOR_REVIEW, "PR opened", notify=True)
     return Outcome(READY_FOR_REVIEW, "turn finished", notify=True)
@@ -117,19 +135,25 @@ class _Turn:
     delivered: list[int]  # comment ids the prompt carried
 
 
-def _run(task: Task, cwd: str) -> _Turn:
+def _run(task: Task, cwd: str, hb: Heartbeat | None = None) -> _Turn:
     harness = get_harness(task.harness)
     comments = taskboard.store.comments(task.id)
     pending = [c for c in comments if not c.delivered]
     if task.session_id and harness.session_exists(task.session_id, cwd):
-        prompt, session_id = prompts.follow_up(
-            pending, reopened=prompts.was_reopened(comments), cwd=cwd
-        ), task.session_id
+        session_id = task.session_id
+        if hb is not None:
+            prompt = prompts.heartbeat(heartbeat.task_prompt(hb), pending)
+        else:
+            prompt = prompts.follow_up(pending, reopened=prompts.was_reopened(comments), cwd=cwd)
     elif task.session_id:
         logger.info("Task #%s: session %s is gone, starting fresh", task.id, task.session_id)
         prompt, session_id = prompts.full_context(task, comments, cwd), None
     else:
         prompt, session_id = prompts.first_turn(task, comments, cwd), None
+    if hb is not None and session_id is None:
+        prompt += "\n\n" + heartbeat.task_prompt(hb)
+    elif hb is None and session_id is None and (own := hs.store.get(TASK, str(task.id))):
+        prompt += "\n\n" + heartbeat.announcement(own)
     delivered = [c.id for c in pending]
     # Shown as seen while the agent works on them; rolled back if the run
     # fails, so the next turn sends them again.
@@ -217,15 +241,35 @@ def _new_comments(task_id: int, delivered: list[int]) -> bool:
     return any(c.id not in sent for c in taskboard.store.undelivered(task_id))
 
 
+def _record_tick(
+    hb: Heartbeat, tick_id: int, result: RunResult, outcome: Outcome, text: str
+) -> None:
+    if result.is_error:
+        heartbeat.record_tick(hb, ERROR)
+        hs.store.finish_tick(tick_id, ERROR, error=result.text.strip()[:4000])
+        return
+    tick_outcome = NOTIFIED if outcome.notify or outcome.status == DONE else QUIET
+    heartbeat.record_tick(hb, tick_outcome)
+    hs.store.finish_tick(tick_id, tick_outcome, response=text)
+
+
 def _run_turn(task_id: int) -> None:
     task = taskboard.store.update_fields(task_id, asked_input=False, done_requested=False)
+    hb = None
+    if task.heartbeat_return_status:
+        hb = hs.store.get(TASK, str(task_id))
+        if hb is None:
+            # Stopped between the claim and now: nothing to do.
+            transition(task_id, task.heartbeat_return_status, reason="heartbeat", quiet=True)
+            return
     cwd = _working_dir(task)
     if cwd is None:
         return
 
     task = taskboard.store.get(task_id)
     live.turn_started(task_id)
-    turn = _run(task, cwd)
+    tick_id = hs.store.start_tick(TASK, str(task_id)) if hb else None
+    turn = _run(task, cwd, hb)
     result = turn.result
 
     # Only a turn that was actually stopped counts: a cancel that arrived
@@ -237,10 +281,13 @@ def _run_turn(task_id: int) -> None:
     # A failed run may never have reached the agent.
     if result.is_error or turn.result is None:
         taskboard.store.mark_delivered(turn.delivered, delivered=False)
-    text, attachments = split_response(result.text)
+    text, attachments = split_response(strip_tags(result.text) if hb else result.text)
     if result.session_id:
         taskboard.store.update_fields(task_id, session_id=result.session_id)
-    if (text or attachments) and not cancelled:
+    task = taskboard.store.get(task_id)
+    # A quiet heartbeat tick leaves nothing on the timeline.
+    speaks = hb is None or NOTIFY_TAG in result.text or task.asked_input or result.is_error
+    if (text or attachments) and not cancelled and speaks:
         taskboard.store.add_comment(
             task_id, "agent", text, attachments=[str(a.local_path) for a in attachments]
         )
@@ -253,12 +300,17 @@ def _run_turn(task_id: int) -> None:
         result,
         cancelled=cancelled,
         has_new_comments=_new_comments(task_id, turn.delivered),
+        heartbeat_tick=hb is not None,
     )
     if result.is_error and outcome.status == NEEDS_INPUT:
         taskboard.store.add_comment(
             task_id, "system", f"The run failed:\n\n```\n{result.text.strip()[:4000]}\n```"
         )
-    transition(task_id, outcome.status, reason=outcome.reason, notify=outcome.notify)
+    if hb is not None:
+        _record_tick(hb, tick_id, result, outcome, text)
+    transition(
+        task_id, outcome.status, reason=outcome.reason, notify=outcome.notify, quiet=outcome.quiet
+    )
     # A comment posted after the check above but before the move saw the task
     # still In Progress and left it for us; don't strand it.
     if outcome.status != TODO and _new_comments(task_id, turn.delivered):

@@ -70,11 +70,13 @@ def transition(
     reason: str,
     notify: bool = False,
     top: bool = False,
+    quiet: bool = False,
 ) -> Task:
     """Move a task to `to`, record why, and tell the listeners.
 
     A task entering To Do goes to the end of the queue, or the top when `top`
-    is set (restart recovery). Raises `InvalidTransition` for a move the state
+    is set (restart recovery). A `quiet` move (a heartbeat tick that found
+    nothing) leaves no system comment. Raises `InvalidTransition` for a move the state
     machine doesn't allow — including when the task moved on between the
     read and the write — and `KeyError` for an unknown task.
     """
@@ -92,7 +94,7 @@ def transition(
             f"Task #{task_id} left {STATUS_LABELS[task.status]} before it could move to "
             f"{STATUS_LABELS[to]}"
         )
-    return _record(task_id, task.status, to, reason, notify)
+    return _record(task_id, task.status, to, reason, notify, comment=not quiet)
 
 
 def claim(task_id: int, *, reason: str = "picked up") -> Task | None:
@@ -102,12 +104,30 @@ def claim(task_id: int, *, reason: str = "picked up") -> Task | None:
     return _record(task_id, TODO, IN_PROGRESS, reason, notify=False)
 
 
-def _record(task_id: int, from_status: str, to: str, reason: str, notify: bool) -> Task:
-    taskboard.store.add_comment(
-        task_id,
-        "system",
-        f"{STATUS_LABELS[from_status]} → {STATUS_LABELS[to]}: {reason}",
-    )
+# Where a task may be when a heartbeat tick claims it: waiting on something.
+HEARTBEAT_CLAIMABLE = frozenset({NEEDS_INPUT, READY_FOR_REVIEW})
+
+
+def claim_heartbeat(task_id: int) -> Task | None:
+    """Pick up a waiting task for a heartbeat tick, quietly: no comment, no
+    notification. Returns None if it isn't Needs Input or Ready for Review."""
+    task = taskboard.store.get(task_id)
+    if task is None or task.status not in HEARTBEAT_CLAIMABLE:
+        return None
+    if not taskboard.store.claim_heartbeat(task_id, task.status):
+        return None
+    return _record(task_id, task.status, IN_PROGRESS, "heartbeat", notify=False, comment=False)
+
+
+def _record(
+    task_id: int, from_status: str, to: str, reason: str, notify: bool, comment: bool = True
+) -> Task:
+    if comment:
+        taskboard.store.add_comment(
+            task_id,
+            "system",
+            f"{STATUS_LABELS[from_status]} → {STATUS_LABELS[to]}: {reason}",
+        )
     task = taskboard.store.get(task_id)
     event = TransitionEvent(
         task=task, from_status=from_status, to_status=to, reason=reason, notify=notify

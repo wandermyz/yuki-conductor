@@ -51,7 +51,7 @@ _TASK_COLUMNS = (
     "status", "sort_order", "session_id", "worktree_path", "branch", "pr_url",
     "pr_state", "pr_checked_at", "asked_input", "done_requested", "parent_task_id",
     "cleanup_error", "created_at", "updated_at", "started_at", "done_at", "archived_at",
-    "wait_for_mcp", "skip_permissions",
+    "wait_for_mcp", "skip_permissions", "heartbeat_return_status",
 )
 _COMMENT_COLUMNS = (
     "id", "task_id", "author", "body", "quote_comment_id", "attachments",
@@ -97,6 +97,9 @@ class Task:
     archived_at: float | None  # set: hidden from the board, only reachable via SQL
     wait_for_mcp: bool = False
     skip_permissions: bool = False
+    # Set while a heartbeat tick runs (In Progress): where a quiet tick
+    # returns the task. Cleared by any other status change.
+    heartbeat_return_status: str | None = None
 
     @property
     def editable(self) -> bool:
@@ -194,9 +197,12 @@ class TaskStore:
                     "done_at REAL, "
                     "archived_at REAL, "
                     "wait_for_mcp INTEGER NOT NULL DEFAULT 0, "
-                    "skip_permissions INTEGER NOT NULL DEFAULT 0)"
+                    "skip_permissions INTEGER NOT NULL DEFAULT 0, "
+                    "heartbeat_return_status TEXT)"
                 )
                 columns = {row[1] for row in con.execute("PRAGMA table_info(tasks)")}
+                if "heartbeat_return_status" not in columns:
+                    con.execute("ALTER TABLE tasks ADD COLUMN heartbeat_return_status TEXT")
                 for flag in ("wait_for_mcp", "skip_permissions"):
                     if flag not in columns:
                         con.execute(
@@ -412,6 +418,23 @@ class TaskStore:
             finally:
                 con.close()
 
+    def claim_heartbeat(self, task_id: int, expected: str) -> bool:
+        """Move a waiting task to In Progress for a heartbeat tick, remembering
+        `expected` as where a quiet tick returns it. Compare-and-set like
+        `claim`."""
+        with self._lock:
+            con = self._connect()
+            try:
+                cur = con.execute(
+                    "UPDATE tasks SET status = ?, heartbeat_return_status = ?, updated_at = ? "
+                    "WHERE id = ? AND status = ? AND archived_at IS NULL",
+                    (IN_PROGRESS, expected, time.time(), task_id, expected),
+                )
+                con.commit()
+                return cur.rowcount == 1
+            finally:
+                con.close()
+
     def set_status(
         self, task_id: int, status: str, *, expected: str, position: str | None = None
     ) -> bool:
@@ -426,7 +449,10 @@ class TaskStore:
         if status not in STATUSES:
             raise ValueError(f"Unknown status {status!r}")
         now = time.time()
-        sql = "UPDATE tasks SET status = ?, updated_at = ?, done_at = ?"
+        sql = (
+            "UPDATE tasks SET status = ?, updated_at = ?, done_at = ?, "
+            "heartbeat_return_status = NULL"
+        )
         if position == "top":
             sql += ", sort_order = (SELECT MIN(sort_order) - 1 FROM tasks)"
         elif position == "end":

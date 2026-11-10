@@ -34,6 +34,9 @@ class IncomingMessage:
     harness: str | None = None
     wait_for_mcp: bool = False
     skip_permissions: bool = False
+    # "user": someone wrote it. "heartbeat": a scheduled wake-up of the
+    # conversation's session (see `heartbeat.py`).
+    kind: str = "user"
 
 
 @dataclass

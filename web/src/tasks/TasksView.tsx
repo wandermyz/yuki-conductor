@@ -36,6 +36,7 @@ import {
 } from "./api";
 import type { BoardState, Task, TaskDetail as Detail, TaskSearchHit, TaskStatus } from "./api";
 import { PrMarker, StatusBadge } from "./common";
+import { formatDuration } from "../heartbeat/api";
 import { formatWhen } from "./format";
 import TaskDetail from "./TaskDetail";
 import type { Highlight } from "./TaskDetail";
@@ -108,6 +109,14 @@ function TaskRow({
           <HarnessIcon name={task.harness} />
           <span>{task.project}</span>
           {task.pr_url && <PrMarker url={task.pr_url} state={task.pr_state} />}
+          {task.heartbeat && (
+            <span
+              className={`task-row-heartbeat${task.heartbeat.paused ? " paused" : ""}`}
+              title={`Heartbeat every ${formatDuration(task.heartbeat.interval_s)}`}
+            >
+              ♡
+            </span>
+          )}
           {task.comment_count ? <span>💬 {task.comment_count}</span> : null}
           <span className="task-row-time">{formatWhen(task.updated_at)}</span>
         </span>

@@ -2,7 +2,8 @@
 
 Three shapes: the first turn (the whole task), a follow-up (only what the
 agent hasn't seen), and a fresh session standing in for one that's gone (the
-whole task plus its timeline, since none of it is in the new session).
+whole task plus its timeline, since none of it is in the new session). A
+heartbeat tick replaces the follow-up with the heartbeat's prompt.
 """
 
 import re
@@ -104,6 +105,16 @@ def follow_up(comments: list[TaskComment], *, reopened: bool = False, cwd: str =
         )
     body = "\n\n".join(render_comment(c) for c in shown)
     return f"New comments on your task since your last turn:\n\n{body}"
+
+
+def heartbeat(tick_prompt: str, comments: list[TaskComment]) -> str:
+    """A heartbeat tick on a resumed session: the tick's prompt, plus any
+    comments the agent hasn't seen."""
+    shown = [c for c in comments if c.author != "system"]
+    if not shown:
+        return tick_prompt
+    body = "\n\n".join(render_comment(c) for c in shown)
+    return f"{tick_prompt}\n\nNew comments on your task since your last turn:\n\n{body}"
 
 
 def full_context(task: Task, comments: list[TaskComment], cwd: str) -> str:

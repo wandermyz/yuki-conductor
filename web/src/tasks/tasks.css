@@ -985,3 +985,40 @@ a.pr-marker:hover {
     max-width: 100%;
   }
 }
+
+.task-row-heartbeat {
+  color: #e0457b;
+}
+
+.task-row-heartbeat.paused {
+  opacity: 0.5;
+}
+
+.task-form-heartbeat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: -4px 0 10px 28px;
+}
+
+.task-form-heartbeat textarea {
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-h);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.task-form .task-form-heartbeat .heartbeat-interval {
+  flex-wrap: nowrap;
+}
+
+.task-form .task-form-heartbeat .heartbeat-interval input {
+  width: 100px;
+  flex-shrink: 0;
+}

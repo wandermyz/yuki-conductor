@@ -19,6 +19,7 @@ import {
 } from "./api";
 import type { TaskAttachment, TaskComment, TaskDetail as Detail } from "./api";
 import { PrMarker, StatusBadge } from "./common";
+import { HeartbeatChip, HeartbeatDialog } from "../heartbeat/Heartbeat";
 import { formatWhen } from "./format";
 
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg)$/i;
@@ -156,6 +157,7 @@ export default function TaskDetail({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSession, setShowSession] = useState(false);
+  const [showHeartbeat, setShowHeartbeat] = useState(false);
   const [refreshingPr, setRefreshingPr] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -285,6 +287,14 @@ export default function TaskDetail({
           onClose={() => setShowSession(false)}
         />
       )}
+      {showHeartbeat && (
+        <HeartbeatDialog
+          kind="task"
+          targetId={task.id}
+          onChanged={onChanged}
+          onClose={() => setShowHeartbeat(false)}
+        />
+      )}
       {/* One line, like the chat's thread header, so the tabs line up. */}
       <div className="task-detail-bar">
         <button className="task-back" onClick={onBack} aria-label="Back to tasks">
@@ -296,6 +306,9 @@ export default function TaskDetail({
         <div className="task-actions">
           {task.editable && <button onClick={onEdit}>Edit</button>}
           <button onClick={() => setShowSession(true)}>Session ID</button>
+          {task.status !== "done" && !task.heartbeat && (
+            <button onClick={() => setShowHeartbeat(true)}>Heartbeat</button>
+          )}
           {task.status === "todo" && (
             <button onClick={() => act(() => moveTaskToTop(task.id))}>Move to top</button>
           )}
@@ -325,6 +338,9 @@ export default function TaskDetail({
           </span>
           {task.branch && <code>{task.branch}</code>}
           {!task.branch && task.use_worktree && <span>worktree</span>}
+          {task.heartbeat && (
+            <HeartbeatChip hb={task.heartbeat} onClick={() => setShowHeartbeat(true)} />
+          )}
           {task.pr_url && (
             <span className="task-pr">
               <PrMarker url={task.pr_url} state={task.pr_state} link />

@@ -1,3 +1,5 @@
+import type { Heartbeat } from "../heartbeat/api";
+
 export interface Conversation {
   id: string;
   platform: string;
@@ -12,6 +14,8 @@ export interface Conversation {
   skip_permissions: boolean;
   created_at: number;
   updated_at: number;
+  /** Its recurring wake-up, if it has one. */
+  heartbeat: Heartbeat | null;
 }
 
 export interface ModelOption {
@@ -89,6 +93,8 @@ export type WSEvent =
   | { type: "processing"; conversation_id: string; on: boolean; message_id: string }
   | { type: "step"; conversation_id: string; step: StreamStep }
   | { type: "title"; conversation_id: string; title: string }
+  /** The conversation's heartbeat changed or ticked: refetch it. */
+  | { type: "heartbeat"; conversation_id: string }
   | { type: "status"; conversation_id: string; status: ConvStatus }
   /** A taskboard task changed (status, fields or comments): refetch it. */
   | { type: "task"; id: number }
@@ -142,6 +148,12 @@ export async function archiveConversation(id: string): Promise<void> {
     method: "POST",
   });
   if (!r.ok) throw new Error("Failed to archive conversation");
+}
+
+export async function getConversation(id: string): Promise<Conversation> {
+  const r = await fetch(`/api/conversations/${encodeURIComponent(id)}`);
+  if (!r.ok) throw new Error("Failed to load conversation");
+  return r.json();
 }
 
 export async function updateConversation(

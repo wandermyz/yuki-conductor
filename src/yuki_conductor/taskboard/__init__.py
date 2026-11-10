@@ -24,6 +24,7 @@ def start_taskboard(ws_manager=None) -> threading.Event:
     to. Returns an event that stops the loop when set.
     """
     global active_harvester
+    from yuki_conductor import heartbeat
     from yuki_conductor.taskboard import cleanup, live, notify, transitions
     from yuki_conductor.taskboard.harvester import Harvester
 
@@ -33,6 +34,7 @@ def start_taskboard(ws_manager=None) -> threading.Event:
     transitions.add_listener(active_harvester.on_transition)
     transitions.add_listener(notify.on_transition)
     transitions.add_listener(cleanup.on_transition)
+    transitions.add_listener(heartbeat.on_task_transition)
     active_harvester.recover()
 
     stop = threading.Event()
