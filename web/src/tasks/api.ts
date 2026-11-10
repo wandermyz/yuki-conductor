@@ -35,6 +35,8 @@ export interface Task {
   model: string | null;
   harness_enabled: boolean;
   use_worktree: boolean;
+  wait_for_mcp: boolean;
+  skip_permissions: boolean;
   status: TaskStatus;
   status_label: string;
   sort_order: number;
@@ -85,6 +87,8 @@ export interface TaskInput {
   harness: string;
   model: string | null;
   use_worktree: boolean;
+  wait_for_mcp: boolean;
+  skip_permissions: boolean;
   body: string;
 }
 

@@ -122,6 +122,9 @@ yuki-conductor task create --project my-app --title "Add rate limiting" --worktr
   Outside an agent run, the machine's defaults apply. Changing `--harness`
   clears the inherited model; pass `--model` to select one for that harness.
 - The body is Markdown. Pass `-` to read it from stdin.
+- `--wait-for-mcp` waits up to 30 seconds for MCP startup (Claude Code and Codex).
+- `--skip-permissions` bypasses approval checks and the Codex sandbox.
+  Both options default off and apply to every turn of the new task.
 
 A task created from inside a task is linked to it as a follow-up. That link is
 informational only: the new task runs on its own, and nothing waits for it.

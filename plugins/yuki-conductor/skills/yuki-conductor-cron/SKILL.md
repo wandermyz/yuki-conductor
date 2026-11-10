@@ -43,6 +43,8 @@ tasks:
       task fires. Write it as an instruction to Claude.
     harness: claude-code             # optional; an enabled harness
     model: sonnet                    # optional; alias ID in workspace/models.yaml
+    wait_for_mcp: false              # optional; wait up to 30 seconds for MCP startup
+    skip_permissions: false          # optional; bypass approval checks and Codex sandbox
     chat_app: slack                  # optional; where to post the result
     origin_conversation: <conv-id>   # optional; conversation that set this up
     paused: true                     # optional; suspend the schedule without deleting
@@ -66,6 +68,11 @@ Field notes:
 - `chat_app` — optional. Which chat surface receives the result. Omit to use the
   first enabled platform. If you name one that isn't enabled, the task is
   skipped with a warning, so only set it when you know the value is enabled.
+- `wait_for_mcp` — optional boolean, default false. Wait up to 30 seconds for MCP
+  tools at startup (Claude Code and Codex).
+- `skip_permissions` — optional boolean, default false. Bypass approval checks
+  (and the sandbox for Codex). Both options apply to scheduled and manual runs;
+  they do not inherit the originating conversation's settings.
 - `origin_conversation` — optional. The web conversation id this task was set up
   in, so the Automations tab can link back to it. If your system prompt has a
   "Your conversation" section naming an id, put that id here when creating a

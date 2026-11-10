@@ -53,6 +53,23 @@ def test_create_and_get(client, tmp_path):
     assert client.get(f"/api/tasks/{task['id']}/file", params={"path": "/etc/hosts"}).status_code == 404
 
 
+@pytest.mark.parametrize("field", ["wait_for_mcp", "skip_permissions"])
+def test_task_launch_options_default_off_and_persist(client, field):
+    default = _create(client)
+    assert default[field] is False
+    task = _create(client, **{field: True})
+    assert task[field] is True
+    assert getattr(taskboard.store.get(task["id"]), field) is True
+    assert client.get(f"/api/tasks/{task['id']}").json()[field] is True
+    edited = client.patch(f"/api/tasks/{task['id']}", json={field: False})
+    assert edited.status_code == 200
+    assert edited.json()[field] is False
+    assert getattr(taskboard.store.get(task["id"]), field) is False
+    assert client.patch(f"/api/tasks/{task['id']}", json={field: None}).status_code == 400
+    claim(task["id"])
+    assert client.patch(f"/api/tasks/{task['id']}", json={field: True}).status_code == 409
+
+
 @pytest.mark.parametrize(
     "payload, detail",
     [

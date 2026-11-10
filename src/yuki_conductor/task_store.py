@@ -51,6 +51,7 @@ _TASK_COLUMNS = (
     "status", "sort_order", "session_id", "worktree_path", "branch", "pr_url",
     "pr_state", "pr_checked_at", "asked_input", "done_requested", "parent_task_id",
     "cleanup_error", "created_at", "updated_at", "started_at", "done_at", "archived_at",
+    "wait_for_mcp", "skip_permissions",
 )
 _COMMENT_COLUMNS = (
     "id", "task_id", "author", "body", "quote_comment_id", "attachments",
@@ -63,6 +64,7 @@ _UPDATABLE = frozenset({
     "title", "body", "attachments", "project", "harness", "model", "use_worktree",
     "session_id", "worktree_path", "branch", "pr_url", "pr_state", "pr_checked_at",
     "asked_input", "done_requested", "cleanup_error",
+    "wait_for_mcp", "skip_permissions",
 })
 
 
@@ -93,6 +95,8 @@ class Task:
     started_at: float | None
     done_at: float | None
     archived_at: float | None  # set: hidden from the board, only reachable via SQL
+    wait_for_mcp: bool = False
+    skip_permissions: bool = False
 
     @property
     def editable(self) -> bool:
@@ -130,6 +134,8 @@ def _task(row: tuple) -> Task:
     d["use_worktree"] = bool(d["use_worktree"])
     d["asked_input"] = bool(d["asked_input"])
     d["done_requested"] = bool(d["done_requested"])
+    d["wait_for_mcp"] = bool(d["wait_for_mcp"])
+    d["skip_permissions"] = bool(d["skip_permissions"])
     return Task(**d)
 
 
@@ -186,9 +192,16 @@ class TaskStore:
                     "updated_at REAL NOT NULL, "
                     "started_at REAL, "
                     "done_at REAL, "
-                    "archived_at REAL)"
+                    "archived_at REAL, "
+                    "wait_for_mcp INTEGER NOT NULL DEFAULT 0, "
+                    "skip_permissions INTEGER NOT NULL DEFAULT 0)"
                 )
                 columns = {row[1] for row in con.execute("PRAGMA table_info(tasks)")}
+                for flag in ("wait_for_mcp", "skip_permissions"):
+                    if flag not in columns:
+                        con.execute(
+                            f"ALTER TABLE tasks ADD COLUMN {flag} INTEGER NOT NULL DEFAULT 0"
+                        )
                 if "model" not in columns:
                     con.execute("ALTER TABLE tasks ADD COLUMN model TEXT")
                 if "archived_at" not in columns:
@@ -241,6 +254,8 @@ class TaskStore:
         attachments: list[str] | None = None,
         parent_task_id: int | None = None,
         model: str | None = None,
+        wait_for_mcp: bool = False,
+        skip_permissions: bool = False,
     ) -> Task:
         """Add a task at the end of the To Do queue."""
         now = time.time()
@@ -250,11 +265,12 @@ class TaskStore:
                 cur = con.execute(
                     "INSERT INTO tasks (title, body, attachments, project, harness, model, "
                     "use_worktree, status, sort_order, parent_task_id, created_at, "
-                    "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "
-                    "(SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks), ?, ?, ?)",
+                    "updated_at, wait_for_mcp, skip_permissions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "
+                    "(SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks), ?, ?, ?, ?, ?)",
                     (
                         title, body, json.dumps(attachments or []), project, harness, model,
                         int(use_worktree), TODO, parent_task_id, now, now,
+                        int(wait_for_mcp), int(skip_permissions),
                     ),
                 )
                 task_id = cur.lastrowid
@@ -328,7 +344,7 @@ class TaskStore:
             raise ValueError(f"Not updatable: {', '.join(sorted(unknown))}")
         if "attachments" in fields:
             fields["attachments"] = json.dumps(fields["attachments"])
-        for flag in ("use_worktree", "asked_input", "done_requested"):
+        for flag in ("use_worktree", "asked_input", "done_requested", "wait_for_mcp", "skip_permissions"):
             if flag in fields:
                 fields[flag] = int(fields[flag])
         fields["updated_at"] = time.time()
@@ -356,8 +372,9 @@ class TaskStore:
             raise ValueError(f"Not updatable: {', '.join(sorted(unknown))}")
         if "attachments" in fields:
             fields["attachments"] = json.dumps(fields["attachments"])
-        if "use_worktree" in fields:
-            fields["use_worktree"] = int(fields["use_worktree"])
+        for flag in ("use_worktree", "wait_for_mcp", "skip_permissions"):
+            if flag in fields:
+                fields[flag] = int(fields[flag])
         fields["updated_at"] = time.time()
         assignments = ", ".join(f"{k} = ?" for k in fields)
         with self._lock:

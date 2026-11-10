@@ -49,6 +49,22 @@ def test_get_missing_returns_none(store):
     assert store.get(999) is None
 
 
+def test_existing_tasks_gain_launch_options_in_place(tmp_path):
+    db = tmp_path / "tasks.db"
+    store = TaskStore(db_path=db)
+    task = _new(store, "Existing task")
+    with sqlite3.connect(db) as con:
+        con.execute("ALTER TABLE tasks DROP COLUMN wait_for_mcp")
+        con.execute("ALTER TABLE tasks DROP COLUMN skip_permissions")
+    reopened = TaskStore(db_path=db)
+    got = reopened.get(task.id)
+    assert got.title == "Existing task"
+    assert got.wait_for_mcp is False and got.skip_permissions is False
+    reopened.update_fields(task.id, wait_for_mcp=True, skip_permissions=True)
+    got = TaskStore(db_path=db).get(task.id)
+    assert got.wait_for_mcp is True and got.skip_permissions is True
+
+
 def test_new_tasks_append_to_queue(store):
     for title in "abc":
         _new(store, title)

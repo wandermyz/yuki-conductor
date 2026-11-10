@@ -47,6 +47,8 @@ def register(sub) -> argparse.ArgumentParser:
     create.add_argument("--harness")
     create.add_argument("--model", help="Configured model alias ID (inherits the current run's alias)")
     create.add_argument("--worktree", action="store_true", help="Work in a fresh git worktree")
+    create.add_argument("--wait-for-mcp", action="store_true", help="Wait up to 30 seconds for MCP startup")
+    create.add_argument("--skip-permissions", action="store_true", help="Bypass approval checks")
     create.add_argument("--attach", "-a", action="append", default=[], metavar="PATH")
     create.add_argument("body", nargs="?", default="", help="Task body (Markdown; - for stdin)")
     return task
@@ -194,6 +196,8 @@ def handle(args) -> None:
             "harness": harness,
             "model": model,
             "use_worktree": args.worktree,
+            "wait_for_mcp": args.wait_for_mcp,
+            "skip_permissions": args.skip_permissions,
             "body": _text(args.body),
             "attachments": _files(args.attach),
             "parent_task_id": env_task_id(),

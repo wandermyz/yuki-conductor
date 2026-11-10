@@ -638,6 +638,12 @@ optional-server startup grace; Claude receives blocking startup with a
 with the available tools. This does not change tool execution timeouts or
 require servers to succeed.
 
+Task creation/editing exposes both options, stored on each task and used on
+every turn, including resumed sessions. Cron definitions accept `wait_for_mcp`
+and `skip_permissions` booleans for scheduled and manual runs. Both default off
+and do not inherit the originating conversation's settings. The task CLI also
+accepts `--wait-for-mcp` and `--skip-permissions` when creating a task.
+
 A turn runs on one **harness**, an agent CLI. `harness/__init__.py` knows these
 (`KNOWN_HARNESSES`):
 
