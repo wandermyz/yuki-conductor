@@ -151,6 +151,8 @@ def _run(task: Task, cwd: str) -> _Turn:
             task_id=task.id,
             on_event=lambda event: live.step(task.id, event),
             kind="task",
+            wait_for_mcp=task.wait_for_mcp,
+            skip_permissions=task.skip_permissions,
         )
 
     result = run(prompt, session_id)

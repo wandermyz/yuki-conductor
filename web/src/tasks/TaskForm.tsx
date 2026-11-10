@@ -39,6 +39,8 @@ export default function TaskForm({
         harness: task?.harness ?? picked?.harness ?? "",
         model: task?.model ?? null,
         use_worktree: task?.use_worktree ?? true,
+        wait_for_mcp: task?.wait_for_mcp ?? false,
+        skip_permissions: task?.skip_permissions ?? false,
       },
   );
   const [uploads, setUploads] = useState<AttachmentRef[]>(draft?.uploads ?? []);
@@ -171,6 +173,30 @@ export default function TaskForm({
           <span>
             Work in a git worktree
             <small>A fresh branch from the default branch. Leave off for read-only tasks.</small>
+          </span>
+        </label>
+
+        <label className="task-form-check">
+          <input
+            type="checkbox"
+            checked={input.wait_for_mcp}
+            onChange={(e) => set("wait_for_mcp", e.target.checked)}
+          />
+          <span>
+            Wait for MCP
+            <small>Wait up to 30 seconds for MCP tools at startup.</small>
+          </span>
+        </label>
+
+        <label className="task-form-check">
+          <input
+            type="checkbox"
+            checked={input.skip_permissions}
+            onChange={(e) => set("skip_permissions", e.target.checked)}
+          />
+          <span>
+            Skip Permissions
+            <small>Bypass approval checks and the Codex sandbox for this task.</small>
           </span>
         </label>
 

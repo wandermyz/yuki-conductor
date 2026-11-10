@@ -37,6 +37,8 @@ class CronTask:
     paused: bool = False  # when true the scheduler never fires it (manual runs still work)
     harness: str | None = None  # "claude-code" | "pi" | None (the default harness)
     model: str | None = None  # alias ID from the selected harness in models.yaml
+    wait_for_mcp: bool = False
+    skip_permissions: bool = False
 
     @property
     def label(self) -> str:
@@ -190,6 +192,8 @@ def load_tasks(path=None) -> list[CronTask]:
                 paused=bool(entry.get("paused", False)),
                 harness=entry.get("harness"),
                 model=entry.get("model"),
+                wait_for_mcp=bool(entry.get("wait_for_mcp", False)),
+                skip_permissions=bool(entry.get("skip_permissions", False)),
             )
             croniter(task.schedule)
         except (KeyError, ValueError, TypeError):

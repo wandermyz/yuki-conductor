@@ -3,6 +3,8 @@
 import threading
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from yuki_conductor.cron_config import CronTask
 from yuki_conductor.cron_scheduler import (
     _build_task_state,
@@ -119,6 +121,27 @@ def test_run_cron_task_silence_does_not_route():
         _run_cron_task(_task(), {"slack": slack})
 
     assert slack.threads == []
+
+
+@pytest.mark.parametrize("trigger", ["schedule", "manual"])
+@pytest.mark.parametrize("field", ["wait_for_mcp", "skip_permissions"])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_cron_launch_options_reach_agent(trigger, field, enabled):
+    task = _task()
+    setattr(task, field, enabled)
+    result = RunResult(text="quiet <silence>", session_id="sess-1")
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=result) as run:
+        _run_cron_task(task, {}, trigger=trigger)
+    assert run.call_args.kwargs[field] is enabled
+
+
+@pytest.mark.parametrize("field", ["wait_for_mcp", "skip_permissions"])
+def test_cron_launch_option_changes_reload_the_schedule(field):
+    before, after = _task(), _task()
+    assert not _tasks_changed([before], [after])
+    setattr(after, field, True)
+    assert _tasks_changed([before], [after])
+    assert _tasks_changed([after], [before])
 
 
 def test_run_cron_task_explicit_missing_app_is_skipped():

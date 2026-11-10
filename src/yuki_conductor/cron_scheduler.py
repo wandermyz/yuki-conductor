@@ -140,6 +140,8 @@ def _execute(
         model=task.model,
         push_conversation_id=reserved,
         kind="automation",
+        wait_for_mcp=task.wait_for_mcp,
+        skip_permissions=task.skip_permissions,
     )
 
     response_text = result.text or ""
@@ -221,7 +223,10 @@ def _build_task_state(tasks: list[CronTask]) -> tuple[list[tuple[CronTask, croni
 def _tasks_changed(old: list[CronTask], new: list[CronTask]) -> bool:
     """Check if the task list has changed (by comparing as tuples)."""
     def to_tuple(t: CronTask) -> tuple:
-        return (t.name, t.schedule, t.description, t.prompt, t.chat_app, t.paused, t.harness, t.model)
+        return (
+            t.name, t.schedule, t.description, t.prompt, t.chat_app, t.paused,
+            t.harness, t.model, t.wait_for_mcp, t.skip_permissions,
+        )
     return [to_tuple(t) for t in old] != [to_tuple(t) for t in new]
 
 

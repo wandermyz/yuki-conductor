@@ -53,6 +53,16 @@ def test_create_from_shell(api, capsys):
     assert "Created task #1: Add cache" in capsys.readouterr().out
     task = taskboard.store.get(1)
     assert task.use_worktree and task.body == "Use redis" and task.parent_task_id is None
+    assert task.wait_for_mcp is False and task.skip_permissions is False
+
+
+@pytest.mark.parametrize("flag,field", [
+    ("--wait-for-mcp", "wait_for_mcp"),
+    ("--skip-permissions", "skip_permissions"),
+])
+def test_create_with_launch_options(api, flag, field):
+    main(["task", "create", "--project", "proj", "--title", "Options", flag])
+    assert getattr(taskboard.store.get(1), field) is True
 
 
 def test_create_inside_a_task_links_the_parent(api, monkeypatch):

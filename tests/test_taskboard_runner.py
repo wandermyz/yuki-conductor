@@ -86,6 +86,8 @@ def test_first_turn_runs_in_project_and_lands_in_review(env):
     assert call["session_id"] is None
     assert call["task_id"] == task.id
     assert call["conversation_key"] == f"task:{task.id}"
+    assert call["wait_for_mcp"] is False
+    assert call["skip_permissions"] is False
     assert "# Task #" in call["prompt"] and "the body" in call["prompt"]
     stored = taskboard.store.get(task.id)
     assert stored.status == READY_FOR_REVIEW
@@ -259,8 +261,9 @@ def test_gone_session_starts_fresh_with_full_context(env):
     assert taskboard.store.get(task.id).session_id == "new"
 
 
-def test_session_missing_mid_resume_retries_fresh(env):
-    task = _claimed()
+@pytest.mark.parametrize("field", ["wait_for_mcp", "skip_permissions"])
+def test_session_missing_mid_resume_retries_fresh(env, field):
+    task = _claimed(**{field: True})
     taskboard.store.update_fields(task.id, session_id="s1")
     env.harness.sessions.add("s1")
     env.script = [
@@ -269,6 +272,7 @@ def test_session_missing_mid_resume_retries_fresh(env):
     ]
     runner.run_turn(task.id)
     assert [c["session_id"] for c in env.calls] == ["s1", None]
+    assert all(c[field] is True for c in env.calls)
     assert _status(task) == READY_FOR_REVIEW
     assert taskboard.store.get(task.id).session_id == "s2"
 

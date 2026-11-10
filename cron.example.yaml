@@ -16,12 +16,17 @@
 #                so the Automations tab can link back to it.
 #   paused:      (optional) true to suspend the schedule without deleting the
 #                task. Toggleable from the Automations tab; "Run now" still works.
+#   wait_for_mcp: (optional) Wait up to 30 seconds for MCP startup. Default false.
+#   skip_permissions: (optional) Bypass approval checks (and the Codex sandbox).
+#                Default false. Applies to each scheduled or manual run.
 
 tasks:
   - name: morning-briefing
     display_name: "Morning briefing"
     schedule: "0 9 * * 1-5"
     description: "Morning briefing (weekdays at 9am)"
+    wait_for_mcp: false
+    skip_permissions: false
     prompt: >
       Give me a concise morning briefing: check for any uncommitted changes or
       open TODOs in the codebase, summarize the git log from the past 24 hours,

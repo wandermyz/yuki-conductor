@@ -40,6 +40,8 @@ def serialize_task(task: Task, *, comment_count: int | None = None) -> dict:
         "model": task.model,
         "harness_enabled": task.harness in HARNESSES,
         "use_worktree": task.use_worktree,
+        "wait_for_mcp": task.wait_for_mcp,
+        "skip_permissions": task.skip_permissions,
         "status": task.status,
         "status_label": STATUS_LABELS[task.status],
         "sort_order": task.sort_order,
@@ -105,6 +107,8 @@ class TaskCreate(BaseModel):
     harness: str | None = None
     model: str | None = None
     use_worktree: bool = True
+    wait_for_mcp: bool = False
+    skip_permissions: bool = False
     body: str = ""
     attachments: list[str] = []  # absolute paths (CLI)
     attachment_ids: list[str] = []  # /api/uploads ids (web)
@@ -117,6 +121,8 @@ class TaskEdit(BaseModel):
     harness: str | None = None
     model: str | None = None
     use_worktree: bool | None = None
+    wait_for_mcp: bool | None = None
+    skip_permissions: bool | None = None
     body: str | None = None
     attachments: list[str] | None = None  # the full new list of paths
     attachment_ids: list[str] = []  # /api/uploads ids (web), added to the list
@@ -163,6 +169,8 @@ def create_task(body: TaskCreate):
         harness=body.harness,
         model=body.model,
         use_worktree=body.use_worktree,
+        wait_for_mcp=body.wait_for_mcp,
+        skip_permissions=body.skip_permissions,
         body=body.body,
         attachments=_paths(body.attachments, body.attachment_ids),
         parent_task_id=body.parent_task_id,

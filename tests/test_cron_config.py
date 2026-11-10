@@ -1,5 +1,7 @@
 """Tests for cron.yaml parsing, schedule description, and surgical edits."""
 
+import pytest
+
 from yuki_conductor.cron_config import (
     CronTask,
     describe_schedule,
@@ -53,6 +55,16 @@ def test_load_tasks_skips_invalid_entries(tmp_path):
 
 def test_load_tasks_missing_file(tmp_path):
     assert load_tasks(tmp_path / "nope.yaml") == []
+
+
+@pytest.mark.parametrize("field", ["wait_for_mcp", "skip_permissions"])
+@pytest.mark.parametrize("value", [None, False, True])
+def test_load_launch_options(tmp_path, field, value):
+    text = 'tasks:\n  - name: test\n    schedule: "* * * * *"\n    prompt: "hi"\n'
+    if value is not None:
+        text += f"    {field}: {str(value).lower()}\n"
+    task = load_tasks(_write(tmp_path, text))[0]
+    assert getattr(task, field) is (value is True)
 
 
 def test_label_falls_back_through_display_name_description_prompt():
