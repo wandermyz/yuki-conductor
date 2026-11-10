@@ -45,7 +45,7 @@ import { useSidebarWidth } from "../sidebarWidth";
 import "./chat.css";
 import { HARNESS_ICONS } from "./harnessIcons";
 import { HarnessIcon, NewSessionPicker, StepList } from "./shared";
-import { HeartbeatChip, HeartbeatDialog } from "../heartbeat/Heartbeat";
+import { HeartbeatChip, HeartbeatMark } from "../heartbeat/Heartbeat";
 /** Marks the agent a conversation runs on: its icon, or its name if it has none. */
 function HarnessMarker({ name }: { name: string }) {
   if (!HARNESS_ICONS[name]) return <span className="chat-list-harness">{name}</span>;
@@ -365,8 +365,6 @@ function ConvMenu({
   onSetWaitForMcp,
   onSetSkipPermissions,
   onShowSessionId,
-  onHeartbeat,
-  hasHeartbeat,
   onRename,
   onSetStatus,
   onArchive,
@@ -379,8 +377,6 @@ function ConvMenu({
   onSetWaitForMcp: (enabled: boolean) => void;
   onSetSkipPermissions: (enabled: boolean) => void;
   onShowSessionId: () => void;
-  onHeartbeat: () => void;
-  hasHeartbeat: boolean;
   onRename: () => void;
   onSetStatus: (s: ConvStatus) => void;
   onArchive: () => void;
@@ -409,13 +405,6 @@ function ConvMenu({
         onClick={(e) => { e.stopPropagation(); onShowSessionId(); onClose(); }}
       >
         Show Session ID
-      </button>
-      <button
-        className="conv-menu-item"
-        title="Wake this conversation's session on an interval"
-        onClick={(e) => { e.stopPropagation(); onHeartbeat(); onClose(); }}
-      >
-        {hasHeartbeat ? "♡ Heartbeat…" : "Heartbeat…"}
       </button>
       <div className="conv-menu-divider" />
       <button
@@ -924,7 +913,6 @@ function ChatThread({
   onRetry,
   onStop,
   onShowSessionId,
-  onHeartbeat,
   onRename,
   onSetStatus,
   onArchive,
@@ -945,7 +933,6 @@ function ChatThread({
   onRetry: (msg: ChatMessage) => void;
   onStop: () => void;
   onShowSessionId: () => void;
-  onHeartbeat: () => void;
   onRename: () => void;
   onSetStatus: (s: ConvStatus) => void;
   onArchive: () => void;
@@ -1002,7 +989,7 @@ function ChatThread({
           ←
         </button>
         <h2 className="chat-thread-title">{conv.title || "New chat"}</h2>
-        {conv.heartbeat && <HeartbeatChip hb={conv.heartbeat} onClick={onHeartbeat} />}
+        {conv.heartbeat && <HeartbeatChip hb={conv.heartbeat} />}
         <ModelPicker harness={harness} model={conv.model} onChange={onSetModel} />
         <HarnessMarker name={conv.harness} />
         <div className="menu-anchor">
@@ -1022,8 +1009,6 @@ function ChatThread({
               onSetWaitForMcp={onSetWaitForMcp}
               onSetSkipPermissions={onSetSkipPermissions}
               onShowSessionId={onShowSessionId}
-              onHeartbeat={onHeartbeat}
-              hasHeartbeat={!!conv.heartbeat}
               onRename={onRename}
               onSetStatus={onSetStatus}
               onArchive={onArchive}
@@ -1084,7 +1069,6 @@ export default function Chat({
   const [statuses, setStatuses] = useState<Record<string, ConvStatus>>({});
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [sessionIdModal, setSessionIdModal] = useState<string | null>(null);
-  const [heartbeatFor, setHeartbeatFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [showDone, setShowDone] = useState(false);
@@ -1459,18 +1443,7 @@ export default function Chat({
       {sessionIdModal && (
         <SessionIdModal sessionId={sessionIdModal} onClose={() => setSessionIdModal(null)} />
       )}
-      {heartbeatFor && (
-        <HeartbeatDialog
-          kind="conversation"
-          targetId={heartbeatFor}
-          onChanged={(hb) =>
-            setConversations((prev) =>
-              prev.map((c) => (c.id === heartbeatFor ? { ...c, heartbeat: hb } : c)),
-            )
-          }
-          onClose={() => setHeartbeatFor(null)}
-        />
-      )}
+
       {renaming && (
         <RenameModal
           initialTitle={conversations.find((c) => c.id === renaming)?.title || ""}
@@ -1571,6 +1544,7 @@ export default function Chat({
                 </div>
                 <div className="chat-list-meta">
                   <HarnessMarker name={c.harness} />
+                  {c.heartbeat && <HeartbeatMark hb={c.heartbeat} />}
                   <span className="chat-list-time">{formatTime(c.updated_at)}</span>
                   {formatUsage(usage[c.id]) && (
                     <span className="chat-list-usage" title="Token usage / cost">
@@ -1599,8 +1573,6 @@ export default function Chat({
                           onSetWaitForMcp={(enabled) => setWaitForMcp(c.id, enabled)}
                           onSetSkipPermissions={(enabled) => setSkipPermissions(c.id, enabled)}
                           onShowSessionId={() => setSessionIdModal(c.claude_session_id || "(no session yet)")}
-                          onHeartbeat={() => setHeartbeatFor(c.id)}
-                          hasHeartbeat={!!c.heartbeat}
                           onRename={() => setRenaming(c.id)}
                           onSetStatus={(s) => setStatus(c.id, s)}
                           onArchive={() => archive(c.id)}
@@ -1635,7 +1607,6 @@ export default function Chat({
             onRetry={(msg) => handleRetry(active.id, msg)}
             onStop={() => cancelProcessing(active.id).catch(console.error)}
             onShowSessionId={() => setSessionIdModal(active.claude_session_id || "(no session yet)")}
-            onHeartbeat={() => setHeartbeatFor(active.id)}
             onRename={() => setRenaming(active.id)}
             onSetStatus={(s) => setStatus(active.id, s)}
             onArchive={() => archive(active.id)}

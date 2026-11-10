@@ -124,9 +124,6 @@ class TaskCreate(BaseModel):
     attachments: list[str] = []  # absolute paths (CLI)
     attachment_ids: list[str] = []  # /api/uploads ids (web)
     parent_task_id: int | None = None
-    # Start with a heartbeat (see `heartbeat.py`).
-    heartbeat_prompt: str | None = None
-    heartbeat_interval_s: int = hs.DEFAULT_INTERVAL_S
 
 
 class TaskEdit(BaseModel):
@@ -192,8 +189,6 @@ def create_task(body: TaskCreate):
         body=body.body,
         attachments=_paths(body.attachments, body.attachment_ids),
         parent_task_id=body.parent_task_id,
-        heartbeat_prompt=body.heartbeat_prompt,
-        heartbeat_interval_s=body.heartbeat_interval_s,
     )
     return serialize_task(task, comment_count=0)
 

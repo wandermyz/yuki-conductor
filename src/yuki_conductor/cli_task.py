@@ -13,7 +13,6 @@ from pathlib import Path
 
 from yuki_conductor.cli_http import api_request
 from yuki_conductor.cli_search import link
-from yuki_conductor.heartbeat import parse_duration
 
 
 def register(sub) -> argparse.ArgumentParser:
@@ -51,14 +50,6 @@ def register(sub) -> argparse.ArgumentParser:
     create.add_argument("--wait-for-mcp", action="store_true", help="Wait up to 30 seconds for MCP startup")
     create.add_argument("--skip-permissions", action="store_true", help="Bypass approval checks")
     create.add_argument("--attach", "-a", action="append", default=[], metavar="PATH")
-    create.add_argument(
-        "--heartbeat", metavar="PROMPT",
-        help="Start with a heartbeat: wake the task's session with PROMPT on an interval",
-    )
-    create.add_argument(
-        "--heartbeat-every", default="270s", metavar="INTERVAL",
-        help="The heartbeat's interval, e.g. 270s, 60m (default 270s)",
-    )
     create.add_argument("body", nargs="?", default="", help="Task body (Markdown; - for stdin)")
     return task
 
@@ -211,12 +202,6 @@ def handle(args) -> None:
             "attachments": _files(args.attach),
             "parent_task_id": env_task_id(),
         }
-        if args.heartbeat:
-            try:
-                payload["heartbeat_interval_s"] = parse_duration(args.heartbeat_every)
-            except ValueError as exc:
-                _die(str(exc))
-            payload["heartbeat_prompt"] = args.heartbeat
         t = api_request("POST", "/api/tasks", payload, what="Create")
         print(f"Created task #{t['id']}: {t['title']}")
     else:

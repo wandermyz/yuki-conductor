@@ -327,6 +327,7 @@ def test_three_failures_pause_and_surface(web, monkeypatch):
     texts = [m["text"] for m in web.get(f"/api/conversations/{cid}/messages").json()]
     assert sum("check failed" in t for t in texts) == 3
     assert "paused after 3 failed ticks" in texts[-1]
+    assert texts[-1].startswith("_🕒")
 
 
 def test_expiry_deletes_with_a_note(web):
@@ -519,20 +520,19 @@ def task_api(monkeypatch):
     return TestClient(web_server.create_api())
 
 
-def test_task_created_with_a_heartbeat(task_api):
-    r = task_api.post("/api/tasks", json={
-        "title": "Babysit PR", "project": "proj",
-        "heartbeat_prompt": "watch the PR", "heartbeat_interval_s": 600,
-    })
-    assert r.status_code == 201, r.text
-    hb = r.json()["heartbeat"]
-    assert hb["prompt"] == "watch the PR" and hb["interval_s"] == 600
-    assert task_api.get("/api/tasks").json()[0]["heartbeat"]["interval_s"] == 600
-    bad = task_api.post("/api/tasks", json={
-        "title": "x", "project": "proj", "heartbeat_prompt": "x", "heartbeat_interval_s": 5,
-    })
-    assert bad.status_code == 400
-    assert len(task_api.get("/api/tasks").json()) == 1  # no task without its heartbeat
+def test_tasks_api_shows_the_heartbeat(task_api):
+    task = _waiting_task()
+    hb = task_api.get(f"/api/tasks/{task.id}").json()["heartbeat"]
+    assert hb["prompt"] == "check CI" and hb["interval_s"] == 60 and not hb["ticking"]
+    assert task_api.get("/api/tasks").json()[0]["heartbeat"]["prompt"] == "check CI"
+
+
+def test_conversations_api_shows_the_heartbeat(web):
+    cid = _conv(web)
+    assert web.get(f"/api/conversations/{cid}").json()["heartbeat"] is None
+    heartbeat.set_heartbeat(CONVERSATION, cid, "watch it")
+    listed = {c["id"]: c for c in web.get("/api/conversations").json()}
+    assert listed[cid]["heartbeat"]["prompt"] == "watch it"
 
 
 def test_archive_and_done_task_heartbeats(task_api):

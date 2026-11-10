@@ -267,7 +267,7 @@ def _note(kind: str, target_id: str, text: str) -> None:
 
     platform, _ = resolved
     try:
-        platform.send(target_id, OutgoingMessage(text=f"_♡ {text}_", pushed=True))
+        platform.send(target_id, OutgoingMessage(text=f"_🕒 {text}_", pushed=True))
     except Exception:
         logger.warning("Couldn't post a heartbeat note to %s", target_id, exc_info=True)
 
@@ -297,7 +297,7 @@ def record_tick(hb: Heartbeat, outcome: str) -> Heartbeat | None:
         _note(
             hb.target_kind, hb.target_id,
             f"Heartbeat paused after {updated.consecutive_errors} failed ticks in a row. "
-            "Resume it from the menu once the problem is fixed.",
+            "Ask the agent to resume it once the problem is fixed.",
         )
     changed(hb.target_kind, hb.target_id)
     return updated
@@ -323,15 +323,6 @@ def conversation_prompt(hb: Heartbeat) -> str:
         "with <silence>. Include <notify> only if the user should see this reply. "
         "When the thing you are watching is resolved, run `yuki-conductor heartbeat "
         "stop` before replying."
-    )
-
-
-def announcement(hb: Heartbeat) -> str:
-    """For a task's first turn when it was created with a heartbeat."""
-    return (
-        f"This task has a heartbeat: every {format_duration(hb.interval_s)} after "
-        f"a turn ends, your session is woken with: \"{hb.prompt}\". Use the "
-        "`yuki-conductor-heartbeat` skill to change or stop it."
     )
 
 
@@ -476,7 +467,7 @@ def _error_message(error: str):
     from yuki_conductor.messaging import OutgoingMessage
 
     return OutgoingMessage(
-        text=f"_♡ Heartbeat check failed:_\n\n```\n{error}\n```", pushed=True
+        text=f"_🕒 Heartbeat check failed:_\n\n```\n{error}\n```", pushed=True
     )
 
 

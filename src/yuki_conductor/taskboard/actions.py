@@ -9,7 +9,7 @@ import re
 
 from yuki_conductor import heartbeat, taskboard
 from yuki_conductor.harness import HARNESSES, default_harness
-from yuki_conductor.heartbeat_store import DEFAULT_INTERVAL_S, TASK
+from yuki_conductor.heartbeat_store import TASK
 from yuki_conductor.model_config import ModelConfigError, load_harness_models
 from yuki_conductor.store import ProjectStore
 from yuki_conductor.task_store import (
@@ -82,11 +82,7 @@ def create(
     body: str = "",
     attachments: list[str] | None = None,
     parent_task_id: int | None = None,
-    heartbeat_prompt: str | None = None,
-    heartbeat_interval_s: int = DEFAULT_INTERVAL_S,
 ) -> Task:
-    """Add a task. With `heartbeat_prompt` it starts with a heartbeat, which
-    first fires one interval after its first turn ends."""
     harness = harness or default_harness()
     title = _check_title(title)
     _check_project(project)
@@ -94,11 +90,6 @@ def create(
     _check_model(harness, model)
     if parent_task_id is not None:
         get(parent_task_id)
-    if heartbeat_prompt is not None:
-        try:
-            heartbeat.validate(heartbeat_prompt, heartbeat_interval_s)
-        except heartbeat.HeartbeatError as exc:
-            raise BoardError(exc.status, str(exc)) from None
     task = taskboard.store.create(
         title=title,
         project=project,
@@ -111,11 +102,6 @@ def create(
         attachments=attachments,
         parent_task_id=parent_task_id,
     )
-    if heartbeat_prompt is not None:
-        heartbeat.set_heartbeat(
-            TASK, str(task.id), heartbeat_prompt,
-            interval_s=heartbeat_interval_s, created_by="user",
-        )
     _changed(task.id)
     return task
 

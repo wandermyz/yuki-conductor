@@ -74,9 +74,11 @@ It is a scheduled check, not the user.
 
 A task's heartbeat only fires while the task is waiting (Needs Input or Ready
 for Review), and stops when the task is Done or archived. A conversation's stops
-when it is archived or deleted. The user can change or stop it at any time; you
-won't be told, so don't rely on it still being there — `heartbeat status`
-shows it.
+when it is archived or deleted. The web UI only shows that a heartbeat is
+active (a 🕒 on the conversation or task); the user changes or stops it by
+asking you, so run these commands when they do. They can also stop it outside
+this session, and you won't be told: `heartbeat status` shows whether it's
+still there.
 
 ## Requirements
 

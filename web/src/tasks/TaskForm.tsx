@@ -4,8 +4,6 @@ import type { AttachmentRef, HarnessInfo, Project } from "../chat/api";
 import { HarnessIcon, ModelPicker, NewSessionPicker } from "../chat/shared";
 import Markdown from "../Markdown";
 import { imageMarkers, insertAt, pastedFiles, withoutMarker } from "../paste";
-import { IntervalInput } from "../heartbeat/Heartbeat";
-import { MIN_INTERVAL_S, parseDuration } from "../heartbeat/api";
 import { createTask, editTask } from "./api";
 import type { Task, TaskInput } from "./api";
 import { DRAFT_KEY, loadDraft } from "./draft";
@@ -46,14 +44,6 @@ export default function TaskForm({
       },
   );
   const [uploads, setUploads] = useState<AttachmentRef[]>(draft?.uploads ?? []);
-  // Only a new task can start with one; after that it's the task's own.
-  const [heartbeatOn, setHeartbeatOn] = useState(false);
-  const [heartbeatPrompt, setHeartbeatPrompt] = useState("");
-  const [heartbeatEvery, setHeartbeatEvery] = useState("270s");
-  const heartbeatSeconds = parseDuration(heartbeatEvery);
-  const heartbeatValid =
-    !heartbeatOn ||
-    (!!heartbeatPrompt.trim() && heartbeatSeconds !== null && heartbeatSeconds >= MIN_INTERVAL_S);
   const [preview, setPreview] = useState(false);
   const [picking, setPicking] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -100,13 +90,7 @@ export default function TaskForm({
       const attachment_ids = uploads.map((u) => u.id);
       const saved = task
         ? await editTask(task.id, { ...input, attachment_ids })
-        : await createTask({
-            ...input,
-            attachment_ids,
-            ...(heartbeatOn
-              ? { heartbeat_prompt: heartbeatPrompt, heartbeat_interval_s: heartbeatSeconds! }
-              : {}),
-          });
+        : await createTask({ ...input, attachment_ids });
       if (!task) localStorage.removeItem(DRAFT_KEY);
       onSaved(saved);
     } catch (e) {
@@ -216,34 +200,6 @@ export default function TaskForm({
           </span>
         </label>
 
-        {!task && (
-          <label className="task-form-check">
-            <input
-              type="checkbox"
-              checked={heartbeatOn}
-              onChange={(e) => setHeartbeatOn(e.target.checked)}
-            />
-            <span>
-              Heartbeat
-              <small>
-                After each turn, wake the task's session on an interval to check on
-                something, e.g. a PR or a deploy. Quiet checks leave no trace.
-              </small>
-            </span>
-          </label>
-        )}
-        {!task && heartbeatOn && (
-          <div className="task-form-heartbeat">
-            <IntervalInput value={heartbeatEvery} onChange={setHeartbeatEvery} />
-            <textarea
-              rows={2}
-              placeholder="What each check should do, e.g. triage new review comments, rebase if main moved, check CI."
-              value={heartbeatPrompt}
-              onChange={(e) => setHeartbeatPrompt(e.target.value)}
-            />
-          </div>
-        )}
-
         <div className="task-form-files">
           {uploads.map((u) => (
             <span key={u.id} className="task-file-chip">
@@ -268,7 +224,7 @@ export default function TaskForm({
           <button onClick={onCancel}>Cancel</button>
           <button
             className="primary"
-            disabled={saving || !input.title.trim() || !input.project || !heartbeatValid}
+            disabled={saving || !input.title.trim() || !input.project}
             onClick={save}
           >
             {saving ? "Saving…" : task ? "Save" : "Create task"}

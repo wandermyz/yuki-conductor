@@ -1,8 +1,4 @@
-/* Doubled class: beats `.tasks-view button`, including its 44px mobile tap
-   height, which would make the chip twice as tall as the rows it sits in. */
-.heartbeat-chip.heartbeat-chip {
-  min-height: 0;
-  font-family: inherit;
+.heartbeat-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -11,34 +7,26 @@
   padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: none;
   color: var(--text);
-  cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
   max-width: 100%;
   overflow: hidden;
-}
-
-.heartbeat-chip.heartbeat-chip:hover {
-  border-color: var(--accent);
+  cursor: default;
 }
 
 .heartbeat-icon {
-  color: #e0457b;
-  font-size: 13px;
+  font-size: 12px;
 }
 
-.heartbeat-chip.ticking .heartbeat-icon {
+.heartbeat-chip.ticking .heartbeat-icon,
+.heartbeat-mark.ticking {
   animation: heartbeat-pulse 1s ease-in-out infinite;
 }
 
-.heartbeat-chip.paused {
-  opacity: 0.6;
-}
-
-.heartbeat-chip.paused .heartbeat-icon {
-  color: var(--text);
+.heartbeat-chip.paused,
+.heartbeat-mark.paused {
+  opacity: 0.5;
 }
 
 .heartbeat-chip.error {
@@ -56,13 +44,21 @@
   margin: 0 1px;
 }
 
+.heartbeat-mark {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+  cursor: default;
+}
+
 @keyframes heartbeat-pulse {
   0%,
   100% {
-    transform: scale(1);
+    opacity: 1;
   }
   50% {
-    transform: scale(1.3);
+    opacity: 0.35;
   }
 }
 
@@ -73,177 +69,10 @@
   }
 }
 
-/* A phone's chat header also holds the title, model and menu: just the ♡,
-   which opens the dialog with the rest. */
+/* A phone's chat header also holds the title, model and menu: just the
+   icon; its tooltip has the rest. */
 @media (max-width: 480px) {
   .chat-thread-header .heartbeat-chip .heartbeat-chip-text {
     display: none;
   }
-}
-
-.heartbeat-dialog {
-  width: min(520px, calc(100vw - 32px));
-  max-width: 520px;
-  box-sizing: border-box;
-  max-height: calc(100vh - 48px);
-  overflow-y: auto;
-}
-
-.heartbeat-help,
-.heartbeat-summary {
-  margin: 0 0 12px;
-  font-size: 13px;
-  color: var(--text);
-}
-
-.heartbeat-summary {
-  color: var(--text-h);
-}
-
-.heartbeat-field {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  margin-bottom: 10px;
-  font-size: 13px;
-}
-
-.heartbeat-field > span:first-child {
-  width: 52px;
-  flex-shrink: 0;
-  padding-top: 7px;
-  color: var(--text-h);
-}
-
-.heartbeat-field textarea,
-.heartbeat-interval input {
-  box-sizing: border-box;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-h);
-  font: inherit;
-  padding: 6px 8px;
-}
-
-.heartbeat-field textarea {
-  flex: 1;
-  resize: vertical;
-  min-width: 0;
-}
-
-.heartbeat-interval {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.heartbeat-interval input {
-  width: 90px;
-}
-
-.heartbeat-interval input[aria-invalid="true"] {
-  border-color: #d64545;
-}
-
-.heartbeat-interval small {
-  color: var(--text);
-  font-size: 12px;
-}
-
-.heartbeat-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* The same buttons from the chat and the Tasks tab, which style buttons
-   differently. */
-.heartbeat-actions button {
-  font: inherit;
-  font-size: 14px;
-  color: var(--text-h);
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 12px;
-  min-height: 36px;
-  cursor: pointer;
-}
-
-.heartbeat-actions button:hover:not(:disabled) {
-  border-color: var(--accent-border, var(--accent));
-}
-
-.heartbeat-actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.heartbeat-actions button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.heartbeat-actions-spacer {
-  flex: 1;
-}
-
-.heartbeat-actions .heartbeat-stop {
-  color: #d64545;
-}
-
-.heartbeat-log {
-  margin-top: 16px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-}
-
-.heartbeat-log h4 {
-  margin: 0 0 6px;
-  font-size: 13px;
-  color: var(--text-h);
-}
-
-.heartbeat-log ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  font-size: 12px;
-}
-
-.heartbeat-tick {
-  display: flex;
-  gap: 8px;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--border);
-  min-width: 0;
-}
-
-.heartbeat-tick-when {
-  flex-shrink: 0;
-  color: var(--text);
-}
-
-.heartbeat-tick-outcome {
-  flex-shrink: 0;
-  font-weight: 600;
-}
-
-.heartbeat-tick.notified .heartbeat-tick-outcome {
-  color: var(--accent);
-}
-
-.heartbeat-tick.error .heartbeat-tick-outcome {
-  color: #d64545;
-}
-
-.heartbeat-tick-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
 }

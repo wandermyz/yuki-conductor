@@ -152,8 +152,6 @@ def _run(task: Task, cwd: str, hb: Heartbeat | None = None) -> _Turn:
         prompt, session_id = prompts.first_turn(task, comments, cwd), None
     if hb is not None and session_id is None:
         prompt += "\n\n" + heartbeat.task_prompt(hb)
-    elif hb is None and session_id is None and (own := hs.store.get(TASK, str(task.id))):
-        prompt += "\n\n" + heartbeat.announcement(own)
     delivered = [c.id for c in pending]
     # Shown as seen while the agent works on them; rolled back if the run
     # fails, so the next turn sends them again.

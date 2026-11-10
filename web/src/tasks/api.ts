@@ -133,13 +133,7 @@ export const searchTasks = (q: string) =>
 
 export const getTask = (id: number) => call<TaskDetail>("GET", `/api/tasks/${id}`);
 
-/** Start the task with a heartbeat (only when creating it). */
-export interface HeartbeatInput {
-  heartbeat_prompt?: string;
-  heartbeat_interval_s?: number;
-}
-
-export const createTask = (input: TaskInput & HeartbeatInput & { attachment_ids: string[] }) =>
+export const createTask = (input: TaskInput & { attachment_ids: string[] }) =>
   call<Task>("POST", "/api/tasks", input);
 
 export const editTask = (id: number, fields: Partial<TaskInput> & { attachment_ids?: string[] }) =>

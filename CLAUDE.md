@@ -61,7 +61,7 @@ src/yuki_conductor/
   updater.py        — self-update: git fetch + rebase onto upstream (see Self-update)
 web/                — React + Vite frontend (pnpm, TypeScript)
   src/tasks/          — the Tasks tab (list, detail, form)
-  src/heartbeat/      — heartbeat chip + dialog, shared by Chat and Tasks
+  src/heartbeat/      — read-only heartbeat indicators, shared by Chat and Tasks
   src/Markdown.tsx    — shared Markdown renderer; ```mermaid via pele
 plugins/
   yuki-conductor/   — bundled skill plugin, injected into every session (cron, send, task, heartbeat skills)
@@ -497,15 +497,15 @@ runs a fresh session each time. Design: `docs/plans/2026-11-10-heartbeat.md`.
   Done. Archive deletes it too; reopening doesn't bring it back.
 - **Targets** for the CLI: `YUKI_TASK_ID`, else `YUKI_CONVERSATION_ID` (set
   by `run_agent` from `push_conversation_id`), else `-c`/`--task`. The CLI
-  warns on 5–30 minute intervals (cache-cold every tick). The user can stop
-  any heartbeat from the UI; the agent isn't told.
-- **UI** (`web/src/heartbeat/`): chip `♡ 4m30s · next in 2m · last: quiet` in
-  the chat header and task meta (icon-only in a phone's chat header), a
-  "Heartbeat…" chat menu item / task "Heartbeat" button, and a dialog with
-  interval, prompt, pause/stop and the tick log. The task form can create a
-  task with one (`heartbeat_prompt` / `heartbeat_interval_s` on
-  `POST /api/tasks`, `task create --heartbeat`). Conversation changes are
-  broadcast as `{"type": "heartbeat"}`; task ones as task changes.
+  warns on 5–30 minute intervals (cache-cold every tick). There's no editing
+  UI: the user asks the agent, which runs the CLI; the agent isn't told when
+  a heartbeat is stopped outside its session.
+- **UI** (`web/src/heartbeat/`): read-only. A 🕒 chip
+  (`🕒 4m30s · next in 2m · last: quiet`, prompt in the tooltip) in the chat
+  header and task meta (icon-only in a phone's chat header), and a 🕒 mark on
+  conversation and task list rows. `/api/conversations` and `/api/tasks`
+  carry each target's `heartbeat`. Conversation changes are broadcast as
+  `{"type": "heartbeat"}`; task ones as task changes.
 - Not yet: the Slack `/<prefix>-heartbeat` command.
 
 ## Key Commands

@@ -34,7 +34,7 @@ PUSHABLE_PLATFORMS = ("web", "slack")
 
 # Appended to a heartbeat tick's reply, so a wake-up the user didn't ask for
 # reads differently from a reply to something they said (cf. PUSH_MARKER).
-HEARTBEAT_MARKER = "_♡ Heartbeat_"
+HEARTBEAT_MARKER = "_🕒 Heartbeat_"
 
 NOTIFY_TAG = "<notify>"
 SILENCE_TAG = "<silence>"
