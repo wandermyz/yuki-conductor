@@ -93,6 +93,43 @@ def test_start_thread_notifies_without_the_text(tmp_path, isolated_push_subscrip
     assert call["data"]["body"] == "Responded to a conversation"
 
 
+@pytest.mark.parametrize("delivery", ["reply", "push", "start_thread"])
+def test_conversation_push_waits_until_all_websockets_disconnect(
+    tmp_path, isolated_push_subscriptions, sent, monkeypatch, delivery
+):
+    from yuki_conductor import web_server
+
+    isolated_push_subscriptions.add(SUB["endpoint"], "pk", "au")
+    manager = ConnectionManager()
+    monkeypatch.setattr(web_server, "ws_manager", manager)
+    client = TestClient(web_server.create_api())
+    store = ConversationStore(db_path=tmp_path / "conv.db")
+    platform = WebPlatform(store, manager)
+    conv = store.create_conversation(platform="web", title="Report")
+
+    def deliver():
+        if delivery == "start_thread":
+            return platform.start_thread("Result", title="Cron")
+        platform.send(conv.id, OutgoingMessage(text="Result", pushed=delivery == "push"))
+        return conv.id
+
+    with client.websocket_connect("/ws/chat") as first:
+        first.send_text("ping")
+        assert first.receive_json() == {"type": "pong"}
+        with client.websocket_connect("/ws/chat") as second:
+            second.send_text("ping")
+            assert second.receive_json() == {"type": "pong"}
+            delivered_id = deliver()
+            assert first.receive_json()["conversation_id"] == delivered_id
+            assert second.receive_json()["conversation_id"] == delivered_id
+            assert sent == []
+        deliver()
+        assert sent == []
+    assert store.list_messages(delivered_id)
+    deliver()
+    assert len(sent) == 1
+
+
 def test_no_subscribers_sends_nothing(tmp_path, sent):
     platform = WebPlatform(ConversationStore(db_path=tmp_path / "conv.db"), ConnectionManager())
     platform.start_thread("hello")

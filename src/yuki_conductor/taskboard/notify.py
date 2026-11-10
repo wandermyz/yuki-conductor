@@ -10,7 +10,13 @@ which task, never the content: the user opens the task to read it.
 import threading
 
 from yuki_conductor import web_push
-from yuki_conductor.task_store import STATUS_LABELS, Task, TaskComment
+from yuki_conductor.task_store import (
+    NEEDS_INPUT,
+    READY_FOR_REVIEW,
+    STATUS_LABELS,
+    Task,
+    TaskComment,
+)
 from yuki_conductor.taskboard.transitions import TransitionEvent
 
 
@@ -20,7 +26,7 @@ def message(task: Task) -> tuple[str, str]:
 
 
 def on_transition(event: TransitionEvent) -> None:
-    if not event.notify:
+    if not event.notify or event.to_status not in {NEEDS_INPUT, READY_FOR_REVIEW}:
         return
     title, body = message(event.task)
     _send_in_background(event.task.id, title, body)

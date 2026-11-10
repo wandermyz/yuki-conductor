@@ -432,6 +432,10 @@ def test_resolve_outcome_notifies_only_when_the_user_is_needed():
     assert runner.resolve_outcome(task, ok, cancelled=False, has_new_comments=False).notify
     assert not runner.resolve_outcome(task, ok, cancelled=True, has_new_comments=False).notify
     assert not runner.resolve_outcome(task, ok, cancelled=False, has_new_comments=True).notify
+    task.done_requested = True
+    outcome = runner.resolve_outcome(task, ok, cancelled=False, has_new_comments=False)
+    assert outcome.status == DONE
+    assert not outcome.notify
 
 
 @pytest.mark.parametrize("model", [None, "opus"])

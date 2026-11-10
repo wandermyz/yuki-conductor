@@ -2,7 +2,9 @@
 
 Every assistant message the web platform delivers — a turn's reply, a cron
 result, a `yuki-conductor send` push — fans out to each browser that
-subscribed from the chat sidebar. The service worker (`web/public/sw.js`)
+subscribed from the chat sidebar, unless a chat WebSocket is connected.
+Task status notifications are independent of chat connections.
+The service worker (`web/public/sw.js`)
 decides whether to actually show it: it stays quiet when a focused window is
 already showing that conversation, since the in-page sound covers that case.
 
