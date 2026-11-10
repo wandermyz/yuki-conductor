@@ -3,7 +3,7 @@
 import pytest
 
 from yuki_conductor import taskboard, web_push
-from yuki_conductor.task_store import NEEDS_INPUT, READY_FOR_REVIEW, TODO
+from yuki_conductor.task_store import DONE, NEEDS_INPUT, READY_FOR_REVIEW, TODO
 from yuki_conductor.taskboard import notify, transitions
 from yuki_conductor.taskboard.transitions import claim, transition
 
@@ -55,6 +55,13 @@ def test_silent_transitions(pushes):
     transition(task.id, TODO, reason="new comment during the turn")
     claim(task.id)
     transition(task.id, NEEDS_INPUT, reason="cancelled")
+    assert pushes == []
+
+
+@pytest.mark.parametrize("status", [DONE, TODO])
+def test_other_statuses_stay_silent_even_when_notify_is_requested(pushes, status):
+    task = _running()
+    transition(task.id, status, reason="turn ended", notify=True)
     assert pushes == []
 
 

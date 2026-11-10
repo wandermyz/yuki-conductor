@@ -542,9 +542,12 @@ The `yuki-conductor-send` skill (bundled plugin) documents `send` for the model.
 
 ### Browser notifications
 
-Every assistant message `WebPlatform` delivers — a reply, a cron result
-(`start_thread` or `send`), a push — and every taskboard task that needs the
-user also goes out as a Web Push notification
+When no chat WebSocket is connected, every assistant message `WebPlatform`
+delivers — a reply, a cron result (`start_thread` or `send`), a push — also
+goes out as a Web Push notification. Task status notifications only go out
+for flagged moves into Needs Input or Ready for Review, never Done, and are
+independent of chat connections. Explicit task comment notifications also
+remain available. Notifications are sent by
 (`web_push.py`) to each browser subscribed via the 🔔 toggle in the chat
 sidebar. Each push names a target, `{kind: "conversation" | "task", id}`
 (`web_push.conversation_target` / `task_target`). A notification names the

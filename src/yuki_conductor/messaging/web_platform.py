@@ -55,6 +55,11 @@ class ConnectionManager:
         with self._lock:
             self._clients = [(s, lp) for (s, lp) in self._clients if s is not ws]
 
+    def has_connections(self) -> bool:
+        """Whether any browser is connected to the chat event stream."""
+        with self._lock:
+            return bool(self._clients)
+
     def broadcast(self, conv_id: str, payload: dict) -> None:
         enriched = {**payload, "conversation_id": conv_id}
         with self._lock:
@@ -262,10 +267,12 @@ class WebPlatform:
         return conv.id
 
     def _notify(self, conversation_key: str, pushed: bool = False) -> None:
-        """Browser push for a new assistant message (see `web_push`).
+        """Browser push for a new assistant message when no browser is connected.
 
         Names the conversation, never the message: the user opens it to read.
         """
+        if self._manager.has_connections():
+            return
         conv = self._store.get_conversation(conversation_key)
         web_push.notify(
             web_push.conversation_target(conversation_key),

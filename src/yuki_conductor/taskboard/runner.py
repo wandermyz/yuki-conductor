@@ -83,7 +83,7 @@ def resolve_outcome(
     if task.asked_input:
         return Outcome(NEEDS_INPUT, "the agent asked for input", notify=True)
     if task.done_requested:
-        return Outcome(DONE, "the agent marked it done", notify=True)
+        return Outcome(DONE, "the agent marked it done", notify=False)
     if task.pr_url:
         return Outcome(READY_FOR_REVIEW, "PR opened", notify=True)
     return Outcome(READY_FOR_REVIEW, "turn finished", notify=True)
