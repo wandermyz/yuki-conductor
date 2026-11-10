@@ -7,8 +7,9 @@ task` CLI are thin wrappers over these functions. Errors are raised as
 
 import re
 
-from yuki_conductor import taskboard
+from yuki_conductor import heartbeat, taskboard
 from yuki_conductor.harness import HARNESSES, default_harness
+from yuki_conductor.heartbeat_store import TASK
 from yuki_conductor.model_config import ModelConfigError, load_harness_models
 from yuki_conductor.store import ProjectStore
 from yuki_conductor.task_store import (
@@ -335,6 +336,7 @@ def archive(task_id: int) -> None:
     if not taskboard.store.archive(task_id, expected=task.status):
         raise BoardError(409, "The task changed while it was being archived; try again")
     taskboard.store.add_comment(task_id, "system", "Archived")
+    heartbeat.target_gone(TASK, str(task_id))
     _changed(task_id)
 
 

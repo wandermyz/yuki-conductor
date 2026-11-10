@@ -3,16 +3,24 @@
 One loop thread walks the queue in order and starts each task whose harness
 is enabled, has a free slot (`config.taskboard_limit`), and isn't paused
 board-wide. Each picked task runs on its own thread via `runner.run_turn`.
+Due heartbeat ticks on waiting tasks are picked up the same way, after the
+queue (see `heartbeat.py`).
 """
 
 import logging
 import threading
 
-from yuki_conductor import config, taskboard
+from yuki_conductor import config, heartbeat, taskboard
 from yuki_conductor.harness import HARNESSES
 from yuki_conductor.task_store import IN_PROGRESS, TODO
 from yuki_conductor.taskboard import runner
-from yuki_conductor.taskboard.transitions import TransitionEvent, claim, transition
+from yuki_conductor.taskboard.transitions import (
+    HEARTBEAT_CLAIMABLE,
+    TransitionEvent,
+    claim,
+    claim_heartbeat,
+    transition,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +52,16 @@ class Harvester:
 
     def recover(self) -> None:
         """Re-queue tasks a previous daemon left In Progress, at the top so
-        they're picked up first. Their session is kept, so they resume."""
+        they're picked up first. Their session is kept, so they resume. A
+        heartbeat tick that was running goes back where it came from instead;
+        its heartbeat fires again soon after the restart."""
         for task in taskboard.store.list_status(IN_PROGRESS):
-            transition(task.id, TODO, reason="re-queued after daemon restart", top=True)
+            if task.heartbeat_return_status:
+                transition(
+                    task.id, task.heartbeat_return_status, reason="heartbeat", quiet=True
+                )
+            else:
+                transition(task.id, TODO, reason="re-queued after daemon restart", top=True)
 
     def tick(self) -> list[int]:
         """Start whatever can start now. Returns the ids started."""
@@ -68,6 +83,31 @@ class Harvester:
             runner.clear_cancel(task.id)
             if claim(task.id) is None:
                 continue  # cancelled or edited away since the list was read
+            counts[task.harness] = counts.get(task.harness, 0) + 1
+            self._start(task.id, task.harness)
+            started.append(task.id)
+        started += self._heartbeats(counts, finishing)
+        return started
+
+    def _heartbeats(self, counts: dict[str, int], finishing: set[int]) -> list[int]:
+        """Start due heartbeat ticks on tasks that are waiting (Needs Input or
+        Ready for Review). A task in To Do or In Progress is about to run or
+        running; its tick stays due until it's waiting again."""
+        started = []
+        for hb in heartbeat.due_tasks():
+            task = taskboard.store.get(int(hb.target_id))
+            if task is None or task.archived_at is not None:
+                heartbeat.target_gone(hb.target_kind, hb.target_id)
+                continue
+            if task.id in finishing or task.status not in HEARTBEAT_CLAIMABLE:
+                continue
+            if task.harness not in HARNESSES:
+                continue
+            if counts.get(task.harness, 0) >= config.taskboard_limit(task.harness):
+                continue
+            runner.clear_cancel(task.id)
+            if claim_heartbeat(task.id) is None:
+                continue
             counts[task.harness] = counts.get(task.harness, 0) + 1
             self._start(task.id, task.harness)
             started.append(task.id)

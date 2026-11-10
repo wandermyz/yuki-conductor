@@ -149,3 +149,17 @@ def no_web_build(monkeypatch):
     from yuki_conductor import config
 
     monkeypatch.setattr(config, "web_frontend_stale", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def isolated_heartbeats(monkeypatch, tmp_path):
+    """Keep heartbeats out of the real workspace DB.
+
+    ``heartbeat_store.store`` is bound at import, and the taskboard, the chat
+    core and the scheduler all read it through the module.
+    """
+    from yuki_conductor import heartbeat_store
+
+    store = heartbeat_store.HeartbeatStore(db_path=tmp_path / "heartbeats.db")
+    monkeypatch.setattr(heartbeat_store, "store", store)
+    return store

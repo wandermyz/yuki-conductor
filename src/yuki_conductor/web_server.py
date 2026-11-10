@@ -26,11 +26,12 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from yuki_conductor import web_push, zellij_manager
+from yuki_conductor import heartbeat, heartbeat_store, web_push, zellij_manager
 from yuki_conductor.config import WEB_UPLOADS_DIR
 from yuki_conductor.conversation_store import ConversationStore
 from yuki_conductor.harness import HARNESSES, default_harness
 from yuki_conductor.harness.process import cancel_process
+from yuki_conductor.heartbeat_store import CONVERSATION
 from yuki_conductor.messaging import (
     Attachment,
     IncomingMessage,
@@ -92,6 +93,17 @@ cron_run_store = CronRunStore()
 ws_manager = ConnectionManager()
 
 
+def platform_for(conv_id: str):
+    """Return the platform that owns `conv_id`, or None if nothing does."""
+    if conv_store.get_conversation(conv_id):
+        return WebPlatform(conv_store, ws_manager)
+    session_type = store.get_session_type(conv_id)
+    for rec in _receivers:
+        if rec.platform.name == session_type:
+            return rec.platform
+    return None
+
+
 def _slack_thread_url(channel_id: str, thread_ts: str) -> str:
     ts_no_dot = thread_ts.replace(".", "")
     return f"https://{SLACK_WORKSPACE}.slack.com/archives/{channel_id}/p{ts_no_dot}"
@@ -112,10 +124,12 @@ def _clear_restart_required() -> None:
 
 
 def create_api() -> FastAPI:
+    from yuki_conductor.heartbeat_routes import router as heartbeat_router
     from yuki_conductor.taskboard.routes import router as taskboard_router
 
     api = FastAPI(title="Agent Conductor")
     api.include_router(taskboard_router)
+    api.include_router(heartbeat_router)
 
     @api.exception_handler(ModelConfigError)
     async def model_config_error(request: Request, exc: ModelConfigError):
@@ -334,7 +348,11 @@ def create_api() -> FastAPI:
         text: str = ""
         attachment_ids: list[str] = []
 
-    def _conv_to_dict(c) -> dict:
+    def _conv_to_dict(c, hb=True) -> dict:
+        """`hb`: the conversation's heartbeat if the caller has it (None:
+        none); True looks it up."""
+        if hb is True:
+            hb = heartbeat_store.store.get(CONVERSATION, c.id)
         return {
             "id": c.id,
             "platform": c.platform,
@@ -347,11 +365,16 @@ def create_api() -> FastAPI:
             "skip_permissions": bool(c.skip_permissions),
             "created_at": c.created_at,
             "updated_at": c.updated_at,
+            "heartbeat": heartbeat.serialize(hb),
         }
 
     @api.get("/api/conversations")
     def list_conversations(platform: str | None = Query(default="web")):
-        return [_conv_to_dict(c) for c in conv_store.list_conversations(platform=platform)]
+        beats = {hb.target_id: hb for hb in heartbeat_store.store.list_all(CONVERSATION)}
+        return [
+            _conv_to_dict(c, beats.get(c.id))
+            for c in conv_store.list_conversations(platform=platform)
+        ]
 
     @api.get("/api/search")
     def search_conversations(
@@ -435,6 +458,7 @@ def create_api() -> FastAPI:
         """Hide a conversation from every web view; its rows stay in the DB."""
         if not conv_store.archive_conversation(conv_id):
             raise HTTPException(status_code=404, detail="Conversation not found")
+        heartbeat.target_gone(CONVERSATION, conv_id)
         return {"ok": True}
 
     @api.delete("/api/conversations/{conv_id}")
@@ -442,6 +466,7 @@ def create_api() -> FastAPI:
         if not conv_store.delete_conversation(conv_id):
             raise HTTPException(status_code=404, detail="Conversation not found")
         store.delete_session(conv_id)
+        heartbeat.target_gone(CONVERSATION, conv_id)
         return {"ok": True}
 
     @api.get("/api/chat/conversations/statuses")
@@ -546,16 +571,6 @@ def create_api() -> FastAPI:
         # Absolute paths on this machine; the daemon and the run share a disk.
         attachments: list[str] = []
 
-    def _push_platform(conv_id: str):
-        """Return the platform that owns `conv_id`, or None if nothing does."""
-        if conv_store.get_conversation(conv_id):
-            return WebPlatform(conv_store, ws_manager)
-        session_type = store.get_session_type(conv_id)
-        for rec in _receivers:
-            if rec.platform.name == session_type:
-                return rec.platform
-        return None
-
     @api.post("/api/push")
     def push_message(body: PushMessage):
         """Deliver an out-of-band assistant message to a conversation.
@@ -584,7 +599,7 @@ def create_api() -> FastAPI:
             created = True
         else:
             conv_id = body.conversation_id
-            platform = _push_platform(conv_id)
+            platform = platform_for(conv_id)
             if platform is None:
                 raise HTTPException(status_code=404, detail="Conversation not found")
             created = False

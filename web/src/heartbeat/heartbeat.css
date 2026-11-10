@@ -1,0 +1,78 @@
+.heartbeat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 100%;
+  overflow: hidden;
+  cursor: default;
+}
+
+.heartbeat-icon {
+  font-size: 12px;
+}
+
+.heartbeat-chip.ticking .heartbeat-icon,
+.heartbeat-mark.ticking {
+  animation: heartbeat-pulse 1s ease-in-out infinite;
+}
+
+.heartbeat-chip.paused,
+.heartbeat-mark.paused {
+  opacity: 0.5;
+}
+
+.heartbeat-chip.error {
+  border-color: #d64545;
+}
+
+.heartbeat-chip-last,
+.heartbeat-chip-text {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.heartbeat-chip-sep {
+  opacity: 0.5;
+  margin: 0 1px;
+}
+
+.heartbeat-mark {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+  cursor: default;
+}
+
+@keyframes heartbeat-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Narrow headers: the interval and countdown are what matter. */
+@media (max-width: 640px) {
+  .heartbeat-chip .heartbeat-chip-last {
+    display: none;
+  }
+}
+
+/* A phone's chat header also holds the title, model and menu: just the
+   icon; its tooltip has the rest. */
+@media (max-width: 480px) {
+  .chat-thread-header .heartbeat-chip .heartbeat-chip-text {
+    display: none;
+  }
+}

@@ -19,6 +19,7 @@ import {
 } from "./api";
 import type { TaskAttachment, TaskComment, TaskDetail as Detail } from "./api";
 import { PrMarker, StatusBadge } from "./common";
+import { HeartbeatChip } from "../heartbeat/Heartbeat";
 import { formatWhen } from "./format";
 
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg)$/i;
@@ -285,6 +286,7 @@ export default function TaskDetail({
           onClose={() => setShowSession(false)}
         />
       )}
+
       {/* One line, like the chat's thread header, so the tabs line up. */}
       <div className="task-detail-bar">
         <button className="task-back" onClick={onBack} aria-label="Back to tasks">
@@ -325,6 +327,9 @@ export default function TaskDetail({
           </span>
           {task.branch && <code>{task.branch}</code>}
           {!task.branch && task.use_worktree && <span>worktree</span>}
+          {task.heartbeat && (
+            <HeartbeatChip hb={task.heartbeat} />
+          )}
           {task.pr_url && (
             <span className="task-pr">
               <PrMarker url={task.pr_url} state={task.pr_state} link />

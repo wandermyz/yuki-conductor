@@ -8,10 +8,12 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from yuki_conductor import taskboard
+from yuki_conductor import heartbeat, taskboard
+from yuki_conductor import heartbeat_store as hs
 from yuki_conductor.harness import HARNESSES
+from yuki_conductor.heartbeat_store import TASK, Heartbeat
 from yuki_conductor.messaging.web_platform import resolve_file
-from yuki_conductor.task_store import STATUS_LABELS, Task, TaskComment
+from yuki_conductor.task_store import IN_PROGRESS, STATUS_LABELS, Task, TaskComment
 from yuki_conductor.taskboard import actions, live, pr_watcher
 from yuki_conductor.taskboard.actions import BoardError
 
@@ -29,7 +31,13 @@ def _attachments(task_id: int, paths: list[str]) -> list[dict]:
     ]
 
 
-def serialize_task(task: Task, *, comment_count: int | None = None) -> dict:
+def serialize_task(
+    task: Task, *, comment_count: int | None = None, hb: Heartbeat | None | bool = True
+) -> dict:
+    """`hb`: the task's heartbeat if the caller already has it (None: none);
+    True looks it up."""
+    if hb is True:
+        hb = hs.store.get(TASK, str(task.id))
     return {
         "id": task.id,
         "title": task.title,
@@ -58,6 +66,9 @@ def serialize_task(task: Task, *, comment_count: int | None = None) -> dict:
         "started_at": task.started_at,
         "done_at": task.done_at,
         "comment_count": comment_count,
+        "heartbeat": heartbeat.serialize(
+            hb, is_ticking=task.status == IN_PROGRESS and bool(task.heartbeat_return_status)
+        ),
     }
 
 
@@ -157,7 +168,11 @@ class StateBody(BaseModel):
 def list_tasks(old: bool = False):
     tasks = taskboard.store.list_tasks(include_old=old)
     counts = taskboard.store.comment_counts()
-    return [serialize_task(t, comment_count=counts.get(t.id, 0)) for t in tasks]
+    beats = {hb.target_id: hb for hb in hs.store.list_all(TASK)}
+    return [
+        serialize_task(t, comment_count=counts.get(t.id, 0), hb=beats.get(str(t.id)))
+        for t in tasks
+    ]
 
 
 @router.post("/api/tasks", status_code=201)

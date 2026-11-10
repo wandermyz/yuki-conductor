@@ -1,5 +1,6 @@
 /** Typed client for the taskboard API (src/yuki_conductor/taskboard/routes.py). */
 import type { StreamStep } from "../chat/api";
+import type { Heartbeat } from "../heartbeat/api";
 
 export type TaskStatus = "todo" | "in_progress" | "needs_input" | "ready_for_review" | "done";
 
@@ -54,6 +55,8 @@ export interface Task {
   started_at: number | null;
   done_at: number | null;
   comment_count: number | null;
+  /** Its recurring wake-up, if it has one. */
+  heartbeat: Heartbeat | null;
 }
 
 export interface TaskComment {

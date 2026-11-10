@@ -11,6 +11,7 @@ import {
   fetchProcessing,
   fetchSteps,
   fetchAllUsage,
+  getConversation,
   listConversations,
   listHarnesses,
   listMessages,
@@ -44,6 +45,7 @@ import { useSidebarWidth } from "../sidebarWidth";
 import "./chat.css";
 import { HARNESS_ICONS } from "./harnessIcons";
 import { HarnessIcon, NewSessionPicker, StepList } from "./shared";
+import { HeartbeatChip, HeartbeatMark } from "../heartbeat/Heartbeat";
 /** Marks the agent a conversation runs on: its icon, or its name if it has none. */
 function HarnessMarker({ name }: { name: string }) {
   if (!HARNESS_ICONS[name]) return <span className="chat-list-harness">{name}</span>;
@@ -987,6 +989,7 @@ function ChatThread({
           ←
         </button>
         <h2 className="chat-thread-title">{conv.title || "New chat"}</h2>
+        {conv.heartbeat && <HeartbeatChip hb={conv.heartbeat} />}
         <ModelPicker harness={harness} model={conv.model} onChange={onSetModel} />
         <HarnessMarker name={conv.harness} />
         <div className="menu-anchor">
@@ -1174,6 +1177,12 @@ export default function Chat({
             else next.delete(cid);
             return next;
           });
+        } else if (e.type === "heartbeat") {
+          getConversation(cid)
+            .then((conv) =>
+              setConversations((prev) => prev.map((c) => (c.id === cid ? conv : c))),
+            )
+            .catch(console.error);
         } else if (e.type === "title") {
           setConversations((prev) =>
             prev.map((c) => (c.id === cid ? { ...c, title: e.title } : c)),
@@ -1434,6 +1443,7 @@ export default function Chat({
       {sessionIdModal && (
         <SessionIdModal sessionId={sessionIdModal} onClose={() => setSessionIdModal(null)} />
       )}
+
       {renaming && (
         <RenameModal
           initialTitle={conversations.find((c) => c.id === renaming)?.title || ""}
@@ -1534,6 +1544,7 @@ export default function Chat({
                 </div>
                 <div className="chat-list-meta">
                   <HarnessMarker name={c.harness} />
+                  {c.heartbeat && <HeartbeatMark hb={c.heartbeat} />}
                   <span className="chat-list-time">{formatTime(c.updated_at)}</span>
                   {formatUsage(usage[c.id]) && (
                     <span className="chat-list-usage" title="Token usage / cost">

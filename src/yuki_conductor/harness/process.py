@@ -160,7 +160,8 @@ def run_agent(
         cwd: Working directory for the run. Defaults to CLAUDE_WORKING_DIR.
         push_conversation_id: Conversation this run belongs to, if `/api/push`
             can route to it. Named in the system prompt so the run can push
-            messages back into it via `yuki-conductor send`.
+            messages back into it via `yuki-conductor send`, and set as
+            `YUKI_CONVERSATION_ID`, which `yuki-conductor heartbeat` defaults to.
         on_event: Called from the reader thread for every intermediate step.
             Exceptions raised by the callback are logged and swallowed so a
             broken UI subscriber can't kill the run.
@@ -169,8 +170,8 @@ def run_agent(
             `yuki-conductor task` commands default to.
         wait_for_mcp: Wait up to 30 seconds for MCP tools at startup.
         skip_permissions: Bypass approval checks instead of automatic review.
-        kind: What the run is for — "chat", "task" or "automation" — as
-            reported by `running_runs()`.
+        kind: What the run is for — "chat", "task", "automation" or
+            "heartbeat" — as reported by `running_runs()`.
     """
     with _track_run(kind):
         try:
@@ -233,6 +234,10 @@ def _run_agent(
     env.pop("YUKI_TASK_ID", None)
     if task_id is not None:
         env["YUKI_TASK_ID"] = str(task_id)
+    # Likewise the conversation, which `heartbeat` defaults to.
+    env.pop("YUKI_CONVERSATION_ID", None)
+    if push_conversation_id is not None:
+        env["YUKI_CONVERSATION_ID"] = push_conversation_id
     effective_timeout = timeout if timeout is not None else CLAUDE_TIMEOUT
 
     try:
