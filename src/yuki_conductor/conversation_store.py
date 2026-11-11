@@ -54,6 +54,7 @@ class StoredConversation:
     model: str | None = None  # harness-native model id; None: the harness's default
     wait_for_mcp: bool = False
     skip_permissions: bool = False
+    pinned_at: float | None = None  # set: listed above every unpinned conversation
 
 
 # Wraps each matched term in a search snippet. Control characters, so they
@@ -101,7 +102,8 @@ class ConversationStore:
                         archived_at REAL,
                         model TEXT,
                         wait_for_mcp INTEGER NOT NULL DEFAULT 0,
-                        skip_permissions INTEGER NOT NULL DEFAULT 0
+                        skip_permissions INTEGER NOT NULL DEFAULT 0,
+                        pinned_at REAL
                     )
                     """
                 )
@@ -169,6 +171,8 @@ class ConversationStore:
                         "ALTER TABLE conversations ADD COLUMN "
                         "skip_permissions INTEGER NOT NULL DEFAULT 0"
                     )
+                if "pinned_at" not in cols:
+                    con.execute("ALTER TABLE conversations ADD COLUMN pinned_at REAL")
                 usage_cols = {
                     row[1]
                     for row in con.execute("PRAGMA table_info(message_usage)").fetchall()
@@ -229,7 +233,8 @@ class ConversationStore:
             try:
                 row = con.execute(
                     "SELECT id, platform, title, project, claude_session_id, "
-                    "created_at, updated_at, harness, archived_at, model, wait_for_mcp, skip_permissions FROM conversations WHERE id = ?",
+                    "created_at, updated_at, harness, archived_at, model, wait_for_mcp, "
+                    "skip_permissions, pinned_at FROM conversations WHERE id = ?",
                     (conv_id,),
                 ).fetchone()
                 if not row:
@@ -239,23 +244,23 @@ class ConversationStore:
                 con.close()
 
     def list_conversations(self, platform: str | None = None) -> list[StoredConversation]:
-        """Unarchived conversations, most recently updated first."""
+        """Unarchived conversations: the pinned ones first, most recently
+        pinned on top, then the rest, most recently updated first."""
+        select = (
+            "SELECT id, platform, title, project, claude_session_id, "
+            "created_at, updated_at, harness, archived_at, model, wait_for_mcp, "
+            "skip_permissions, pinned_at FROM conversations WHERE archived_at IS NULL "
+        )
+        order = " ORDER BY pinned_at IS NULL, pinned_at DESC, updated_at DESC"
         with self._lock:
             con = self._connect()
             try:
                 if platform is not None:
                     rows = con.execute(
-                        "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at, harness, archived_at, model, wait_for_mcp, skip_permissions FROM conversations "
-                        "WHERE platform = ? AND archived_at IS NULL ORDER BY updated_at DESC",
-                        (platform,),
+                        select + "AND platform = ?" + order, (platform,)
                     ).fetchall()
                 else:
-                    rows = con.execute(
-                        "SELECT id, platform, title, project, claude_session_id, "
-                        "created_at, updated_at, harness, archived_at, model, wait_for_mcp, skip_permissions FROM conversations "
-                        "WHERE archived_at IS NULL ORDER BY updated_at DESC"
-                    ).fetchall()
+                    rows = con.execute(select + order).fetchall()
                 return [StoredConversation(*r) for r in rows]
             finally:
                 con.close()
@@ -335,6 +340,30 @@ class ConversationStore:
                     "UPDATE conversations SET skip_permissions = ? WHERE id = ?",
                     (int(enabled), conv_id),
                 )
+                con.commit()
+                return cur.rowcount > 0
+            finally:
+                con.close()
+
+    def set_pinned(self, conv_id: str, pinned: bool) -> bool:
+        """Pin a conversation to the top of the list, or unpin it.
+
+        Pinning an already pinned conversation keeps its place among the pins,
+        and neither leaves `updated_at` touched.
+        """
+        with self._lock:
+            con = self._connect()
+            try:
+                if pinned:
+                    cur = con.execute(
+                        "UPDATE conversations SET pinned_at = COALESCE(pinned_at, ?) "
+                        "WHERE id = ?",
+                        (time.time(), conv_id),
+                    )
+                else:
+                    cur = con.execute(
+                        "UPDATE conversations SET pinned_at = NULL WHERE id = ?", (conv_id,)
+                    )
                 con.commit()
                 return cur.rowcount > 0
             finally:

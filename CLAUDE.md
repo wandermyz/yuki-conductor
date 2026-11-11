@@ -184,6 +184,15 @@ from `/api/conversations`, and `GET /api/conversations/{id}` and its
 `/messages` 404. There's no unarchive and no UI to browse them — query the DB
 directly (`SELECT … FROM conversations WHERE archived_at IS NOT NULL`).
 
+### Pinned conversations
+
+The chat menu's **Pin to Top** / **Unpin** (`PATCH /api/conversations/{id}`
+with `pinned`) sets or clears `conversations.pinned_at`, leaving `updated_at`
+alone. `/api/conversations` lists pinned conversations first, most recently
+pinned on top, then the rest by `updated_at`; the sidebar sorts the same way
+(`byPinThenRecency`) and marks them 📌. Pinning doesn't touch status, so the
+Active/All filter still hides a pinned conversation that is done.
+
 ### Conversation search
 
 The search box at the top of the chat sidebar calls `GET /api/search?q=`,

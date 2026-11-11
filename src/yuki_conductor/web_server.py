@@ -343,6 +343,7 @@ def create_api() -> FastAPI:
         model: str | None = None  # only when sent; null returns to the harness default
         wait_for_mcp: bool = False
         skip_permissions: bool = False
+        pinned: bool = False
 
     class MessageCreate(BaseModel):
         text: str = ""
@@ -363,6 +364,7 @@ def create_api() -> FastAPI:
             "model": c.model,
             "wait_for_mcp": bool(c.wait_for_mcp),
             "skip_permissions": bool(c.skip_permissions),
+            "pinned_at": c.pinned_at,
             "created_at": c.created_at,
             "updated_at": c.updated_at,
             "heartbeat": heartbeat.serialize(hb),
@@ -446,6 +448,8 @@ def create_api() -> FastAPI:
             conv_store.set_wait_for_mcp(conv_id, body.wait_for_mcp)
         if "skip_permissions" in body.model_fields_set:
             conv_store.set_skip_permissions(conv_id, body.skip_permissions)
+        if "pinned" in body.model_fields_set:
+            conv_store.set_pinned(conv_id, body.pinned)
         if body.title is not None or body.project is not None:
             conv_store.update_conversation(conv_id, title=body.title, project=body.project)
         # Mirror title into the legacy session store so the Sessions tab matches.
