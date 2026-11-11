@@ -698,8 +698,11 @@ their menu to use Claude's `bypassPermissions` or Codex's
 `--dangerously-bypass-approvals-and-sandbox` on subsequent turns. The setting
 is stored as `conversations.skip_permissions`, defaults off, and never changes
 a turn already running. Unavailable review models or reviewer denials do not
-fall back to bypass. LiteLLM must serve Claude's classifier model as well as
-the conversation model (currently `claude-sonnet-5` by default). It must also
+fall back to bypass. An `endpoint` connection sets
+`CLAUDE_CODE_AUTO_MODE_SERVER=0`: a gateway rejects the server-side review's
+beta, and Claude Code then denies every action needing a verdict rather than
+falling back. So LiteLLM must serve Claude's local classifier model as well as
+the conversation model (currently `claude-sonnet-5[1m]` by default). It must also
 serve `codex-auto-review` when Codex advertises that dedicated reviewer; otherwise
 Codex's custom provider uses the conversation model for review.
 

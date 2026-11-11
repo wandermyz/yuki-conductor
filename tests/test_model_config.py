@@ -88,6 +88,7 @@ def test_concurrent_routes_are_isolated_and_never_serialize_keys(endpoints, harn
             if harness.name == "claude-code":
                 assert config["env"]["ANTHROPIC_BASE_URL"] == f"http://localhost:{port}"
                 assert config["env"]["ANTHROPIC_AUTH_TOKEN"] == ""
+                assert config["env"]["CLAUDE_CODE_AUTO_MODE_SERVER"] == "0"
                 assert "YUKI_MODEL_API_KEY" in config["apiKeyHelper"]
                 assert "-r" in launch.argv
             else:
@@ -120,6 +121,7 @@ def test_subscription_overrides_inherited_routing(endpoints, monkeypatch, harnes
             assert config["apiKeyHelper"] == ""
             assert config["forceLoginMethod"] == "claudeai"
             assert config["env"]["ANTHROPIC_BASE_URL"] == ""
+            assert "CLAUDE_CODE_AUTO_MODE_SERVER" not in config["env"]
             assert "ANTHROPIC_AUTH_TOKEN" not in launch.env
             assert "CLAUDE_CODE_OAUTH_TOKEN" not in launch.env
             assert config["env"]["CLAUDE_CODE_OAUTH_TOKEN"] == ""
