@@ -52,11 +52,12 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "ready_for_review", label: "Review" },
   { key: "in_progress", label: "In Progress" },
   { key: "todo", label: "To Do" },
+  { key: "draft", label: "Drafts" },
   { key: "done", label: "Done" },
 ];
 
 /** The order statuses are grouped in: what needs the user first. */
-const STATUS_ORDER: TaskStatus[] = ["needs_input", "ready_for_review", "in_progress", "todo", "done"];
+const STATUS_ORDER: TaskStatus[] = ["needs_input", "ready_for_review", "in_progress", "todo", "draft", "done"];
 
 function sortForDisplay(tasks: Task[]): Task[] {
   return [...tasks].sort((a, b) => {

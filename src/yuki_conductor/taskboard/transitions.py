@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from yuki_conductor import taskboard
 from yuki_conductor.task_store import (
     DONE,
+    DRAFT,
     IN_PROGRESS,
     NEEDS_INPUT,
     READY_FOR_REVIEW,
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 # The state machine from the PRD. To Do → In Progress isn't here: only
 # `claim()` does that, atomically.
 ALLOWED: dict[str, frozenset[str]] = {
+    DRAFT: frozenset({TODO}),  # queued
     TODO: frozenset({NEEDS_INPUT}),
     IN_PROGRESS: frozenset({TODO, NEEDS_INPUT, READY_FOR_REVIEW, DONE}),
     NEEDS_INPUT: frozenset({TODO, DONE}),

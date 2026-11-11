@@ -23,7 +23,7 @@ def register(sub) -> argparse.ArgumentParser:
     show.add_argument("id", nargs="?", type=int)
 
     lst = tsub.add_parser("list", help="List tasks")
-    lst.add_argument("--status", help="todo, in_progress, needs_input, ready_for_review or done")
+    lst.add_argument("--status", help="draft, todo, in_progress, needs_input, ready_for_review or done")
     lst.add_argument("--project")
     lst.add_argument("--old", action="store_true", help="Include tasks done over 30 days ago")
 
@@ -41,6 +41,9 @@ def register(sub) -> argparse.ArgumentParser:
     pr = tsub.add_parser("pr", help="Register the task's pull request")
     pr.add_argument("args", nargs="+", metavar="[ID] URL")
 
+    queue = tsub.add_parser("queue", help="Queue a draft task for pickup")
+    queue.add_argument("id", type=int)
+
     create = tsub.add_parser("create", help="Create a task")
     create.add_argument("--project", required=True)
     create.add_argument("--title", required=True)
@@ -50,6 +53,7 @@ def register(sub) -> argparse.ArgumentParser:
     create.add_argument("--wait-for-mcp", action="store_true", help="Wait up to 30 seconds for MCP startup")
     create.add_argument("--skip-permissions", action="store_true", help="Bypass approval checks")
     create.add_argument("--attach", "-a", action="append", default=[], metavar="PATH")
+    create.add_argument("--draft", action="store_true", help="Save it without queueing it")
     create.add_argument("body", nargs="?", default="", help="Task body (Markdown; - for stdin)")
     return task
 
@@ -201,8 +205,13 @@ def handle(args) -> None:
             "body": _text(args.body),
             "attachments": _files(args.attach),
             "parent_task_id": env_task_id(),
+            "draft": args.draft,
         }
         t = api_request("POST", "/api/tasks", payload, what="Create")
-        print(f"Created task #{t['id']}: {t['title']}")
+        kind = "draft" if args.draft else "task"
+        print(f"Created {kind} #{t['id']}: {t['title']}")
+    elif cmd == "queue":
+        api_request("POST", f"/api/tasks/{args.id}/queue", what="Queue")
+        print(f"Queued task #{args.id}")
     else:
-        _die("usage: yuki-conductor task {show,list,comment,ask,done,pr,create} ...")
+        _die("usage: yuki-conductor task {show,list,comment,ask,done,pr,queue,create} ...")

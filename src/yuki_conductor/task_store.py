@@ -23,14 +23,16 @@ from yuki_conductor.conversation_store import (
 )
 from yuki_conductor.store import _SqliteKVStore
 
+DRAFT = "draft"
 TODO = "todo"
 IN_PROGRESS = "in_progress"
 NEEDS_INPUT = "needs_input"
 READY_FOR_REVIEW = "ready_for_review"
 DONE = "done"
-STATUSES = (TODO, IN_PROGRESS, NEEDS_INPUT, READY_FOR_REVIEW, DONE)
+STATUSES = (DRAFT, TODO, IN_PROGRESS, NEEDS_INPUT, READY_FOR_REVIEW, DONE)
 
 STATUS_LABELS = {
+    DRAFT: "Draft",
     TODO: "To Do",
     IN_PROGRESS: "In Progress",
     NEEDS_INPUT: "Needs Input",
@@ -104,7 +106,7 @@ class Task:
     @property
     def editable(self) -> bool:
         """Only a task nobody has picked up yet may be edited."""
-        return self.status == TODO and self.started_at is None
+        return self.status in (DRAFT, TODO) and self.started_at is None
 
 
 @dataclass
@@ -262,8 +264,10 @@ class TaskStore:
         model: str | None = None,
         wait_for_mcp: bool = False,
         skip_permissions: bool = False,
+        draft: bool = False,
     ) -> Task:
-        """Add a task at the end of the To Do queue."""
+        """Add a task at the end of the To Do queue, or as a draft, which
+        nothing picks up until it's queued."""
         now = time.time()
         with self._lock:
             con = self._connect()
@@ -275,7 +279,7 @@ class TaskStore:
                     "(SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks), ?, ?, ?, ?, ?)",
                     (
                         title, body, json.dumps(attachments or []), project, harness, model,
-                        int(use_worktree), TODO, parent_task_id, now, now,
+                        int(use_worktree), DRAFT if draft else TODO, parent_task_id, now, now,
                         int(wait_for_mcp), int(skip_permissions),
                     ),
                 )
@@ -370,8 +374,8 @@ class TaskStore:
         return self.get(task_id)
 
     def edit_if_untouched(self, task_id: int, **fields) -> bool:
-        """Like `update_fields`, but only while the task is To Do and has never
-        been picked up, checked in the same statement so a pickup can't slip
+        """Like `update_fields`, but only while the task is a draft or To Do and
+        has never been picked up, checked in the same statement so a pickup can't slip
         in between. Returns whether the edit happened."""
         unknown = set(fields) - _UPDATABLE
         if unknown:
@@ -387,9 +391,9 @@ class TaskStore:
             con = self._connect()
             try:
                 cur = con.execute(
-                    f"UPDATE tasks SET {assignments} WHERE id = ? AND status = ? "
+                    f"UPDATE tasks SET {assignments} WHERE id = ? AND status IN (?, ?) "
                     "AND started_at IS NULL",
-                    (*fields.values(), task_id, TODO),
+                    (*fields.values(), task_id, DRAFT, TODO),
                 )
                 if cur.rowcount == 1 and fields.keys() & {"title", "body"}:
                     _index_task(con, task_id)

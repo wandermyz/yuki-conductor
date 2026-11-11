@@ -470,3 +470,26 @@ def test_task_model_roundtrip_and_edit(client):
     assert client.patch(url, json={"model": None}).json()["model"] is None
     client.patch(url, json={"model": "opus"})
     assert client.patch(url, json={"harness": "pi"}).json()["model"] is None
+
+
+def test_draft_is_saved_but_not_picked_up_until_queued(client):
+    from yuki_conductor.task_store import DRAFT
+    from yuki_conductor.taskboard.harvester import Harvester
+
+    task = _create(client, draft=True)
+    assert task["status"] == DRAFT and task["status_label"] == "Draft"
+    assert task["editable"]
+    assert client.patch(f"/api/tasks/{task['id']}", json={"title": "Better"}).status_code == 200
+    assert Harvester(run_turn=lambda _id: None).tick() == []
+    assert _status(task["id"]) == DRAFT
+
+    queued = client.post(f"/api/tasks/{task['id']}/queue").json()
+    assert queued["status"] == TODO and queued["title"] == "Better"
+    # Only a draft can be queued.
+    assert client.post(f"/api/tasks/{task['id']}/queue").status_code == 409
+
+
+def test_draft_can_be_archived(client):
+    task = _create(client, draft=True)
+    assert client.post(f"/api/tasks/{task['id']}/archive").status_code == 200
+    assert client.get(f"/api/tasks/{task['id']}").status_code == 404

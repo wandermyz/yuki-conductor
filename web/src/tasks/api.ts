@@ -2,11 +2,12 @@
 import type { StreamStep } from "../chat/api";
 import type { Heartbeat } from "../heartbeat/api";
 
-export type TaskStatus = "todo" | "in_progress" | "needs_input" | "ready_for_review" | "done";
+export type TaskStatus = "draft" | "todo" | "in_progress" | "needs_input" | "ready_for_review" | "done";
 
 export type PrState = "OPEN" | "DRAFT" | "MERGED" | "CLOSED";
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
+  draft: "Draft",
   todo: "To Do",
   in_progress: "In Progress",
   needs_input: "Needs Input",
@@ -133,7 +134,8 @@ export const searchTasks = (q: string) =>
 
 export const getTask = (id: number) => call<TaskDetail>("GET", `/api/tasks/${id}`);
 
-export const createTask = (input: TaskInput & { attachment_ids: string[] }) =>
+/** `draft`: save it without queueing it for an agent; `queueTask` does that later. */
+export const createTask = (input: TaskInput & { attachment_ids: string[]; draft?: boolean }) =>
   call<Task>("POST", "/api/tasks", input);
 
 export const editTask = (id: number, fields: Partial<TaskInput> & { attachment_ids?: string[] }) =>
@@ -157,6 +159,7 @@ export const deleteTaskComment = (id: number, commentId: number) =>
 
 /** Ask GitHub for this task's PR state now; waits for the answer. */
 export const refreshTaskPr = (id: number) => call<Task>("POST", `/api/tasks/${id}/pr-refresh`);
+export const queueTask = (id: number) => call<Task>("POST", `/api/tasks/${id}/queue`);
 export const cancelTask = (id: number) => call<Task>("POST", `/api/tasks/${id}/cancel`);
 export const markTaskDone = (id: number) => call<Task>("POST", `/api/tasks/${id}/done`);
 export const reopenTask = (id: number) => call<Task>("POST", `/api/tasks/${id}/reopen`);

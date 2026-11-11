@@ -378,13 +378,18 @@ A queue of agent tasks the daemon works through on its own: the Tasks tab
 (`web/src/tasks/`), `/api/tasks`, and `src/yuki_conductor/taskboard/`. The
 PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
 
-- **States**: To Do → In Progress → Needs Input / Ready for Review → Done
+- **States**: (Draft →) To Do → In Progress → Needs Input / Ready for Review → Done
   (`task_store.STATUSES`). `taskboard/transitions.py` is the only code that
   changes a status; it enforces the allowed moves, writes compare-and-set
   (a move that loses a race raises `InvalidTransition`), leaves a system
   comment, and calls listeners. Side effects subscribe as listeners in
   `start_taskboard()`: web broadcast, harvester wake-up, notifications,
   worktree cleanup. Tests clear the listener list (`isolated_task_store`).
+- **Drafts**: a task created with `draft` (the form's "Save as draft",
+  `task create --draft`) starts in Draft, which the harvester never looks
+  at. It stays editable and takes comments; Queue (`POST
+  /api/tasks/{id}/queue`, `actions.queue`, `task queue <id>`) is its only
+  way on, to the end of To Do.
 - **Harvester** (`harvester.py`): picks To Do tasks in `sort_order`, per
   harness up to `TASKBOARD_CONCURRENCY` (`.env`, e.g. `claude-code:10,pi:1`;
   defaults 10 / 1 / 1 for anything else), unless paused (`taskboard_state`

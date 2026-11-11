@@ -9,6 +9,7 @@ import { imageMarkers, insertAt, pastedFiles, withoutMarker } from "../paste";
 import {
   archiveTask,
   cancelTask,
+  queueTask,
   commentOnTask,
   deleteTaskComment,
   markTaskDone,
@@ -274,7 +275,7 @@ export default function TaskDetail({
       ? "The agent is working. Your comment will reach it when this turn ends."
       : task.status === "done"
         ? "This task is done. Comments are kept but won't reopen it; use Reopen for that."
-        : task.status === "todo"
+        : task.status === "todo" || task.status === "draft"
           ? "Your comment will be included when the task is picked up."
           : "Commenting puts the task back in the queue.";
 
@@ -298,6 +299,11 @@ export default function TaskDetail({
         <div className="task-actions">
           {task.editable && <button onClick={onEdit}>Edit</button>}
           <button onClick={() => setShowSession(true)}>Session ID</button>
+          {task.status === "draft" && (
+            <button className="primary" title="Queue it for an agent to pick up" onClick={() => act(() => queueTask(task.id))}>
+              Queue
+            </button>
+          )}
           {task.status === "todo" && (
             <button onClick={() => act(() => moveTaskToTop(task.id))}>Move to top</button>
           )}

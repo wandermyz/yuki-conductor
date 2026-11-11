@@ -203,3 +203,12 @@ def test_api_request_reports_http_errors(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         cli_http.api_request("GET", "/api/tasks/9", what="Show")
     assert "Show failed (404): Task #9 not found" in capsys.readouterr().err
+
+
+def test_create_draft_and_queue(api, capsys):
+    main(["task", "create", "--project", "proj", "--title", "Later", "--draft"])
+    assert "Created draft #1: Later" in capsys.readouterr().out
+    assert taskboard.store.get(1).status == "draft"
+    main(["task", "queue", "1"])
+    assert "Queued task #1" in capsys.readouterr().out
+    assert taskboard.store.get(1).status == "todo"

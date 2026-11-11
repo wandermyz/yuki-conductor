@@ -82,7 +82,7 @@ export default function TaskForm({
     setInput((cur) => ({ ...cur, body: withoutMarker(cur.body, u) }));
   };
 
-  const save = async () => {
+  const save = async (draft = false) => {
     if (!input.title.trim() || !input.project) return;
     setSaving(true);
     setError(null);
@@ -90,7 +90,7 @@ export default function TaskForm({
       const attachment_ids = uploads.map((u) => u.id);
       const saved = task
         ? await editTask(task.id, { ...input, attachment_ids })
-        : await createTask({ ...input, attachment_ids });
+        : await createTask({ ...input, attachment_ids, draft });
       if (!task) localStorage.removeItem(DRAFT_KEY);
       onSaved(saved);
     } catch (e) {
@@ -217,15 +217,24 @@ export default function TaskForm({
 
         <div className="modal-actions task-form-actions">
           {hasDraft && (
-            <button className="task-form-discard" onClick={discard}>
-              Discard draft
+            <button className="task-form-discard" title="Clear this form" onClick={discard}>
+              Discard
             </button>
           )}
           <button onClick={onCancel}>Cancel</button>
+          {!task && (
+            <button
+              title="Save the task without queueing it for an agent"
+              disabled={saving || !input.title.trim() || !input.project}
+              onClick={() => save(true)}
+            >
+              Save as draft
+            </button>
+          )}
           <button
             className="primary"
             disabled={saving || !input.title.trim() || !input.project}
-            onClick={save}
+            onClick={() => save()}
           >
             {saving ? "Saving…" : task ? "Save" : "Create task"}
           </button>
