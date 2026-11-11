@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 
-from yuki_conductor.config import CLAUDE_WORKING_DIR, channels, channels_override
+from yuki_conductor.config import channels, channels_override, project_dir
 from yuki_conductor.messaging import ChatAppReceiver, MessagingPlatform
 from yuki_conductor.plugins import discover_plugins, find_channel, load_factory
 from yuki_conductor.store import ModelStore, SessionStore
@@ -24,7 +24,7 @@ def _get_commit_short() -> str:
         return (
             subprocess.run(
                 ["git", "rev-parse", "--short", "HEAD"],
-                cwd=CLAUDE_WORKING_DIR,
+                cwd=project_dir(),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

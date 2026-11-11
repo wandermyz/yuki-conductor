@@ -16,7 +16,6 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from yuki_conductor.config import (
     CLAUDE_BIN,
-    CLAUDE_WORKING_DIR,
     slack_app_token,
     slack_bot_token,
     slack_command_prefix,
@@ -182,7 +181,6 @@ def create_app() -> App:
                 encoding="utf-8",
                 errors="replace",
                 timeout=10,
-                cwd=CLAUDE_WORKING_DIR,
             )
             version = (proc.stdout or "").strip()
             if version:
