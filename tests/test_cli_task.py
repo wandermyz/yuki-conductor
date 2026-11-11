@@ -72,6 +72,11 @@ def test_create_inside_a_task_links_the_parent(api, monkeypatch):
     assert taskboard.store.children(parent.id)[0].title == "Follow-up"
 
 
+def test_create_without_a_title_uses_the_body(api, capsys):
+    main(["task", "create", "--project", "proj", "Use redis for the cache"])
+    assert "Created task #1: Use redis for the cache" in capsys.readouterr().out
+
+
 def test_create_reports_api_errors(api, capsys):
     with pytest.raises(SystemExit):
         main(["task", "create", "--project", "nope", "--title", "t"])

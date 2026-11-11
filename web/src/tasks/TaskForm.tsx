@@ -83,7 +83,7 @@ export default function TaskForm({
   };
 
   const save = async (draft = false) => {
-    if (!input.title.trim() || !input.project) return;
+    if (!(input.title.trim() || input.body.trim()) || !input.project) return;
     setSaving(true);
     setError(null);
     try {
@@ -130,7 +130,7 @@ export default function TaskForm({
 
         <input
           className="task-form-title"
-          placeholder="Title"
+          placeholder="Title (optional: defaults to the description)"
           value={input.title}
           autoFocus
           onChange={(e) => set("title", e.target.value)}
@@ -225,7 +225,7 @@ export default function TaskForm({
           {!task && (
             <button
               title="Save the task without queueing it for an agent"
-              disabled={saving || !input.title.trim() || !input.project}
+              disabled={saving || !(input.title.trim() || input.body.trim()) || !input.project}
               onClick={() => save(true)}
             >
               Save as draft
@@ -233,7 +233,7 @@ export default function TaskForm({
           )}
           <button
             className="primary"
-            disabled={saving || !input.title.trim() || !input.project}
+            disabled={saving || !(input.title.trim() || input.body.trim()) || !input.project}
             onClick={() => save()}
           >
             {saving ? "Saving…" : task ? "Save" : "Create task"}

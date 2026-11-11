@@ -46,7 +46,7 @@ def register(sub) -> argparse.ArgumentParser:
 
     create = tsub.add_parser("create", help="Create a task")
     create.add_argument("--project", required=True)
-    create.add_argument("--title", required=True)
+    create.add_argument("--title", default="", help="Defaults to the start of the body")
     create.add_argument("--harness")
     create.add_argument("--model", help="Configured model alias ID (inherits the current run's alias)")
     create.add_argument("--worktree", action="store_true", help="Work in a fresh git worktree")

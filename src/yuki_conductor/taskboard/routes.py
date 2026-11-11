@@ -113,7 +113,7 @@ def _paths(attachments: list[str], attachment_ids: list[str]) -> list[str]:
 
 
 class TaskCreate(BaseModel):
-    title: str
+    title: str = ""  # blank: derived from the body
     project: str
     harness: str | None = None
     model: str | None = None

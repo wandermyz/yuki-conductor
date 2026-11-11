@@ -56,10 +56,18 @@ def _check_harness(name: str) -> None:
         raise BoardError(400, f"Harness {name!r} isn't enabled on this machine")
 
 
-def _check_title(title: str) -> str:
-    title = title.strip()
+TITLE_FROM_BODY_MAX = 80
+
+
+def _check_title(title: str, body: str) -> str:
+    """The title, or — when it's blank — the body on one line, cut to length."""
+    if title := title.strip():
+        return title
+    title = " ".join(body.split())
     if not title:
-        raise BoardError(400, "A task needs a title")
+        raise BoardError(400, "A task needs a title or a description")
+    if len(title) > TITLE_FROM_BODY_MAX:
+        title = title[: TITLE_FROM_BODY_MAX - 1].rstrip() + "…"
     return title
 
 
@@ -87,7 +95,7 @@ def create(
 ) -> Task:
     """`draft`: save it without queueing it; `queue` sends it to To Do later."""
     harness = harness or default_harness()
-    title = _check_title(title)
+    title = _check_title(title, body)
     _check_project(project)
     _check_harness(harness)
     _check_model(harness, model)
@@ -126,7 +134,7 @@ def edit(task_id: int, **fields) -> Task:
     if not task.editable:
         raise BoardError(409, "Only a draft or a To Do task that was never picked up can be edited")
     if "title" in fields:
-        fields["title"] = _check_title(fields["title"])
+        fields["title"] = _check_title(fields["title"], fields.get("body", task.body))
     if "project" in fields:
         _check_project(fields["project"])
     if "harness" in fields:
