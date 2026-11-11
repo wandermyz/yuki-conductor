@@ -74,7 +74,9 @@ UPLOADS_DIR = WORKSPACE_DIR / "uploads"
 WEB_UPLOADS_DIR = UPLOADS_DIR / "web"
 
 CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "1800"))
-CLAUDE_WORKING_DIR = os.path.expanduser(os.environ.get("CLAUDE_WORKING_DIR", "~/Projects/wandering-vibe"))
+CLAUDE_WORKING_DIR = os.path.normpath(
+    os.path.expanduser(os.environ.get("CLAUDE_WORKING_DIR", "~/Projects/wandering-vibe"))
+)
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 
 # Agent harnesses enabled on this machine, comma-separated, in preference

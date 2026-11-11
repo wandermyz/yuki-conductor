@@ -16,6 +16,7 @@ import {
   listHarnesses,
   listMessages,
   listProjects,
+  getDefaultProjectDir,
   searchConversations,
   subscribeChatSocket,
   sendMessage,
@@ -1098,6 +1099,7 @@ export default function Chat({
   const sidebar = useSidebarWidth("chat-sidebar-width", 280);
   const [usage, setUsage] = useState<Record<string, ConversationUsage>>({});
   const [projects, setProjects] = useState<Project[]>([]);
+  const [defaultDir, setDefaultDir] = useState<string | null>(null);
   // New-conversation picker: an agent (when there's a choice), then a project.
   const [picking, setPicking] = useState(false);
   // Harnesses a new conversation can use.
@@ -1249,6 +1251,7 @@ export default function Chat({
     fetchStatuses().then((s) => setStatuses(s as Record<string, ConvStatus>)).catch(console.error);
     fetchAllUsage().then(setUsage).catch(console.error);
     listProjects().then(setProjects).catch(console.error);
+    getDefaultProjectDir().then(setDefaultDir).catch(console.error);
     listHarnesses()
       .then((h) => setHarnesses(h.harnesses.filter((x) => x.available)))
       .catch(console.error);
@@ -1492,6 +1495,7 @@ export default function Chat({
           harnesses={harnesses}
           projects={projects}
           allowNoProject
+          defaultDir={defaultDir}
           onPick={newChat}
           onCancel={() => setPicking(false)}
         />
