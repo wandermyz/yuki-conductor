@@ -339,6 +339,11 @@ class ClaudeCodeHarness(ConfiguredModels):
         if key is not None:
             env["YUKI_MODEL_API_KEY"] = key
             route_env["ANTHROPIC_BASE_URL"] = selection.connection.base_url
+            # Through a gateway, auto mode's server-side review is refused (the
+            # proxy rejects its beta) and Claude Code then denies every action
+            # needing a verdict instead of falling back. Ask for the local
+            # classifier up front; its requests go through the same endpoint.
+            route_env["CLAUDE_CODE_AUTO_MODE_SERVER"] = "0"
             helper = [sys.executable, "-c", "import os; print(os.environ['YUKI_MODEL_API_KEY'])"]
             settings["apiKeyHelper"] = (
                 subprocess.list2cmdline(helper) if os.name == "nt" else shlex.join(helper)
