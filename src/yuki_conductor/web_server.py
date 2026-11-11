@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from yuki_conductor import heartbeat, heartbeat_store, web_push, zellij_manager
-from yuki_conductor.config import WEB_UPLOADS_DIR
+from yuki_conductor.config import CLAUDE_WORKING_DIR, WEB_UPLOADS_DIR
 from yuki_conductor.conversation_store import ConversationStore
 from yuki_conductor.harness import HARNESSES, default_harness
 from yuki_conductor.harness.process import cancel_process
@@ -256,6 +256,11 @@ def create_api() -> FastAPI:
     @api.get("/api/projects")
     def list_projects():
         return project_store.list_all()
+
+    @api.get("/api/projects/default")
+    def default_project_dir():
+        """Where a run with no project works: the CLAUDE_WORKING_DIR setting."""
+        return {"path": CLAUDE_WORKING_DIR}
 
     @api.post("/api/projects")
     def add_project(body: ProjectCreate):

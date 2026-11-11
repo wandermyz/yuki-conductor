@@ -265,6 +265,13 @@ export async function listProjects(): Promise<Project[]> {
   return r.json();
 }
 
+/** The directory a conversation with no project runs in. */
+export async function getDefaultProjectDir(): Promise<string> {
+  const r = await fetch("/api/projects/default");
+  if (!r.ok) throw new Error("Failed to get the default working directory");
+  return (await r.json()).path;
+}
+
 export async function addProject(name: string, path: string): Promise<void> {
   const r = await fetch("/api/projects", {
     method: "POST",

@@ -20,6 +20,7 @@ export function NewSessionPicker({
   harnesses,
   projects,
   allowNoProject,
+  defaultDir,
   onPick,
   onCancel,
 }: {
@@ -27,6 +28,8 @@ export function NewSessionPicker({
   projects: Project[];
   /** Offer "No project" (the default working directory) as a choice. */
   allowNoProject: boolean;
+  /** Where "No project" runs, shown under it; a generic label until known. */
+  defaultDir?: string | null;
   /** `harness` is null only when no harness list is known; the server picks its default. */
   onPick: (harness: string | null, project: string | null) => void;
   onCancel: () => void;
@@ -77,7 +80,7 @@ export function NewSessionPicker({
                 <li>
                   <button className="project-picker-item" onClick={() => onPick(harness, null)}>
                     <span className="project-picker-name">No project</span>
-                    <span className="project-picker-path">Default working directory</span>
+                    <span className="project-picker-path">{defaultDir || "Default working directory"}</span>
                   </button>
                 </li>
               )}
