@@ -92,6 +92,32 @@ def test_archive_hides_from_list_but_keeps_rows(tmp_path: Path):
     assert not s.archive_conversation("missing")
 
 
+def test_pinned_conversations_list_first(tmp_path: Path, monkeypatch):
+    import itertools
+
+    from yuki_conductor import conversation_store
+
+    clock = itertools.count(100)
+    monkeypatch.setattr(conversation_store.time, "time", lambda: float(next(clock)))
+    s = ConversationStore(db_path=tmp_path / "t.db")
+    a, b, c, d = (s.create_conversation(title=t) for t in "abcd")
+    assert [x.id for x in s.list_conversations()] == [d.id, c.id, b.id, a.id]
+
+    assert s.set_pinned(a.id, True)
+    assert s.set_pinned(b.id, True)
+    # The most recently pinned leads; the rest keep their recency order.
+    assert [x.id for x in s.list_conversations()] == [b.id, a.id, d.id, c.id]
+    # Pinning again doesn't move it, and pinning never touches updated_at.
+    assert s.set_pinned(a.id, True)
+    assert [x.id for x in s.list_conversations("web")] == [b.id, a.id, d.id, c.id]
+    assert s.get_conversation(a.id).updated_at == a.updated_at
+
+    assert s.set_pinned(b.id, False)
+    assert s.get_conversation(b.id).pinned_at is None
+    assert [x.id for x in s.list_conversations()] == [a.id, d.id, c.id, b.id]
+    assert not s.set_pinned("missing", True)
+
+
 def test_context_usage_travels_with_the_messages(tmp_path: Path):
     """The chat reads context straight off the message list, so the join matters."""
     s = ConversationStore(db_path=tmp_path / "t.db")

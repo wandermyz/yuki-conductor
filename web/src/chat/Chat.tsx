@@ -358,10 +358,21 @@ function RenameModal({
 
 /* ---------- Context Menu ---------- */
 
+/** The sidebar's order, as the server lists it: pinned conversations first,
+ *  most recently pinned on top, then the rest by last update. */
+function byPinThenRecency(a: Conversation, b: Conversation): number {
+  if (a.pinned_at != null || b.pinned_at != null) {
+    return (b.pinned_at ?? -Infinity) - (a.pinned_at ?? -Infinity);
+  }
+  return b.updated_at - a.updated_at;
+}
+
 function ConvMenu({
   status,
+  pinned,
   waitForMcp,
   skipPermissions,
+  onSetPinned,
   onSetWaitForMcp,
   onSetSkipPermissions,
   onShowSessionId,
@@ -372,8 +383,10 @@ function ConvMenu({
   onClose,
 }: {
   status: ConvStatus;
+  pinned: boolean;
   waitForMcp: boolean;
   skipPermissions: boolean;
+  onSetPinned: (pinned: boolean) => void;
   onSetWaitForMcp: (enabled: boolean) => void;
   onSetSkipPermissions: (enabled: boolean) => void;
   onShowSessionId: () => void;
@@ -394,6 +407,12 @@ function ConvMenu({
 
   return (
     <div className="conv-menu" ref={ref}>
+      <button
+        className="conv-menu-item"
+        onClick={(e) => { e.stopPropagation(); onSetPinned(!pinned); onClose(); }}
+      >
+        {pinned ? "Unpin" : "Pin to Top"}
+      </button>
       <button
         className="conv-menu-item"
         onClick={(e) => { e.stopPropagation(); onRename(); onClose(); }}
@@ -920,6 +939,7 @@ function ChatThread({
   onSetModel,
   onSetWaitForMcp,
   onSetSkipPermissions,
+  onSetPinned,
 }: {
   conv: Conversation;
   harness: HarnessInfo | undefined;
@@ -940,6 +960,7 @@ function ChatThread({
   onSetModel: (model: string | null) => void;
   onSetWaitForMcp: (enabled: boolean) => void;
   onSetSkipPermissions: (enabled: boolean) => void;
+  onSetPinned: (pinned: boolean) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
@@ -1004,8 +1025,10 @@ function ChatThread({
           {headerMenuOpen && (
             <ConvMenu
               status={status}
+              pinned={conv.pinned_at != null}
               waitForMcp={conv.wait_for_mcp}
               skipPermissions={conv.skip_permissions}
+              onSetPinned={onSetPinned}
               onSetWaitForMcp={onSetWaitForMcp}
               onSetSkipPermissions={onSetSkipPermissions}
               onShowSessionId={onShowSessionId}
@@ -1350,6 +1373,16 @@ export default function Chat({
     }
   };
 
+  const setPinned = async (id: string, pinned: boolean) => {
+    try {
+      const updated = await updateConversation(id, { pinned });
+      setConversations((prev) => prev.map((c) => c.id === id ? updated : c));
+    } catch (err) {
+      console.error("Failed to pin conversation", err);
+      alert(`Could not ${pinned ? "pin" : "unpin"} the conversation. Please try again.`);
+    }
+  };
+
   const setModel = async (id: string, model: string | null) => {
     // Optimistic, like rename: the picker shows the choice at once.
     const prevModel = conversations.find((c) => c.id === id)?.model ?? null;
@@ -1529,7 +1562,10 @@ export default function Chat({
           {conversations.length === 0 && (
             <li className="chat-empty-list">No conversations yet.</li>
           )}
-          {conversations.filter((c) => showDone || getStatus(statuses, c.id) !== "done").map((c) => {
+          {conversations
+            .filter((c) => showDone || getStatus(statuses, c.id) !== "done")
+            .sort(byPinThenRecency)
+            .map((c) => {
             const st = getStatus(statuses, c.id);
             return (
               <li
@@ -1541,6 +1577,7 @@ export default function Chat({
                 }}
               >
                 <div className="chat-list-title-row">
+                  {c.pinned_at != null && <span className="pin-mark" title="Pinned">📌</span>}
                   {st === "unread" && <span className="status-dot" title="Unread" />}
                   {st === "done" && <span className="status-check" title="Done">&#10003;</span>}
                   <span className="chat-list-title">{c.title || "New chat"}</span>
@@ -1571,8 +1608,10 @@ export default function Chat({
                       {menuOpen === c.id && (
                         <ConvMenu
                           status={st}
+                          pinned={c.pinned_at != null}
                           waitForMcp={c.wait_for_mcp}
                           skipPermissions={c.skip_permissions}
+                          onSetPinned={(pinned) => setPinned(c.id, pinned)}
                           onSetWaitForMcp={(enabled) => setWaitForMcp(c.id, enabled)}
                           onSetSkipPermissions={(enabled) => setSkipPermissions(c.id, enabled)}
                           onShowSessionId={() => setSessionIdModal(c.claude_session_id || "(no session yet)")}
@@ -1617,6 +1656,7 @@ export default function Chat({
             onSetModel={(model) => setModel(active.id, model)}
             onSetWaitForMcp={(enabled) => setWaitForMcp(active.id, enabled)}
             onSetSkipPermissions={(enabled) => setSkipPermissions(active.id, enabled)}
+            onSetPinned={(pinned) => setPinned(active.id, pinned)}
           />
         ) : (
           <div className="chat-placeholder">

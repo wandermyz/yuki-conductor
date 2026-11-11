@@ -398,6 +398,25 @@ def test_archive_conversation_hides_it_everywhere(client):
     assert client.post(f"/api/conversations/{conv['id']}/archive").status_code == 404
 
 
+def test_pin_conversation(client):
+    older = client.post("/api/conversations", json={"title": "older"}).json()
+    client.post("/api/conversations", json={"title": "newer"})
+    assert older["pinned_at"] is None
+
+    r = client.patch(f"/api/conversations/{older['id']}", json={"pinned": True})
+    assert r.status_code == 200
+    assert r.json()["pinned_at"] is not None
+    assert r.json()["title"] == "older"
+    assert client.get("/api/conversations").json()[0]["id"] == older["id"]
+
+    # A patch that doesn't mention pinning leaves it alone.
+    client.patch(f"/api/conversations/{older['id']}", json={"wait_for_mcp": True})
+    assert client.get(f"/api/conversations/{older['id']}").json()["pinned_at"] is not None
+
+    r = client.patch(f"/api/conversations/{older['id']}", json={"pinned": False})
+    assert r.json()["pinned_at"] is None
+
+
 def test_search_api(client):
     from yuki_conductor import web_server
 

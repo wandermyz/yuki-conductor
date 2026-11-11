@@ -12,6 +12,8 @@ export interface Conversation {
   model: string | null;
   wait_for_mcp: boolean;
   skip_permissions: boolean;
+  /** When it was pinned to the top of the list; null: not pinned. */
+  pinned_at: number | null;
   created_at: number;
   updated_at: number;
   /** Its recurring wake-up, if it has one. */
@@ -158,7 +160,7 @@ export async function getConversation(id: string): Promise<Conversation> {
 
 export async function updateConversation(
   id: string,
-  patch: { title?: string; project?: string; model?: string | null; wait_for_mcp?: boolean; skip_permissions?: boolean },
+  patch: { title?: string; project?: string; model?: string | null; wait_for_mcp?: boolean; skip_permissions?: boolean; pinned?: boolean },
 ): Promise<Conversation> {
   const r = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
     method: "PATCH",

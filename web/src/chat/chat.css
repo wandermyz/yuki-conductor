@@ -318,6 +318,12 @@
   line-height: 1;
 }
 
+.pin-mark {
+  font-size: 11px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
 /* ---------- Menu ---------- */
 
 .chat-list-actions {
