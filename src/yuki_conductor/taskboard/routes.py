@@ -124,6 +124,7 @@ class TaskCreate(BaseModel):
     attachments: list[str] = []  # absolute paths (CLI)
     attachment_ids: list[str] = []  # /api/uploads ids (web)
     parent_task_id: int | None = None
+    draft: bool = False  # saved, but not queued for pickup
 
 
 class TaskEdit(BaseModel):
@@ -189,6 +190,7 @@ def create_task(body: TaskCreate):
         body=body.body,
         attachments=_paths(body.attachments, body.attachment_ids),
         parent_task_id=body.parent_task_id,
+        draft=body.draft,
     )
     return serialize_task(task, comment_count=0)
 
@@ -277,6 +279,11 @@ def set_task_pr(task_id: int, body: PrBody):
 @router.post("/api/tasks/{task_id}/pr-refresh")
 def refresh_task_pr(task_id: int):
     return serialize_task(_call(actions.refresh_pr, task_id))
+
+
+@router.post("/api/tasks/{task_id}/queue")
+def queue_task(task_id: int):
+    return serialize_task(_call(actions.queue, task_id))
 
 
 @router.post("/api/tasks/{task_id}/cancel")

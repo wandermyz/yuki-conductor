@@ -327,6 +327,12 @@
   color: var(--text-h);
 }
 
+.task-status.status-draft {
+  background: none;
+  color: var(--text);
+  border: 1px dashed var(--border);
+}
+
 .task-status.status-in_progress {
   background: var(--accent-bg);
   color: var(--accent);

@@ -14,6 +14,7 @@ from yuki_conductor.model_config import ModelConfigError, load_harness_models
 from yuki_conductor.store import ProjectStore
 from yuki_conductor.task_store import (
     DONE,
+    DRAFT,
     IN_PROGRESS,
     NEEDS_INPUT,
     READY_FOR_REVIEW,
@@ -82,7 +83,9 @@ def create(
     body: str = "",
     attachments: list[str] | None = None,
     parent_task_id: int | None = None,
+    draft: bool = False,
 ) -> Task:
+    """`draft`: save it without queueing it; `queue` sends it to To Do later."""
     harness = harness or default_harness()
     title = _check_title(title)
     _check_project(project)
@@ -101,16 +104,27 @@ def create(
         body=body,
         attachments=attachments,
         parent_task_id=parent_task_id,
+        draft=draft,
     )
     _changed(task.id)
     return task
+
+
+def queue(task_id: int) -> Task:
+    """Send a draft to the end of the To Do queue, where it can be picked up."""
+    if get(task_id).status != DRAFT:
+        raise BoardError(409, "Only a draft can be queued")
+    try:
+        return transition(task_id, TODO, reason="queued")
+    except InvalidTransition as exc:
+        raise BoardError(409, str(exc)) from exc
 
 
 def edit(task_id: int, **fields) -> Task:
     """Change a task nobody has picked up yet."""
     task = get(task_id)
     if not task.editable:
-        raise BoardError(409, "Only a To Do task that was never picked up can be edited")
+        raise BoardError(409, "Only a draft or a To Do task that was never picked up can be edited")
     if "title" in fields:
         fields["title"] = _check_title(fields["title"])
     if "project" in fields:
@@ -139,7 +153,7 @@ def add_comment(
     """Post a comment. A user comment sends a waiting task back to the queue.
 
     Needs Input and Ready for Review go straight back to To Do. In Progress
-    keeps it for when the turn ends; To Do delivers it at pickup. Done tasks
+    keeps it for when the turn ends; To Do (or a draft) delivers it at pickup. Done tasks
     stay done. `notify_user` also pings the user with it, as a push does.
     """
     if author not in API_AUTHORS:

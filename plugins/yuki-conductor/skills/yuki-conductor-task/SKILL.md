@@ -125,6 +125,9 @@ yuki-conductor task create --project my-app --title "Add rate limiting" --worktr
 - `--wait-for-mcp` waits up to 30 seconds for MCP startup (Claude Code and Codex).
 - `--skip-permissions` bypasses approval checks and the Codex sandbox.
   Both options default off and apply to every turn of the new task.
+- `--draft` saves the task without queueing it: no agent picks it up until
+  the user (or `yuki-conductor task queue <id>`) queues it. Use it when the
+  user wants to write a task now and start it later.
 
 A task created from inside a task is linked to it as a follow-up. That link is
 informational only: the new task runs on its own, and nothing waits for it.
