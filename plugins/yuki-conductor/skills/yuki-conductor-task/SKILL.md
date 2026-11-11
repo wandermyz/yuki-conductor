@@ -115,6 +115,8 @@ yuki-conductor task create --project my-app --title "Add rate limiting" --worktr
 
 - `--project` must be a project registered in the web UI's Projects tab. Run
   `yuki-conductor task list` to see which projects tasks already use.
+- `--title` is optional: without it the title is the body, trimmed onto one
+  line and cut to 80 characters.
 - `--worktree` gives the task its own branch and checkout. Use it for anything
   that changes code. Leave it off for read-only work like research or reports.
 - `--harness` picks the agent CLI and `--model` picks a harness-native model id.

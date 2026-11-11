@@ -73,7 +73,7 @@ def test_task_launch_options_default_off_and_persist(client, field):
 @pytest.mark.parametrize(
     "payload, detail",
     [
-        ({"title": " ", "project": "proj"}, "title"),
+        ({"title": " ", "project": "proj", "body": " \n "}, "title or a description"),
         ({"title": "t", "project": "nope"}, "isn't registered"),
         ({"title": "t", "project": "proj", "harness": "dsh"}, "isn't enabled"),
         ({"title": "t", "project": "proj", "attachments": ["/no/such/file"]}, "Not a file"),
@@ -84,6 +84,16 @@ def test_create_validation(client, payload, detail):
     r = client.post("/api/tasks", json=payload)
     assert r.status_code in (400, 404)
     assert detail in r.json()["detail"]
+
+
+def test_blank_title_comes_from_the_body(client):
+    task = _create(client, title=" ", body="  Fix the\n  login   bug  ")
+    assert task["title"] == "Fix the login bug"
+    long = _create(client, title="", body="word " * 40)
+    assert len(long["title"]) == actions.TITLE_FROM_BODY_MAX and long["title"].endswith("…")
+    edited = client.patch(f"/api/tasks/{task['id']}", json={"title": "", "body": "New body"})
+    assert edited.json()["title"] == "New body"
+    assert client.patch(f"/api/tasks/{task['id']}", json={"title": " "}).json()["title"] == "New body"
 
 
 def test_web_uploads_resolve_to_paths(client, monkeypatch, tmp_path):
