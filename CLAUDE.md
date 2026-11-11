@@ -312,6 +312,15 @@ pausing suspends the *schedule*, not the task. The Automations tab toggles it vi
 
 Routing rule when `chat_app:` is omitted: pick the first enabled platform, with `slack` preferred. If `chat_app:` names a platform that isn't enabled, the task is skipped with a warning rather than misrouted.
 
+**Failure alerts.** A failed run (an `is_error` result, an exception, or a
+disabled harness) notifies through the same routing regardless of
+`<notify>`/`<silence>`, once `CronRunStore.failure_streak` — consecutive
+`error` rows, newest first — reaches the task's `alert_after` (default 1,
+`0` = never). Each streak alerts exactly once; the first success after an
+alerted streak prepends a "succeeded again" line and notifies. The streak is
+read from `cron_runs`, so there is no extra state, and it can't exceed the 30
+retained runs.
+
 Required env var (only when the Slack channel is enabled): `SLACK_CRON_CHANNEL` — the Slack channel ID to post cron results to.
 
 **Slack slash commands are `/<prefix>-…`**, where the prefix is

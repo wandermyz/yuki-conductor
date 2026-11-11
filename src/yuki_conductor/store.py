@@ -444,6 +444,22 @@ class CronRunStore:
         runs = self.list_runs(task_name, limit=1)
         return runs[0] if runs else None
 
+    def failure_streak(self, task_name: str, exclude_id: int | None = None) -> int:
+        """Consecutive failed runs, newest first, ignoring runs still in flight
+        and ``exclude_id``.
+
+        Bounded by the retention window, so a streak never reads past
+        ``MAX_RUNS_PER_TASK``.
+        """
+        streak = 0
+        for run in self.list_runs(task_name):
+            if run["status"] == "running" or run["id"] == exclude_id:
+                continue
+            if run["status"] != "error":
+                break
+            streak += 1
+        return streak
+
     def is_running(self, task_name: str) -> bool:
         return any(r["status"] == "running" for r in self.list_runs(task_name, limit=5))
 

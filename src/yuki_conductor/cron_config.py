@@ -39,6 +39,7 @@ class CronTask:
     model: str | None = None  # alias ID from the selected harness in models.yaml
     wait_for_mcp: bool = False
     skip_permissions: bool = False
+    alert_after: int = 1  # consecutive failed runs before alerting; 0 never alerts
 
     @property
     def label(self) -> str:
@@ -194,6 +195,7 @@ def load_tasks(path=None) -> list[CronTask]:
                 model=entry.get("model"),
                 wait_for_mcp=bool(entry.get("wait_for_mcp", False)),
                 skip_permissions=bool(entry.get("skip_permissions", False)),
+                alert_after=max(0, int(entry.get("alert_after", 1))),
             )
             croniter(task.schedule)
         except (KeyError, ValueError, TypeError):

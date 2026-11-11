@@ -53,6 +53,7 @@ tasks:
     model: sonnet                    # optional; alias ID in workspace/models.yaml
     wait_for_mcp: false              # optional; wait up to 30 seconds for MCP startup
     skip_permissions: false          # optional; bypass approval checks and Codex sandbox
+    alert_after: 1                   # optional; consecutive failures before alerting
     chat_app: slack                  # optional; where to post the result
     origin_conversation: <conv-id>   # optional; conversation that set this up
     paused: true                     # optional; suspend the schedule without deleting
@@ -81,6 +82,15 @@ Field notes:
 - `skip_permissions` — optional boolean, default false. Bypass approval checks
   (and the sandbox for Codex). Both options apply to scheduled and manual runs;
   they do not inherit the originating conversation's settings.
+- `alert_after` — optional integer, default 1. A failed run (the agent errored,
+  crashed, or its harness isn't enabled) alerts the user through the task's
+  `chat_app` once this many runs in a row have failed, whatever the run said;
+  the next successful run then reports that it recovered. Each streak alerts
+  once. Raise it for frequent tasks with transient failures (e.g. `3` on a
+  5-minute task); `0` disables alerts. The prompt doesn't need its own
+  "tell me if this fails" logic for crashes — only for failures the run itself
+  detects and still finishes (e.g. a WorkIQ call erroring), which it reports
+  with `<notify>` as usual.
 - `origin_conversation` — optional. The web conversation id this task was set up
   in, so the Automations tab can link back to it. If your system prompt has a
   "Your conversation" section naming an id, put that id here when creating a

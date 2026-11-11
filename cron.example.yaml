@@ -19,6 +19,9 @@
 #   wait_for_mcp: (optional) Wait up to 30 seconds for MCP startup. Default false.
 #   skip_permissions: (optional) Bypass approval checks (and the Codex sandbox).
 #                Default false. Applies to each scheduled or manual run.
+#   alert_after: (optional) Consecutive failed runs before you're alerted.
+#                Default 1 (alert on the first failure); 0 never alerts. Each
+#                streak alerts once, and the next success says it recovered.
 
 tasks:
   - name: morning-briefing
@@ -36,6 +39,7 @@ tasks:
     schedule: "0 10 * * 1"
     description: "Weekly dependency check (Mondays at 10am)"
     chat_app: slack
+    alert_after: 3                 # only alert once three runs in a row failed
     # paused: true                 # uncomment to suspend without deleting
     prompt: >
       Check for outdated dependencies across all projects in this monorepo.
