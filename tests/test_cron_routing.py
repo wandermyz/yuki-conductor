@@ -466,3 +466,131 @@ def test_cron_model_changes_trigger_reload_and_parse(tmp_path):
     [task] = load_tasks(path)
     assert task.model == "sol"
     assert _tasks_changed([task], [replace(task, model="astra")])
+
+
+# ---- Failure alerts ----
+
+
+def _run(task, platform, text, is_error=False):
+    result = RunResult(text=text, session_id="sess-1", is_error=is_error)
+    with patch("yuki_conductor.cron_scheduler.run_agent", return_value=result):
+        _run_cron_task(task, {platform.name: platform})
+
+
+def test_failed_run_alerts_even_when_it_asked_for_silence(isolated_cron_run_store):
+    platform = FakePlatform("slack")
+    _run(_task(chat_app="slack"), platform, "WorkIQ 401 <silence>", is_error=True)
+
+    [(text, title)] = platform.threads
+    assert title == "desc t1"
+    assert "failed once" in text and "WorkIQ 401" in text
+    assert isolated_cron_run_store.last_run("t1")["notified"] is True
+
+
+def test_failure_alert_into_reserved_conversation(isolated_cron_run_store):
+    platform = ReservingPlatform()
+    _run(_task(), platform, "", is_error=True)
+
+    [(key, msg)] = platform.sent
+    assert key == "web-reserved-0"
+    assert "run failed with no output" in msg.text
+    assert platform.discarded == []
+
+
+def test_streak_alerts_once_at_threshold_then_recovers(isolated_cron_run_store):
+    platform = FakePlatform("slack")
+    task = _task(chat_app="slack")
+    task.alert_after = 3
+
+    _run(task, platform, "boom", is_error=True)
+    _run(task, platform, "boom", is_error=True)
+    assert platform.threads == []
+
+    _run(task, platform, "boom", is_error=True)
+    assert len(platform.threads) == 1
+    assert "failed 3 times in a row" in platform.threads[0][0]
+
+    _run(task, platform, "boom", is_error=True)
+    assert len(platform.threads) == 1  # one alert per streak
+
+    _run(task, platform, "all good <silence>")
+    assert len(platform.threads) == 2
+    recovered = platform.threads[1][0]
+    assert recovered.startswith("✅") and "after 4 failed runs" in recovered
+    assert "all good" in recovered
+
+    _run(task, platform, "still good <silence>")
+    assert len(platform.threads) == 2
+
+
+def test_success_below_threshold_stays_silent(isolated_cron_run_store):
+    platform = FakePlatform("slack")
+    task = _task(chat_app="slack")
+    task.alert_after = 2
+    _run(task, platform, "boom", is_error=True)
+    _run(task, platform, "fine <silence>")
+    assert platform.threads == []
+
+
+def test_alert_after_zero_never_alerts(isolated_cron_run_store):
+    platform = FakePlatform("slack")
+    task = _task(chat_app="slack")
+    task.alert_after = 0
+    _run(task, platform, "boom", is_error=True)
+    _run(task, platform, "fine <silence>")
+    assert platform.threads == []
+
+
+def test_raised_exception_alerts(isolated_cron_run_store):
+    platform = FakePlatform("slack")
+    with patch(
+        "yuki_conductor.cron_scheduler.run_agent",
+        side_effect=RuntimeError("subprocess died"),
+    ):
+        _run_cron_task(_task(chat_app="slack"), {"slack": platform})
+
+    [(text, _)] = platform.threads
+    assert "RuntimeError: subprocess died" in text
+    assert isolated_cron_run_store.last_run("t1")["notified"] is True
+
+
+def test_disabled_harness_alerts(isolated_cron_run_store):
+    platform = FakePlatform("slack")
+    task = _task(chat_app="slack")
+    task.harness = "not-enabled-here"
+    with patch("yuki_conductor.cron_scheduler.run_agent") as run:
+        _run_cron_task(task, {"slack": platform})
+
+    run.assert_not_called()
+    [(text, _)] = platform.threads
+    assert "isn't enabled" in text
+
+
+def test_long_errors_are_truncated_in_the_alert(isolated_cron_run_store):
+    platform = FakePlatform("slack")
+    _run(_task(chat_app="slack"), platform, "x" * 5000, is_error=True)
+    [(text, _)] = platform.threads
+    assert len(text) < 1700 and text.endswith("…")
+    assert len(isolated_cron_run_store.last_run("t1")["error"]) == 5000
+
+
+def test_failure_streak_skips_running_rows(isolated_cron_run_store):
+    store = isolated_cron_run_store
+    store.finish_run(store.start_run("t"), status="success")
+    store.finish_run(store.start_run("t"), status="error")
+    store.start_run("t")  # in flight
+    store.finish_run(store.start_run("t"), status="error")
+    assert store.failure_streak("t") == 2
+
+
+def test_alert_after_is_read_from_yaml(tmp_path):
+    from yuki_conductor.cron_config import load_tasks
+
+    path = tmp_path / "cron.yaml"
+    path.write_text(
+        "tasks:\n"
+        "  - name: a\n    schedule: '* * * * *'\n    prompt: hi\n    alert_after: 4\n"
+        "  - name: b\n    schedule: '* * * * *'\n    prompt: hi\n",
+        encoding="utf-8",
+    )
+    assert [t.alert_after for t in load_tasks(path)] == [4, 1]

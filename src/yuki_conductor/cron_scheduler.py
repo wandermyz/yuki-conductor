@@ -98,8 +98,81 @@ def _run_cron_task(
         _execute(task, platforms_by_name, run_id)
     except Exception as exc:
         logger.error(f"Cron task={task.name} failed", exc_info=True)
+        error = f"{type(exc).__name__}: {exc}"
+        alert = _failure_alert(task, run_id, error)
+        platform = _pick_platform(task, platforms_by_name) if platforms_by_name else None
         run_store.finish_run(
-            run_id, status="error", error=f"{type(exc).__name__}: {exc}"
+            run_id, status="error", error=error, notified=alert is not None
+        )
+        if alert and platform is not None:
+            _deliver(task, platform, None, alert)
+
+
+# Longest slice of a failure's error text quoted in its alert.
+_ALERT_ERROR_CHARS = 1500
+
+
+def _failure_alert(task: CronTask, run_id: int, error: str) -> str | None:
+    """The alert for run ``run_id``, which is failing, or None if it shouldn't alert.
+
+    Alerts once per streak of failures, when it reaches ``alert_after`` runs,
+    so a task failing every five minutes doesn't page every five minutes.
+    """
+    if not task.alert_after:
+        return None
+    streak = run_store.failure_streak(task.name, exclude_id=run_id) + 1
+    if streak != task.alert_after:
+        return None
+    runs = "once" if streak == 1 else f"{streak} times in a row"
+    error = error.strip() or "no output"
+    if len(error) > _ALERT_ERROR_CHARS:
+        error = error[:_ALERT_ERROR_CHARS].rstrip() + "…"
+    return f"⚠️ Automation **{task.label}** failed {runs}.\n\n{error}"
+
+
+def _recovery_note(task: CronTask, run_id: int) -> str | None:
+    """A note for a successful run that ends a streak that was alerted on."""
+    if not task.alert_after:
+        return None
+    streak = run_store.failure_streak(task.name, exclude_id=run_id)
+    if streak < task.alert_after:
+        return None
+    runs = "1 failed run" if streak == 1 else f"{streak} failed runs"
+    return f"✅ Automation **{task.label}** succeeded again after {runs}."
+
+
+def _deliver(
+    task: CronTask,
+    platform: MessagingPlatform,
+    reserved: str | None,
+    display_text: str,
+    session_id: str | None = None,
+    harness: str | None = None,
+) -> None:
+    """Post a cron message: into the reserved conversation, else a new thread."""
+    title = task.label
+    harness = harness or task.harness or default_harness()
+    text, attachments = split_response(display_text)
+    try:
+        if reserved is not None:
+            platform.send(reserved, OutgoingMessage(text=text, attachments=attachments))
+            conversation_key = reserved
+        else:
+            conversation_key = platform.start_thread(text, title=title, harness=harness)
+            if task.model and hasattr(platform, "set_model"):
+                platform.set_model(conversation_key, task.model, harness)
+            if attachments:
+                platform.send(conversation_key, OutgoingMessage(text="", attachments=attachments))
+    except Exception:
+        logger.error(
+            f"Failed to start cron thread on platform={platform.name} for task={task.name}",
+            exc_info=True,
+        )
+        return
+
+    if session_id:
+        platform.set_session_id(
+            conversation_key, session_id, title_hint=title, harness=harness
         )
 
 
@@ -115,7 +188,10 @@ def _execute(
         # Like a missing chat_app: don't run a prompt written for one agent on another.
         error = f"harness {harness!r} isn't enabled on this machine (see the HARNESSES setting)"
         logger.warning(f"Cron task={task.name} skipped: {error}")
-        run_store.finish_run(run_id, status="error", error=error)
+        alert = _failure_alert(task, run_id, error)
+        run_store.finish_run(run_id, status="error", error=error, notified=alert is not None)
+        if alert and platform is not None:
+            _deliver(task, platform, None, alert)
         return
 
     # Reserve the destination conversation up front where the platform supports
@@ -149,14 +225,26 @@ def _execute(
     display_text = response_text.replace("<notify>", "").replace("<silence>", "").strip()
 
     if result.is_error:
+        error = display_text or f"{get_harness(harness).label} run failed with no output"
+        # A failure is reported whatever the run's own <notify>/<silence> said,
+        # once its streak reaches the task's alert_after.
+        alert = _failure_alert(task, run_id, error)
+        should_notify = alert is not None
         run_store.finish_run(
             run_id,
             status="error",
-            error=display_text or f"{get_harness(harness).label} run failed with no output",
+            error=error,
+            notified=should_notify,
             session_id=result.session_id,
             conversation_id=reserved,
         )
+        if alert:
+            display_text = alert
     else:
+        recovery = _recovery_note(task, run_id)
+        if recovery:
+            should_notify = True
+            display_text = f"{recovery}\n\n{display_text}" if display_text else recovery
         run_store.finish_run(
             run_id,
             status="success",
@@ -182,28 +270,7 @@ def _execute(
     if platform is None:
         return
 
-    text, attachments = split_response(display_text)
-    try:
-        if reserved is not None:
-            platform.send(reserved, OutgoingMessage(text=text, attachments=attachments))
-            conversation_key = reserved
-        else:
-            conversation_key = platform.start_thread(text, title=title, harness=harness)
-            if task.model and hasattr(platform, "set_model"):
-                platform.set_model(conversation_key, task.model, harness)
-            if attachments:
-                platform.send(conversation_key, OutgoingMessage(text="", attachments=attachments))
-    except Exception:
-        logger.error(
-            f"Failed to start cron thread on platform={platform.name} for task={task.name}",
-            exc_info=True,
-        )
-        return
-
-    if result.session_id:
-        platform.set_session_id(
-            conversation_key, result.session_id, title_hint=title, harness=harness
-        )
+    _deliver(task, platform, reserved, display_text, result.session_id, harness)
 
 
 def _build_task_state(tasks: list[CronTask]) -> tuple[list[tuple[CronTask, croniter]], dict[str, datetime]]:
@@ -225,7 +292,7 @@ def _tasks_changed(old: list[CronTask], new: list[CronTask]) -> bool:
     def to_tuple(t: CronTask) -> tuple:
         return (
             t.name, t.schedule, t.description, t.prompt, t.chat_app, t.paused,
-            t.harness, t.model, t.wait_for_mcp, t.skip_permissions,
+            t.harness, t.model, t.wait_for_mcp, t.skip_permissions, t.alert_after,
         )
     return [to_tuple(t) for t in old] != [to_tuple(t) for t in new]
 
