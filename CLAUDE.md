@@ -193,6 +193,18 @@ pinned on top, then the rest by `updated_at`; the sidebar sorts the same way
 (`byPinThenRecency`) and marks them 📌. Pinning doesn't touch status, so the
 Active/All filter still hides a pinned conversation that is done.
 
+### Queued messages
+
+While a turn runs, the chat composer stays enabled: submitting queues the
+message in the browser instead of sending it (`queue:<conv-id>` in
+`localStorage`, shown above the input with edit / remove). When the
+conversation's `processing` ends, `Chat` sends every queued message as one
+message (joined by blank lines, attachments concatenated), so the queue costs
+one turn, not one per message. Draining waits for `/api/chat/processing` on
+load, and reads and clears the `localStorage` copy before sending so two tabs
+can't both send it. The queue is client-only: it drains only while a tab is
+open, and the server never sees a queued message until then.
+
 ### Conversation search
 
 The search box at the top of the chat sidebar calls `GET /api/search?q=`,
