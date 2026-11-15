@@ -240,6 +240,57 @@ function getStatus(statuses: Record<string, ConvStatus>, id: string): ConvStatus
   return statuses[id] ?? "read";
 }
 
+/* ---------- Queued messages ----------
+ *
+ * A message submitted while a turn is running waits in the browser, not on
+ * the server, so it can still be edited or dropped. When the turn ends every
+ * queued message goes out together as one message (one turn, not one per
+ * message). The queue lives in localStorage so a reload doesn't lose it; that
+ * copy is the source of truth when draining, so two tabs can't both send it.
+ */
+
+interface QueuedMessage {
+  id: string;
+  text: string;
+  attachments: AttachmentRef[];
+}
+
+const QUEUE_PREFIX = "queue:";
+
+function loadQueue(convId: string): QueuedMessage[] {
+  try {
+    const raw = localStorage.getItem(QUEUE_PREFIX + convId);
+    return raw ? (JSON.parse(raw) as QueuedMessage[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveQueue(convId: string, items: QueuedMessage[]) {
+  if (items.length) localStorage.setItem(QUEUE_PREFIX + convId, JSON.stringify(items));
+  else localStorage.removeItem(QUEUE_PREFIX + convId);
+}
+
+function loadAllQueues(): Record<string, QueuedMessage[]> {
+  const out: Record<string, QueuedMessage[]> = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key?.startsWith(QUEUE_PREFIX)) continue;
+    const convId = key.slice(QUEUE_PREFIX.length);
+    const items = loadQueue(convId);
+    if (items.length) out[convId] = items;
+  }
+  return out;
+}
+
+/** Queued messages as the one message that's sent when the turn ends. */
+function mergeQueue(items: QueuedMessage[]): { text: string; files: AttachmentRef[] } {
+  return {
+    text: items.map((q) => q.text.trim()).filter(Boolean).join("\n\n"),
+    files: items.flatMap((q) => q.attachments),
+  };
+}
+
 /* ---------- Insecure-context fallbacks ----------
  *
  * The web server binds 0.0.0.0 and is normally reached over plain HTTP at a
@@ -722,13 +773,20 @@ function Composer({
   agent,
   onSend,
   onStop,
-  disabled,
+  processing,
+  queued,
+  onQueue,
+  onUnqueue,
 }: {
   conversationId: string;
   agent: string;
   onSend: (text: string, files: AttachmentRef[]) => void;
   onStop: () => void;
-  disabled: boolean;
+  /** A turn is running: what's submitted is queued rather than sent. */
+  processing: boolean;
+  queued: QueuedMessage[];
+  onQueue: (text: string, files: AttachmentRef[]) => void;
+  onUnqueue: (id: string) => void;
 }) {
   const draftKey = `draft:${conversationId}`;
   const [text, setText] = useState(() => localStorage.getItem(draftKey) ?? "");
@@ -757,10 +815,19 @@ function Composer({
   const submit = () => {
     if (!text.trim() && pending.length === 0) return;
     unlockAudio();
-    onSend(text, pending);
+    if (processing) onQueue(text, pending);
+    else onSend(text, pending);
     setText("");
     setPending([]);
     localStorage.removeItem(draftKey);
+  };
+
+  // Pull a queued message back into the composer to change it.
+  const editQueued = (q: QueuedMessage) => {
+    onUnqueue(q.id);
+    setText((t) => (t.trim() ? `${t}\n\n${q.text}` : q.text));
+    setPending((p) => [...p, ...q.attachments]);
+    taRef.current?.focus();
   };
 
   const addFiles = async (files: File[]) => {
@@ -796,6 +863,39 @@ function Composer({
         submit();
       }}
     >
+      {queued.length > 0 && (
+        <ul className="queued-messages" aria-label="Queued messages">
+          {queued.map((q) => (
+            <li key={q.id} className="queued-message">
+              <span className="queued-label">Queued</span>
+              <span className="queued-text" title={q.text}>
+                {q.text.trim() || `📎 ${q.attachments.map((a) => a.filename).join(", ")}`}
+              </span>
+              {q.text.trim() && q.attachments.length > 0 && (
+                <span className="queued-files">📎 {q.attachments.length}</span>
+              )}
+              <button
+                type="button"
+                className="queued-btn"
+                onClick={() => editQueued(q)}
+                aria-label="Edit queued message"
+                title="Edit"
+              >
+                ✎
+              </button>
+              <button
+                type="button"
+                className="queued-btn"
+                onClick={() => onUnqueue(q.id)}
+                aria-label="Remove queued message"
+                title="Remove"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {pending.length > 0 && (
         <div className="pending-attachments">
           {pending.map((a) => (
@@ -851,24 +951,28 @@ function Composer({
               submit();
             }
           }}
-          placeholder={`Message ${agent}…`}
-          disabled={disabled}
+          placeholder={
+            processing ? `Queue a message for ${agent}…` : `Message ${agent}…`
+          }
         />
-        {disabled ? (
+        {processing && (
           <button
             type="button"
             className="stop-btn"
             onClick={onStop}
             aria-label="Stop"
+            title="Stop"
           >
             ■
           </button>
-        ) : (
+        )}
+        {(!processing || text.trim() || pending.length > 0) && (
           <button
             type="submit"
             className="send-btn"
             disabled={uploading || (!text.trim() && pending.length === 0)}
-            aria-label="Send"
+            aria-label={processing ? "Queue" : "Send"}
+            title={processing ? `Queue: sent when ${agent} finishes` : "Send"}
           >
             ↑
           </button>
@@ -930,6 +1034,9 @@ function ChatThread({
   highlight,
   onBack,
   onSend,
+  queued,
+  onQueue,
+  onUnqueue,
   onRetry,
   onStop,
   onShowSessionId,
@@ -951,6 +1058,9 @@ function ChatThread({
   highlight: Highlight | null;
   onBack: () => void;
   onSend: (text: string, files: AttachmentRef[]) => void;
+  queued: QueuedMessage[];
+  onQueue: (text: string, files: AttachmentRef[]) => void;
+  onUnqueue: (id: string) => void;
   onRetry: (msg: ChatMessage) => void;
   onStop: () => void;
   onShowSessionId: () => void;
@@ -1071,7 +1181,10 @@ function ChatThread({
         agent={agentName(conv)}
         onSend={onSend}
         onStop={onStop}
-        disabled={processing}
+        processing={processing}
+        queued={queued}
+        onQueue={onQueue}
+        onUnqueue={onUnqueue}
       />
     </div>
   );
@@ -1089,6 +1202,10 @@ export default function Chat({
   const setSelected = onSelectId;
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({});
   const [processingConvs, setProcessingConvs] = useState<Set<string>>(new Set());
+  // False until the server has said which runs are in flight: until then an
+  // idle-looking conversation may be busy, so nothing queued is drained.
+  const [processingKnown, setProcessingKnown] = useState(false);
+  const [queues, setQueues] = useState<Record<string, QueuedMessage[]>>(loadAllQueues);
   const [stepsByConv, setStepsByConv] = useState<Record<string, StreamStep[]>>({});
   const [statuses, setStatuses] = useState<Record<string, ConvStatus>>({});
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
@@ -1256,8 +1373,27 @@ export default function Chat({
       .then((h) => setHarnesses(h.harnesses.filter((x) => x.available)))
       .catch(console.error);
     // A run may already be in flight from before this page loaded.
-    fetchProcessing().then((p) => setProcessingConvs(new Set(Object.keys(p)))).catch(console.error);
+    fetchProcessing()
+      .then((p) => {
+        setProcessingConvs(new Set(Object.keys(p)));
+        setProcessingKnown(true);
+      })
+      .catch(console.error);
     fetchSteps().then(setStepsByConv).catch(console.error);
+  }, []);
+
+  // Another tab queuing or draining.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null) {
+        setQueues(loadAllQueues());
+      } else if (e.key.startsWith(QUEUE_PREFIX)) {
+        const convId = e.key.slice(QUEUE_PREFIX.length);
+        setQueues((prev) => ({ ...prev, [convId]: loadQueue(convId) }));
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   // Debounced search; a stale response never overwrites a newer query's.
@@ -1316,6 +1452,7 @@ export default function Chat({
       delete next[id];
       return next;
     });
+    setQueue(id, []);
     if (selected === id) setSelected(null);
   };
 
@@ -1444,6 +1581,40 @@ export default function Chat({
       }));
     }
   };
+
+  const setQueue = (convId: string, items: QueuedMessage[]) => {
+    saveQueue(convId, items);
+    setQueues((prev) => {
+      const next = { ...prev };
+      if (items.length) next[convId] = items;
+      else delete next[convId];
+      return next;
+    });
+  };
+
+  const handleQueue = (convId: string, text: string, files: AttachmentRef[]) =>
+    setQueue(convId, [...loadQueue(convId), { id: newTempId(), text, attachments: files }]);
+
+  const handleUnqueue = (convId: string, id: string) =>
+    setQueue(convId, loadQueue(convId).filter((q) => q.id !== id));
+
+  // When a conversation's turn ends, send what was queued for it. The queue
+  // is emptied before the send, so this can't fire twice for the same items.
+  const sendRef = useRef(handleSend);
+  useEffect(() => {
+    sendRef.current = handleSend;
+  });
+  useEffect(() => {
+    if (!processingKnown) return;
+    for (const convId of Object.keys(queues)) {
+      if (processingConvs.has(convId)) continue;
+      const items = loadQueue(convId);
+      setQueue(convId, []);
+      if (items.length === 0) continue;
+      const { text, files } = mergeQueue(items);
+      sendRef.current(convId, text, files);
+    }
+  }, [queues, processingConvs, processingKnown]);
 
   const handleRetry = (convId: string, msg: ChatMessage) => {
     // Drop the failed placeholder and re-send its contents.
@@ -1650,6 +1821,9 @@ export default function Chat({
             highlight={highlight}
             onBack={() => setSelected(null)}
             onSend={(text, files) => handleSend(active.id, text, files)}
+            queued={queues[active.id] || []}
+            onQueue={(text, files) => handleQueue(active.id, text, files)}
+            onUnqueue={(id) => handleUnqueue(active.id, id)}
             onRetry={(msg) => handleRetry(active.id, msg)}
             onStop={() => cancelProcessing(active.id).catch(console.error)}
             onShowSessionId={() => setSessionIdModal(active.claude_session_id || "(no session yet)")}
