@@ -3,7 +3,7 @@
 import threading
 from pathlib import Path
 
-from yuki_conductor.store import ModelStore, SessionStore
+from yuki_conductor.store import ModelStore, ProjectStore, SessionStore
 
 
 def test_session_roundtrip(tmp_path: Path):
@@ -140,3 +140,13 @@ def test_session_harness_is_fixed_by_the_first_write(tmp_path: Path):
     assert store.get_harness("ts1") == "pi"
     store.set("ts2", "sess-c")
     assert store.get_harness("ts2") == "claude-code"
+
+
+def test_new_project_goes_to_top(tmp_path):
+    store = ProjectStore(tmp_path / "test.db")
+    store.add("a", "/a")
+    store.add("b", "/b")
+    assert [p["name"] for p in store.list_all()] == ["b", "a"]
+    store.reorder(["a", "b"])
+    store.add("c", "/c")
+    assert [p["name"] for p in store.list_all()] == ["c", "a", "b"]
