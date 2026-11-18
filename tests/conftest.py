@@ -163,3 +163,19 @@ def isolated_heartbeats(monkeypatch, tmp_path):
     store = heartbeat_store.HeartbeatStore(db_path=tmp_path / "heartbeats.db")
     monkeypatch.setattr(heartbeat_store, "store", store)
     return store
+
+
+@pytest.fixture(autouse=True)
+def isolated_db_backup(monkeypatch, tmp_path):
+    """Snapshot a temp DB into a temp folder, and never start the real loop.
+
+    `runtime.start()` imports `db_backup.start` at call time, so the no-op
+    reaches it. Tests of the loop call `db_backup.loop` directly.
+    """
+    from yuki_conductor import config, db_backup
+
+    monkeypatch.setattr(config, "DB_FILE", tmp_path / "live.db")
+    monkeypatch.setattr(config, "DB_BACKUP_DIR", tmp_path / "backups")
+    monkeypatch.setattr(db_backup, "start", lambda: None)
+    monkeypatch.setattr(db_backup, "_last_error", None)
+    return tmp_path / "backups"

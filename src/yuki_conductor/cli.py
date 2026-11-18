@@ -71,9 +71,10 @@ def main(argv: list[str] | None = None) -> None:
         help="Title for the new conversation (only used without --conversation)",
     )
 
-    from yuki_conductor import cli_heartbeat, cli_search, cli_task
+    from yuki_conductor import cli_db, cli_heartbeat, cli_search, cli_task
 
     cli_task.register(sub)
+    cli_db.register(sub)
     cli_heartbeat.register(sub)
     cli_search.register(sub)
 
@@ -172,6 +173,8 @@ def main(argv: list[str] | None = None) -> None:
         from yuki_conductor import cli_task
 
         cli_task.handle(args)
+    elif args.command == "db":
+        cli_db.handle(args)
     elif args.command == "heartbeat":
         cli_heartbeat.handle(args)
     elif args.command == "search":
