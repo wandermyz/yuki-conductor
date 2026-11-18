@@ -566,9 +566,9 @@ class ProjectStore:
         with self._lock:
             con = self._connect()
             try:
-                # New projects get sort_order after the current max
+                # New projects go to the top: sort_order before the current min
                 row = con.execute(
-                    "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM projects"
+                    "SELECT COALESCE(MIN(sort_order), 1) - 1 FROM projects"
                 ).fetchone()
                 next_order = row[0] if row else 0
                 con.execute(

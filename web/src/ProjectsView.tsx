@@ -115,7 +115,10 @@ export default function ProjectsView() {
     setLoading(true);
     try {
       await addProject(trimName, trimPath);
-      setProjects((prev) => [...prev, { name: trimName, path: trimPath }]);
+      setProjects((prev) => [
+        { name: trimName, path: trimPath },
+        ...prev.filter((p) => p.name !== trimName),
+      ]);
       setName("");
       setPath("");
       setShowForm(false);
