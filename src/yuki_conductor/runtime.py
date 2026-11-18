@@ -154,6 +154,7 @@ def start() -> None:
 
     from yuki_conductor.config import build_web_frontend, web_frontend_stale
     from yuki_conductor.cron_scheduler import start_cron_scheduler
+    from yuki_conductor.db_backup import start as start_db_backup
     from yuki_conductor.heartbeat import start as start_heartbeats
     from yuki_conductor.taskboard import start_taskboard
     from yuki_conductor.web_server import (
@@ -174,6 +175,7 @@ def start() -> None:
     start_cron_scheduler(platforms_by_name=platforms_by_name)
     start_taskboard(ws_manager=ws_manager)
     start_heartbeats(ws_manager=ws_manager)
+    start_db_backup()
 
     for rec in receivers:
         if hasattr(rec, "register_api_routes"):

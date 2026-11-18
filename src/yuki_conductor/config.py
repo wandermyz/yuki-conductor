@@ -72,6 +72,13 @@ USER_SKILLS_DIR = Path.home() / ".claude" / "skills"
 ATTACHMENTS_DIR = WORKSPACE_DIR / "attachments"
 UPLOADS_DIR = WORKSPACE_DIR / "uploads"
 WEB_UPLOADS_DIR = UPLOADS_DIR / "web"
+# Where the daemon writes DB snapshots. Outside workspace/ by default, since
+# that may live in a synced or git-backed folder (see db_backup.py).
+def parse_db_backup_dir(raw: str | None) -> Path:
+    return Path(os.path.expanduser(raw)) if raw and raw.strip() else DATA_DIR / "backups"
+
+
+DB_BACKUP_DIR = parse_db_backup_dir(os.environ.get("DB_BACKUP_DIR"))
 
 CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "1800"))
 CLAUDE_WORKING_DIR = os.path.normpath(

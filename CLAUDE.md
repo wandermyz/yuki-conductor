@@ -33,6 +33,8 @@ src/yuki_conductor/
     pr_watcher.py      — `gh` check of Ready for Review PRs, run when the Tasks tab opens
     cleanup.py         — removes a Done task's worktree + branches
   cli_task.py       — `yuki-conductor task …` (show/list/comment/ask/pr/create)
+  db_backup.py      — DB snapshots: VACUUM INTO, retention, the backup loop
+  cli_db.py         — `yuki-conductor db backup|list|restore`
   heartbeat.py      — heartbeats: scheduler loop, conversation ticks, lifecycle, API actions
   heartbeat_store.py — SQLite `heartbeats` + `heartbeat_ticks`
   heartbeat_routes.py — /api/heartbeats/{kind}/{id}
@@ -81,6 +83,7 @@ Key files:
 - `~/.zshenv.d/claude.zsh` — exports `ANTHROPIC_AUTH_TOKEN` (read from `.secrets/claude-auth-token`), shared with interactive shells; `config.py` sources this one file under `zsh -f` at startup so the LaunchAgent authenticates the same way a terminal does. The endpoint is *not* here — `ANTHROPIC_BASE_URL` lives in `~/.claude/settings.json` under `env`, which applies to Claude Code only rather than every process that starts a zsh.
 - `~/.yuki-conductor/.secrets/` — one secret per file, mode 600 (referenced by the above; never in `workspace/`, which syncs to Obsidian)
 - `~/.yuki-conductor/workspace/yuki-conductor.db` — SQLite database for session and model tracking
+- `~/.yuki-conductor/backups/` — hourly DB snapshots (see Database Backups; `DB_BACKUP_DIR` in `.env` moves it)
 - `~/.yuki-conductor/workspace/cron.yaml` — Cron task definitions (see `cron.example.yaml` for format)
 - `~/.yuki-conductor/workspace/plugins.yaml` — plugin registry: installed and enabled (see `plugins.example.yaml`)
 - `~/.yuki-conductor/workspace/models.yaml` — per-harness model aliases, connections and defaults (see `models.example.yaml`)
@@ -553,10 +556,45 @@ runs a fresh session each time. Design: `docs/plans/2026-11-10-heartbeat.md`.
 - `uv run yuki-conductor send -c <conv-id> "text"` — push a message (and `--attach` files) into a web or Slack conversation (see Outbound Messages)
 - `uv run yuki-conductor task show|list|comment|ask|done|pr|create` — the taskboard from a shell (see Taskboard)
 - `uv run yuki-conductor heartbeat set|status|pause|resume|stop` — wake this conversation or task on an interval (see Heartbeat)
+- `uv run yuki-conductor db backup|list|restore` — snapshot the workspace DB now, list snapshots, restore one (daemon stopped; see Database Backups)
 - `uv run yuki-conductor search [--conversations|--tasks] TERMS` / `conversation show <id>` — find and read past work (see Conversation search)
 - `uv run yuki-conductor web rebuild` — rebuild frontend + auto-reload connected browsers
 - `cd web && pnpm dev` — start frontend dev server (proxies /api to port 2333)
 - `cd web && pnpm build` — build frontend for production (output: web/dist/)
+
+## Database Backups
+
+The daemon snapshots `yuki-conductor.db` into `DB_BACKUP_DIR` (`.env`;
+default `~/.yuki-conductor/backups`, deliberately outside `workspace/`, which
+may sit in a synced or git-backed folder). `db_backup.py`:
+
+- **Never copy the live file.** A copy taken mid-write is torn, and a sync
+  tool writing into a live SQLite file corrupts it. A snapshot is
+  `VACUUM INTO` a `.<name>.partial` file (consistent while other connections
+  write), then `PRAGMA quick_check`, then an atomic rename to
+  `yuki-conductor-<UTC stamp>.db`. The folder only ever holds complete files
+  that are never modified, which is what makes it safe to point at OneDrive
+  or hand to restic/Kopia for an off-machine copy.
+- **Cadence**: a `db-backup` thread started by `runtime.start()` checks every
+  5 minutes (first check a minute after startup) and snapshots when the
+  newest snapshot is an hour old *and* the DB's mtime is newer than it, so an
+  idle daemon or frequent restarts don't pile up copies.
+- **Retention**: the newest snapshot in each of the last 24 hours, 14 days and
+  8 ISO weeks that have one; other snapshots are deleted after each backup.
+  Only files matching the snapshot name are ever deleted.
+- **Status**: `/api/status` carries a `db-backup` entry (last backup and its
+  age, or the last error), shown on the Status tab.
+- **Restore**: `yuki-conductor db restore <name-or-path>` checks the snapshot,
+  moves the current DB *and any `-journal`/`-wal`/`-shm` beside it* to
+  `yuki-conductor.db.before-restore-<stamp>` (a leftover hot journal would be
+  rolled back into the restored file), then copies the snapshot in. It
+  refuses while the daemon answers; on Windows quit yuki-watcher first.
+- Only the DB is covered. Harness sessions live in `~/.claude/projects` and
+  `~/.codex/sessions`; after a restore, resuming an old conversation may start
+  a fresh session (tasks already handle that, see Taskboard).
+- Tests never start the loop or touch the real DB: the autouse
+  `isolated_db_backup` fixture points `DB_FILE` and `DB_BACKUP_DIR` at
+  `tmp_path` and no-ops `db_backup.start`.
 
 ## Daemon Management
 
@@ -876,5 +914,6 @@ install and config. Only enabled harnesses are registered (`HARNESSES` in
 - `test_harness_pi.py` — pi command line, plus its parser against real recorded runs in `tests/fixtures/harness/pi/` (system prompt scrubbed)
 - `test_harness_codex.py` — Codex command line, parser against real runs in `tests/fixtures/harness/codex/`, rollout-file context, `run_agent` end to end
 - `test_cli_simulate.py` — integration tests via simulate commands
+- `test_db_backup.py` — snapshots against a temp DB, retention, the due check, the loop, status, restore and the `db` CLI
 - `test_heartbeat.py` — heartbeats: store, turn guard, conversation ticks through the web API, task ticks through a real harvester and runner (fake `run_agent`), API, CLI
 - `test_task_store.py`, `test_taskboard_*.py`, `test_tasks_api.py`, `test_cli_task.py` — the taskboard: store, state machine, harvester, runner (fake `run_agent`), worktrees and cleanup against a temp repo with a bare origin, PR watcher with `gh` mocked, API, CLI end to end through the API. The autouse `no_stray_harvester` fixture fails any test that leaves a real board loop running.

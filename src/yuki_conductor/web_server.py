@@ -156,6 +156,9 @@ def create_api() -> FastAPI:
                 result[rec.name] = rec.status()
             except Exception as exc:
                 result[rec.name] = {"status": "error", "message": str(exc)}
+        from yuki_conductor import db_backup
+
+        result["db-backup"] = db_backup.status()
         return result
 
     @api.get("/api/sessions")
