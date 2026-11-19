@@ -48,6 +48,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from yuki_conductor import config
 from yuki_conductor.config import (
     SKILLS_CONFIG_FILE,
     SYSTEM_PROMPT_FILE,
@@ -282,6 +283,33 @@ _ATTACHMENTS = (
     "same way, as `<attachment>` tags at the start of their message."
 )
 
+def _data_dirs() -> str:
+    """Where yuki-conductor keeps its files, and what may go in each.
+
+    Read at render time so a `YUKI_CONDUCTOR_DATA_DIR` override (and the test
+    fixtures that rebind it) shows the real paths.
+    """
+    data_dir = config.DATA_DIR
+    workspace = config.WORKSPACE_DIR
+    secrets = data_dir / ".secrets"
+    return (
+        "## yuki-conductor data directories\n"
+        "\n"
+        f"- `{workspace}` is the user's workspace. It is meant to be synced "
+        "through git or a cloud drive (often via a symlink), so put only things "
+        "worth syncing there: notes, reports, generated artifacts and other "
+        "deliverables are fine. Never put intermediate or build files there — no "
+        "`node_modules`, Python virtualenvs or package caches, build output, or "
+        "scratch clones; keep those outside the workspace.\n"
+        f"- The rest of `{data_dir}` holds yuki-conductor's own system files "
+        "(daemon logs, DB backups, `.env`). They aren't meant for the user in "
+        "normal use; don't add your own files there.\n"
+        f"- `{secrets}` holds credentials, one per file. Store any credential "
+        "there, never in the workspace, and never echo a secret's contents in "
+        "your replies."
+    )
+
+
 _TIER_HEADINGS = {
     Tier.YUKI: "## yuki-conductor capabilities (always available)",
     Tier.PROJECT: "## This project: {cwd}",
@@ -395,7 +423,7 @@ def system_prompt(
     resolved = resolve_skills(cwd=cwd, plugin_dirs=plugin_dirs)
 
     lines = [
-        f"{_INTRO}\n\n{_SKILLS_INTRO}\n\n{_ATTACHMENTS}",
+        f"{_INTRO}\n\n{_SKILLS_INTRO}\n\n{_ATTACHMENTS}\n\n{_data_dirs()}",
         *_render_skills(resolved, cwd),
         *_conversation_section(conversation_key),
         *_taskboard_section(task_id),
@@ -411,7 +439,7 @@ def core_prompt(conversation_key: str | None = None, task_id: int | None = None)
     prompt. Without it, file replies and pushes break.
     """
     lines = [
-        f"{_INTRO}\n\n{_ATTACHMENTS}",
+        f"{_INTRO}\n\n{_ATTACHMENTS}\n\n{_data_dirs()}",
         *_conversation_section(conversation_key),
         *_taskboard_section(task_id),
     ]
@@ -441,7 +469,7 @@ def codex_prompt(
         s for s in resolve_skills(cwd=cwd, plugin_dirs=plugin_dirs)
         if s.tier in (Tier.YUKI, Tier.PROJECT)
     ]
-    lines = [f"{_INTRO}\n\n{_ATTACHMENTS}"]
+    lines = [f"{_INTRO}\n\n{_ATTACHMENTS}\n\n{_data_dirs()}"]
     if resolved:
         lines.extend(["", "## yuki-conductor skills", "", _CODEX_SKILLS_INTRO, ""])
         lines.extend(

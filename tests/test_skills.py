@@ -301,6 +301,28 @@ def test_prompt_instructs_skill_tool_invocation(tmp_path):
     assert "no automatic skill listing" in prompt
 
 
+def test_every_harness_prompt_explains_data_dirs(tmp_path):
+    data_dir = tmp_path / "data"
+    patches = _with([
+        *_isolated(tmp_path),
+        patch.object(skills.config, "DATA_DIR", data_dir),
+        patch.object(skills.config, "WORKSPACE_DIR", data_dir / "workspace"),
+    ])
+    try:
+        prompts = [
+            skills.system_prompt([], cwd=None),
+            skills.core_prompt(),
+            skills.codex_prompt([], cwd=None),
+        ]
+    finally:
+        _stop(patches)
+
+    for prompt in prompts:
+        assert f"`{data_dir / 'workspace'}` is the user's workspace" in prompt
+        assert "node_modules" in prompt
+        assert f"`{data_dir / '.secrets'}` holds credentials" in prompt
+
+
 def test_prompt_names_real_bundled_cron_skill(tmp_path):
     patches = _with(_isolated(tmp_path))
     try:
