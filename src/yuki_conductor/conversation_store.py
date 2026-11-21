@@ -41,6 +41,17 @@ class StoredMessage:
 
 
 @dataclass
+class QueuedMessage:
+    """A message the user wrote while a turn was running, not yet sent."""
+
+    id: str
+    conversation_id: str
+    text: str
+    attachments: list[StoredAttachment] = field(default_factory=list)
+    created_at: float = 0.0
+
+
+@dataclass
 class StoredConversation:
     id: str
     platform: str
@@ -142,6 +153,21 @@ class ConversationStore:
                 con.execute(
                     "CREATE INDEX IF NOT EXISTS idx_usage_conv "
                     "ON message_usage(conversation_id)"
+                )
+                con.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS queued_messages (
+                        id TEXT PRIMARY KEY,
+                        conversation_id TEXT NOT NULL REFERENCES conversations(id),
+                        text TEXT NOT NULL,
+                        attachments_json TEXT,
+                        created_at REAL NOT NULL
+                    )
+                    """
+                )
+                con.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_queued_conv "
+                    "ON queued_messages(conversation_id, created_at)"
                 )
                 # Auto-migrate: add columns if missing
                 cols = {
@@ -393,6 +419,7 @@ class ConversationStore:
             con = self._connect()
             try:
                 con.execute("DELETE FROM message_usage WHERE conversation_id = ?", (conv_id,))
+                con.execute("DELETE FROM queued_messages WHERE conversation_id = ?", (conv_id,))
                 con.execute(
                     "DELETE FROM messages_fts WHERE rowid IN "
                     "(SELECT rowid FROM messages WHERE conversation_id = ?)",
@@ -464,17 +491,7 @@ class ConversationStore:
             attachments=attachments or [],
             created_at=time.time(),
         )
-        attachments_json = json.dumps(
-            [
-                {
-                    "id": a.id,
-                    "filename": a.filename,
-                    "url": a.url,
-                    "mime_type": a.mime_type,
-                }
-                for a in msg.attachments
-            ]
-        )
+        attachments_json = _attachments_json(msg.attachments)
         with self._lock:
             con = self._connect()
             try:
@@ -526,6 +543,91 @@ class ConversationStore:
                 msgs = [_row_to_message(r) for r in rows]
                 msgs.reverse()  # ascending by time
                 return msgs
+            finally:
+                con.close()
+
+    # ------------------------------------------------------------ queue
+    #
+    # Messages submitted while a web turn runs wait here; when the turn ends
+    # they're taken all at once and sent as one message.
+
+    def queue_message(
+        self,
+        conv_id: str,
+        text: str,
+        attachments: list[StoredAttachment] | None = None,
+    ) -> QueuedMessage:
+        item = QueuedMessage(
+            id=uuid.uuid4().hex,
+            conversation_id=conv_id,
+            text=text,
+            attachments=attachments or [],
+            created_at=time.time(),
+        )
+        with self._lock:
+            con = self._connect()
+            try:
+                con.execute(
+                    "INSERT INTO queued_messages "
+                    "(id, conversation_id, text, attachments_json, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        item.id, conv_id, text,
+                        _attachments_json(item.attachments), item.created_at,
+                    ),
+                )
+                con.commit()
+            finally:
+                con.close()
+        return item
+
+    def list_queued(self, conv_id: str | None = None) -> list[QueuedMessage]:
+        """Queued messages, oldest first: one conversation's, or every one's."""
+        select = (
+            "SELECT id, conversation_id, text, attachments_json, created_at "
+            "FROM queued_messages"
+        )
+        with self._lock:
+            con = self._connect()
+            try:
+                if conv_id is None:
+                    rows = con.execute(select + " ORDER BY created_at").fetchall()
+                else:
+                    rows = con.execute(
+                        select + " WHERE conversation_id = ? ORDER BY created_at",
+                        (conv_id,),
+                    ).fetchall()
+                return [_row_to_queued(r) for r in rows]
+            finally:
+                con.close()
+
+    def unqueue_message(self, conv_id: str, item_id: str) -> QueuedMessage | None:
+        """Remove one queued message; None if it's gone (or already sent)."""
+        with self._lock:
+            con = self._connect()
+            try:
+                row = con.execute(
+                    "DELETE FROM queued_messages WHERE conversation_id = ? AND id = ? "
+                    "RETURNING id, conversation_id, text, attachments_json, created_at",
+                    (conv_id, item_id),
+                ).fetchone()
+                con.commit()
+                return _row_to_queued(row) if row else None
+            finally:
+                con.close()
+
+    def take_queued(self, conv_id: str) -> list[QueuedMessage]:
+        """Remove and return a conversation's whole queue, oldest first."""
+        with self._lock:
+            con = self._connect()
+            try:
+                rows = con.execute(
+                    "DELETE FROM queued_messages WHERE conversation_id = ? "
+                    "RETURNING id, conversation_id, text, attachments_json, created_at",
+                    (conv_id,),
+                ).fetchall()
+                con.commit()
+                return sorted((_row_to_queued(r) for r in rows), key=lambda q: q.created_at)
             finally:
                 con.close()
 
@@ -802,23 +904,44 @@ def fts_query(query: str) -> str | None:
     )
 
 
-def _row_to_message(r: tuple) -> StoredMessage:
-    raw = json.loads(r[4]) if r[4] else []
-    atts = [
+def _attachments_json(atts: list[StoredAttachment]) -> str:
+    return json.dumps(
+        [
+            {"id": a.id, "filename": a.filename, "url": a.url, "mime_type": a.mime_type}
+            for a in atts
+        ]
+    )
+
+
+def _parse_attachments(raw: str | None) -> list[StoredAttachment]:
+    return [
         StoredAttachment(
             id=a["id"],
             filename=a["filename"],
             url=a["url"],
             mime_type=a.get("mime_type"),
         )
-        for a in raw
+        for a in (json.loads(raw) if raw else [])
     ]
+
+
+def _row_to_queued(r: tuple) -> QueuedMessage:
+    return QueuedMessage(
+        id=r[0],
+        conversation_id=r[1],
+        text=r[2],
+        attachments=_parse_attachments(r[3]),
+        created_at=r[4],
+    )
+
+
+def _row_to_message(r: tuple) -> StoredMessage:
     return StoredMessage(
         id=r[0],
         conversation_id=r[1],
         role=r[2],
         text=r[3],
-        attachments=atts,
+        attachments=_parse_attachments(r[4]),
         created_at=r[5],
         # Only `list_messages` joins the usage table.
         context_tokens=r[6] if len(r) > 6 else None,
