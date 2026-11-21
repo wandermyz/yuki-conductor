@@ -199,14 +199,21 @@ Active/All filter still hides a pinned conversation that is done.
 ### Queued messages
 
 While a turn runs, the chat composer stays enabled: submitting queues the
-message in the browser instead of sending it (`queue:<conv-id>` in
-`localStorage`, shown above the input with edit / remove). When the
-conversation's `processing` ends, `Chat` sends every queued message as one
-message (joined by blank lines, attachments concatenated), so the queue costs
-one turn, not one per message. Draining waits for `/api/chat/processing` on
-load, and reads and clears the `localStorage` copy before sending so two tabs
-can't both send it. The queue is client-only: it drains only while a tab is
-open, and the server never sees a queued message until then.
+message on the server (`POST /api/conversations/{id}/queue`, stored in the
+`queued_messages` table) instead of sending it. The queue shows above the
+input with edit / remove (`DELETE .../queue/{item}`, a 404 once it's been
+sent, so edit only pulls back what's still queued); browsers follow it via
+`GET /api/chat/queued` and `{"type": "queue", "items": [...]}` broadcasts.
+When a conversation's last web turn ends, `web_server.drain_queue` sends
+every queued message as one message (joined by blank lines, attachments
+concatenated), so the queue costs one turn, not one per message. Nothing
+needs a tab open. `_turns` counts web turns per conversation; queuing stores
+then drains, a turn's end uncounts then drains, so whichever is second sends
+the item (never stranded), and queuing with no web turn running sends at once.
+At startup (`start_web_server`) every leftover queue is sent, since the turn
+it waited on died with the old daemon. Archive and delete drop the queue.
+Heartbeat ticks don't count as turns: a message sent during one waits on the
+turn guard as before.
 
 ### Conversation search
 

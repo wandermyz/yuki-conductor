@@ -9,6 +9,9 @@ import {
   deleteConversation,
   fetchStatuses,
   fetchProcessing,
+  fetchQueued,
+  queueMessage,
+  unqueueMessage,
   fetchSteps,
   fetchAllUsage,
   getConversation,
@@ -32,6 +35,7 @@ import type {
   ConvStatus,
   HarnessInfo,
   Project,
+  QueuedMessage,
   SearchHit,
   StreamStep,
   WSEvent,
@@ -238,57 +242,6 @@ function contextLevel(pct: number): string {
 
 function getStatus(statuses: Record<string, ConvStatus>, id: string): ConvStatus {
   return statuses[id] ?? "read";
-}
-
-/* ---------- Queued messages ----------
- *
- * A message submitted while a turn is running waits in the browser, not on
- * the server, so it can still be edited or dropped. When the turn ends every
- * queued message goes out together as one message (one turn, not one per
- * message). The queue lives in localStorage so a reload doesn't lose it; that
- * copy is the source of truth when draining, so two tabs can't both send it.
- */
-
-interface QueuedMessage {
-  id: string;
-  text: string;
-  attachments: AttachmentRef[];
-}
-
-const QUEUE_PREFIX = "queue:";
-
-function loadQueue(convId: string): QueuedMessage[] {
-  try {
-    const raw = localStorage.getItem(QUEUE_PREFIX + convId);
-    return raw ? (JSON.parse(raw) as QueuedMessage[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveQueue(convId: string, items: QueuedMessage[]) {
-  if (items.length) localStorage.setItem(QUEUE_PREFIX + convId, JSON.stringify(items));
-  else localStorage.removeItem(QUEUE_PREFIX + convId);
-}
-
-function loadAllQueues(): Record<string, QueuedMessage[]> {
-  const out: Record<string, QueuedMessage[]> = {};
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (!key?.startsWith(QUEUE_PREFIX)) continue;
-    const convId = key.slice(QUEUE_PREFIX.length);
-    const items = loadQueue(convId);
-    if (items.length) out[convId] = items;
-  }
-  return out;
-}
-
-/** Queued messages as the one message that's sent when the turn ends. */
-function mergeQueue(items: QueuedMessage[]): { text: string; files: AttachmentRef[] } {
-  return {
-    text: items.map((q) => q.text.trim()).filter(Boolean).join("\n\n"),
-    files: items.flatMap((q) => q.attachments),
-  };
 }
 
 /* ---------- Insecure-context fallbacks ----------
@@ -786,7 +739,8 @@ function Composer({
   processing: boolean;
   queued: QueuedMessage[];
   onQueue: (text: string, files: AttachmentRef[]) => void;
-  onUnqueue: (id: string) => void;
+  /** Resolves to the item, or null if it was already sent. */
+  onUnqueue: (id: string) => Promise<QueuedMessage | null>;
 }) {
   const draftKey = `draft:${conversationId}`;
   const [text, setText] = useState(() => localStorage.getItem(draftKey) ?? "");
@@ -823,8 +777,9 @@ function Composer({
   };
 
   // Pull a queued message back into the composer to change it.
-  const editQueued = (q: QueuedMessage) => {
-    onUnqueue(q.id);
+  const editQueued = async (q: QueuedMessage) => {
+    // Too late if the turn ended meanwhile: it's been sent.
+    if (!(await onUnqueue(q.id))) return;
     setText((t) => (t.trim() ? `${t}\n\n${q.text}` : q.text));
     setPending((p) => [...p, ...q.attachments]);
     taRef.current?.focus();
@@ -1060,7 +1015,7 @@ function ChatThread({
   onSend: (text: string, files: AttachmentRef[]) => void;
   queued: QueuedMessage[];
   onQueue: (text: string, files: AttachmentRef[]) => void;
-  onUnqueue: (id: string) => void;
+  onUnqueue: (id: string) => Promise<QueuedMessage | null>;
   onRetry: (msg: ChatMessage) => void;
   onStop: () => void;
   onShowSessionId: () => void;
@@ -1202,10 +1157,9 @@ export default function Chat({
   const setSelected = onSelectId;
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({});
   const [processingConvs, setProcessingConvs] = useState<Set<string>>(new Set());
-  // False until the server has said which runs are in flight: until then an
-  // idle-looking conversation may be busy, so nothing queued is drained.
-  const [processingKnown, setProcessingKnown] = useState(false);
-  const [queues, setQueues] = useState<Record<string, QueuedMessage[]>>(loadAllQueues);
+  // Messages waiting on a running turn. The server holds the queue and sends
+  // it when the turn ends; this mirrors it via `queue` events.
+  const [queues, setQueues] = useState<Record<string, QueuedMessage[]>>({});
   const [stepsByConv, setStepsByConv] = useState<Record<string, StreamStep[]>>({});
   const [statuses, setStatuses] = useState<Record<string, ConvStatus>>({});
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
@@ -1328,6 +1282,13 @@ export default function Chat({
               setConversations((prev) => prev.map((c) => (c.id === cid ? conv : c))),
             )
             .catch(console.error);
+        } else if (e.type === "queue") {
+          setQueues((prev) => {
+            const next = { ...prev };
+            if (e.items.length) next[cid] = e.items;
+            else delete next[cid];
+            return next;
+          });
         } else if (e.type === "title") {
           setConversations((prev) =>
             prev.map((c) => (c.id === cid ? { ...c, title: e.title } : c)),
@@ -1346,6 +1307,7 @@ export default function Chat({
         fetchProcessing().then((p) => {
           setProcessingConvs(new Set(Object.keys(p)));
         }).catch(console.error);
+        fetchQueued().then(setQueues).catch(console.error);
         // Resume the step stream: replace buffers wholesale with the server's
         // snapshot, so a run that started while we were disconnected still
         // shows its progress instead of an empty list.
@@ -1374,26 +1336,10 @@ export default function Chat({
       .catch(console.error);
     // A run may already be in flight from before this page loaded.
     fetchProcessing()
-      .then((p) => {
-        setProcessingConvs(new Set(Object.keys(p)));
-        setProcessingKnown(true);
-      })
+      .then((p) => setProcessingConvs(new Set(Object.keys(p))))
       .catch(console.error);
+    fetchQueued().then(setQueues).catch(console.error);
     fetchSteps().then(setStepsByConv).catch(console.error);
-  }, []);
-
-  // Another tab queuing or draining.
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === null) {
-        setQueues(loadAllQueues());
-      } else if (e.key.startsWith(QUEUE_PREFIX)) {
-        const convId = e.key.slice(QUEUE_PREFIX.length);
-        setQueues((prev) => ({ ...prev, [convId]: loadQueue(convId) }));
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   // Debounced search; a stale response never overwrites a newer query's.
@@ -1452,7 +1398,11 @@ export default function Chat({
       delete next[id];
       return next;
     });
-    setQueue(id, []);
+    setQueues((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     if (selected === id) setSelected(null);
   };
 
@@ -1582,39 +1532,27 @@ export default function Chat({
     }
   };
 
-  const setQueue = (convId: string, items: QueuedMessage[]) => {
-    saveQueue(convId, items);
-    setQueues((prev) => {
-      const next = { ...prev };
-      if (items.length) next[convId] = items;
-      else delete next[convId];
-      return next;
+  // The server sends the queue when the turn ends (or at once, if it already
+  // has); the `queue` event updates the list either way.
+  const handleQueue = (convId: string, text: string, files: AttachmentRef[]) => {
+    queueMessage(
+      convId,
+      text,
+      files.map((f) => f.id),
+    ).catch((e) => {
+      console.error(e);
+      alert("Could not queue the message. Please try again.");
     });
   };
 
-  const handleQueue = (convId: string, text: string, files: AttachmentRef[]) =>
-    setQueue(convId, [...loadQueue(convId), { id: newTempId(), text, attachments: files }]);
-
-  const handleUnqueue = (convId: string, id: string) =>
-    setQueue(convId, loadQueue(convId).filter((q) => q.id !== id));
-
-  // When a conversation's turn ends, send what was queued for it. The queue
-  // is emptied before the send, so this can't fire twice for the same items.
-  const sendRef = useRef(handleSend);
-  useEffect(() => {
-    sendRef.current = handleSend;
-  });
-  useEffect(() => {
-    if (!processingKnown) return;
-    for (const convId of Object.keys(queues)) {
-      if (processingConvs.has(convId)) continue;
-      const items = loadQueue(convId);
-      setQueue(convId, []);
-      if (items.length === 0) continue;
-      const { text, files } = mergeQueue(items);
-      sendRef.current(convId, text, files);
+  const handleUnqueue = async (convId: string, id: string) => {
+    try {
+      return await unqueueMessage(convId, id);
+    } catch (e) {
+      console.error(e);
+      return null;
     }
-  }, [queues, processingConvs, processingKnown]);
+  };
 
   const handleRetry = (convId: string, msg: ChatMessage) => {
     // Drop the failed placeholder and re-send its contents.

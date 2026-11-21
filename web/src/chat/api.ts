@@ -95,6 +95,8 @@ export type WSEvent =
   | { type: "processing"; conversation_id: string; on: boolean; message_id: string }
   | { type: "step"; conversation_id: string; step: StreamStep }
   | { type: "title"; conversation_id: string; title: string }
+  /** The conversation's queued messages changed; `items` is the whole queue. */
+  | { type: "queue"; conversation_id: string; items: QueuedMessage[] }
   /** The conversation's heartbeat changed or ticked: refetch it. */
   | { type: "heartbeat"; conversation_id: string }
   | { type: "status"; conversation_id: string; status: ConvStatus }
@@ -193,6 +195,54 @@ export async function sendMessage(
     },
   );
   if (!r.ok) throw new Error("Failed to send message");
+  return r.json();
+}
+
+/**
+ * A message submitted while a turn was running. The server holds it and,
+ * when the turn ends, sends the whole queue as one message.
+ */
+export interface QueuedMessage {
+  id: string;
+  conversation_id: string;
+  text: string;
+  attachments: AttachmentRef[];
+  created_at: number;
+}
+
+/** Every conversation's queue: conversation_id -> items, oldest first. */
+export async function fetchQueued(): Promise<Record<string, QueuedMessage[]>> {
+  const r = await fetch("/api/chat/queued");
+  if (!r.ok) throw new Error("Failed to fetch queued messages");
+  return r.json();
+}
+
+/** Queue a message; with no turn running the server sends it at once. */
+export async function queueMessage(
+  convId: string,
+  text: string,
+  attachmentIds: string[] = [],
+): Promise<QueuedMessage> {
+  const r = await fetch(`/api/conversations/${encodeURIComponent(convId)}/queue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, attachment_ids: attachmentIds }),
+  });
+  if (!r.ok) throw new Error("Failed to queue message");
+  return r.json();
+}
+
+/** Take a queued message back; null if it has already been sent. */
+export async function unqueueMessage(
+  convId: string,
+  itemId: string,
+): Promise<QueuedMessage | null> {
+  const r = await fetch(
+    `/api/conversations/${encodeURIComponent(convId)}/queue/${encodeURIComponent(itemId)}`,
+    { method: "DELETE" },
+  );
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error("Failed to remove queued message");
   return r.json();
 }
 

@@ -24,6 +24,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(conversation_store, "DB_FILE", db)
     monkeypatch.setattr(web_server, "store", SessionStore(db_path=db))
     monkeypatch.setattr(web_server, "conv_store", ConversationStore(db_path=db))
+    monkeypatch.setattr(web_server, "_turns", {})
     monkeypatch.setattr(web_server, "WEB_UPLOADS_DIR", uploads_web)
     monkeypatch.setattr("yuki_conductor.messaging.web_platform.WEB_UPLOADS_DIR", uploads_web)
 
@@ -535,3 +536,143 @@ def test_turn_options_cannot_be_null(client, field):
         f"/api/conversations/{conv['id']}", json={field: None}
     )
     assert response.status_code == 422
+
+
+# ------------------------------------------------------------ queued messages
+
+
+def _wait_for(pred, timeout=5.0):
+    deadline = time.time() + timeout
+    while not pred():
+        assert time.time() < deadline, "timed out"
+        time.sleep(0.02)
+
+
+@pytest.fixture
+def gated_agent(monkeypatch):
+    """run_agent that blocks each turn until released; records prompts."""
+    import threading
+
+    from yuki_conductor.harness.base import RunResult
+
+    prompts: list[str] = []
+    gate = threading.Semaphore(0)
+
+    def fake(harness, prompt, **kw):
+        prompts.append(prompt)
+        gate.acquire(timeout=5)
+        return RunResult(text=f"re: {prompt}", session_id="s1")
+
+    monkeypatch.setattr("yuki_conductor.messaging.conversation.run_agent", fake)
+    return prompts, gate
+
+
+def test_queued_messages_go_out_together_when_the_turn_ends(client, gated_agent):
+    prompts, gate = gated_agent
+    conv = client.post("/api/conversations", json={"title": "q"}).json()
+    cid = conv["id"]
+    client.post(f"/api/conversations/{cid}/messages", json={"text": "first"})
+    _wait_for(lambda: prompts == ["first"])
+
+    a = client.post(f"/api/conversations/{cid}/queue", json={"text": "second"})
+    b = client.post(f"/api/conversations/{cid}/queue", json={"text": "third"})
+    assert a.status_code == b.status_code == 201
+    queued = client.get("/api/chat/queued").json()[cid]
+    assert [q["text"] for q in queued] == ["second", "third"]
+
+    gate.release()
+    _wait_for(lambda: len(prompts) == 2)
+    assert prompts[1] == "second\n\nthird"
+    assert client.get("/api/chat/queued").json() == {}
+    gate.release()
+    _wait_for(
+        lambda: [m["text"] for m in client.get(f"/api/conversations/{cid}/messages").json()]
+        == ["first", "re: first", "second\n\nthird", "re: second\n\nthird"]
+    )
+
+
+def test_queue_on_an_idle_conversation_sends_at_once(client, gated_agent):
+    prompts, gate = gated_agent
+    cid = client.post("/api/conversations", json={"title": "q"}).json()["id"]
+    r = client.post(f"/api/conversations/{cid}/queue", json={"text": "now"})
+    assert r.status_code == 201
+    _wait_for(lambda: prompts == ["now"])
+    assert client.get("/api/chat/queued").json() == {}
+    gate.release()
+
+
+def test_unqueue_takes_a_message_back(client, gated_agent):
+    prompts, gate = gated_agent
+    cid = client.post("/api/conversations", json={"title": "q"}).json()["id"]
+    client.post(f"/api/conversations/{cid}/messages", json={"text": "first"})
+    _wait_for(lambda: prompts == ["first"])
+    keep = client.post(f"/api/conversations/{cid}/queue", json={"text": "keep"}).json()
+    drop = client.post(f"/api/conversations/{cid}/queue", json={"text": "drop"}).json()
+
+    r = client.delete(f"/api/conversations/{cid}/queue/{drop['id']}")
+    assert r.status_code == 200
+    assert r.json()["text"] == "drop"
+    assert client.delete(f"/api/conversations/{cid}/queue/{drop['id']}").status_code == 404
+
+    gate.release()
+    _wait_for(lambda: len(prompts) == 2)
+    assert prompts[1] == "keep"
+    # Already sent: it can't be taken back.
+    assert client.delete(f"/api/conversations/{cid}/queue/{keep['id']}").status_code == 404
+    gate.release()
+
+
+def test_queue_carries_attachments(client, gated_agent):
+    prompts, gate = gated_agent
+    cid = client.post("/api/conversations", json={"title": "q"}).json()["id"]
+    client.post(f"/api/conversations/{cid}/messages", json={"text": "first"})
+    _wait_for(lambda: prompts == ["first"])
+    up = client.post("/api/uploads", files={"file": ("n.txt", b"x", "text/plain")}).json()
+    item = client.post(
+        f"/api/conversations/{cid}/queue", json={"text": "see", "attachment_ids": [up["id"]]}
+    ).json()
+    assert [a["filename"] for a in item["attachments"]] == ["n.txt"]
+    assert client.post(
+        f"/api/conversations/{cid}/queue", json={"text": "x", "attachment_ids": ["nope"]}
+    ).status_code == 400
+
+    gate.release()
+    _wait_for(lambda: len(prompts) == 2)
+    assert "<attachment>" in prompts[1] and prompts[1].endswith("see")
+    gate.release()
+
+
+def test_queue_broadcasts_changes(client, gated_agent, monkeypatch):
+    prompts, gate = gated_agent
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        web_server.ws_manager, "broadcast", lambda cid, payload: sent.append(payload)
+    )
+    cid = client.post("/api/conversations", json={"title": "q"}).json()["id"]
+    client.post(f"/api/conversations/{cid}/messages", json={"text": "first"})
+    _wait_for(lambda: prompts == ["first"])
+    item = client.post(f"/api/conversations/{cid}/queue", json={"text": "later"}).json()
+    client.delete(f"/api/conversations/{cid}/queue/{item['id']}")
+    queues = [[q["text"] for q in p["items"]] for p in sent if p["type"] == "queue"]
+    assert queues == [["later"], []]
+    gate.release()
+
+
+def test_queue_is_sent_at_startup(client, gated_agent):
+    """A restart killed the turn the queue was waiting on: send it now."""
+    prompts, gate = gated_agent
+    cid = client.post("/api/conversations", json={"title": "q"}).json()["id"]
+    web_server.conv_store.queue_message(cid, "left over")
+    web_server.drain_all_queues()
+    _wait_for(lambda: prompts == ["left over"])
+    gate.release()
+
+
+def test_archive_and_delete_drop_the_queue(client):
+    a = client.post("/api/conversations", json={"title": "a"}).json()["id"]
+    b = client.post("/api/conversations", json={"title": "b"}).json()["id"]
+    web_server.conv_store.queue_message(a, "x")
+    web_server.conv_store.queue_message(b, "y")
+    client.post(f"/api/conversations/{a}/archive")
+    client.delete(f"/api/conversations/{b}")
+    assert client.get("/api/chat/queued").json() == {}

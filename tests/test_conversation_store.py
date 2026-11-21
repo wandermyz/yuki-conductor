@@ -373,3 +373,29 @@ def test_turn_options_persist_without_reordering(tmp_path, field):
     assert getattr(reopened, "set_" + field)(first.id, False)
     assert not getattr(reopened.get_conversation(first.id), field)
     assert not getattr(reopened, "set_" + field)("missing", True)
+
+
+def test_queue_roundtrip(tmp_path: Path):
+    s = ConversationStore(db_path=tmp_path / "t.db")
+    c = s.create_conversation()
+    other = s.create_conversation()
+    att = StoredAttachment(id="f1", filename="a.png", url="/api/files/f1")
+    one = s.queue_message(c.id, "one", [att])
+    two = s.queue_message(c.id, "two")
+    s.queue_message(other.id, "elsewhere")
+
+    assert [q.text for q in s.list_queued(c.id)] == ["one", "two"]
+    assert len(s.list_queued()) == 3
+    assert s.list_queued(c.id)[0].attachments == [att]
+
+    assert s.unqueue_message(c.id, two.id).text == "two"
+    assert s.unqueue_message(c.id, two.id) is None
+    assert s.unqueue_message(other.id, one.id) is None  # wrong conversation
+
+    taken = s.take_queued(c.id)
+    assert [q.id for q in taken] == [one.id]
+    assert s.take_queued(c.id) == []
+    assert [q.text for q in s.list_queued()] == ["elsewhere"]
+
+    s.delete_conversation(other.id)
+    assert s.list_queued() == []

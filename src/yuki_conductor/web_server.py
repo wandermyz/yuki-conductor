@@ -28,7 +28,12 @@ from pydantic import BaseModel
 
 from yuki_conductor import heartbeat, heartbeat_store, web_push, zellij_manager
 from yuki_conductor.config import CLAUDE_WORKING_DIR, WEB_UPLOADS_DIR
-from yuki_conductor.conversation_store import ConversationStore
+from yuki_conductor.conversation_store import (
+    ConversationStore,
+    QueuedMessage,
+    StoredAttachment,
+    StoredMessage,
+)
 from yuki_conductor.harness import HARNESSES, default_harness
 from yuki_conductor.harness.process import cancel_process
 from yuki_conductor.heartbeat_store import CONVERSATION
@@ -102,6 +107,161 @@ def platform_for(conv_id: str):
         if rec.platform.name == session_type:
             return rec.platform
     return None
+
+
+# ------------------------------------------------------------------ web turns
+#
+# A message submitted while a web turn runs is queued in the DB
+# (`queued_messages`) rather than sent. When the conversation's last web turn
+# ends, the whole queue goes out as one message: one turn, not one per message.
+# `_turns` counts web turns started and not yet finished, per conversation.
+# Queuing stores the item and then drains; a turn's end uncounts it and then
+# drains. Whichever comes second sees both, so an item is never stranded, and
+# the check-and-take runs under `_turns_lock`, so two drains can't both send.
+
+_turns_lock = threading.Lock()
+_turns: dict[str, int] = {}
+
+
+def serialize_queued(item: QueuedMessage) -> dict:
+    return {
+        "id": item.id,
+        "conversation_id": item.conversation_id,
+        "text": item.text,
+        "attachments": [asdict(a) for a in item.attachments],
+        "created_at": item.created_at,
+    }
+
+
+def _broadcast_queue(conv_id: str) -> None:
+    ws_manager.broadcast(
+        conv_id,
+        {
+            "type": "queue",
+            "items": [serialize_queued(q) for q in conv_store.list_queued(conv_id)],
+        },
+    )
+
+
+def _stored_attachments(file_ids: list[str]) -> list[StoredAttachment]:
+    """Uploaded file ids as message attachments; 400 on an unknown one."""
+    out = []
+    for fid in file_ids:
+        path = resolve_file(fid)
+        if path is None:
+            raise HTTPException(status_code=400, detail=f"Unknown attachment id {fid}")
+        out.append(StoredAttachment(id=fid, filename=path.name, url=f"/api/files/{fid}"))
+    return out
+
+
+def _launch_turn(conv, text: str, attachments: list[StoredAttachment]) -> StoredMessage:
+    """Store the user's message and run the agent on it in a worker thread.
+
+    The caller has already counted the turn in `_turns`; it's uncounted when
+    the run ends, which then sends anything queued meanwhile.
+    """
+    conv_id = conv.id
+    try:
+        incoming = []
+        for a in attachments:
+            path = resolve_file(a.id)
+            if path is None:
+                logger.warning("Attachment %s for %s is gone; dropped", a.id, conv_id)
+                continue
+            incoming.append(Attachment(filename=path.name, local_path=path))
+
+        user_msg = conv_store.add_message(
+            conv_id, role="user", text=text, attachments=attachments
+        )
+        ws_manager.broadcast(
+            conv_id, {"type": "message", "message": serialize_message(user_msg)}
+        )
+        reopened = conv_store.reopen_if_done(conv_id, "user")
+        if reopened:
+            ws_manager.broadcast(conv_id, {"type": "status", "status": reopened})
+
+        # Auto-title the conversation from the first message.
+        is_thread_start = conv.claude_session_id is None
+        if is_thread_start and not conv.title and text.strip():
+            title = text.strip().splitlines()[0][:80]
+            conv_store.update_conversation(conv_id, title=title)
+            ws_manager.broadcast(conv_id, {"type": "title", "title": title})
+
+        msg = IncomingMessage(
+            platform="web",
+            conversation_key=conv_id,
+            message_id=user_msg.id,
+            text=text,
+            attachments=incoming,
+            is_thread_start=is_thread_start,
+            title_hint=user_msg.text[:80] if is_thread_start else None,
+            model=conv.model,
+            wait_for_mcp=bool(conv.wait_for_mcp),
+            skip_permissions=bool(conv.skip_permissions),
+            # Runs in the conversation's project, if it has one.
+            cwd=project_store.get_path(conv.project) if conv.project else None,
+        )
+        threading.Thread(
+            target=_run_turn,
+            args=(WebPlatform(conv_store, ws_manager), msg),
+            name=f"web-msg-{user_msg.id}",
+            daemon=True,
+        ).start()
+    except BaseException:
+        _turn_ended(conv_id)
+        raise
+    return user_msg
+
+
+def _run_turn(platform: WebPlatform, msg: IncomingMessage) -> None:
+    try:
+        handle_incoming_message(platform, msg)
+    except Exception:
+        logger.exception("Web turn failed for %s", msg.conversation_key)
+    finally:
+        _turn_ended(msg.conversation_key)
+
+
+def _turn_ended(conv_id: str) -> None:
+    with _turns_lock:
+        left = _turns.get(conv_id, 0) - 1
+        if left > 0:
+            _turns[conv_id] = left
+        else:
+            _turns.pop(conv_id, None)
+    drain_queue(conv_id)
+
+
+def drain_queue(conv_id: str) -> bool:
+    """Send a conversation's queue as one message, unless a web turn runs.
+
+    Returns whether a turn was started.
+    """
+    with _turns_lock:
+        if _turns.get(conv_id):
+            return False
+        items = conv_store.take_queued(conv_id)
+        if not items:
+            return False
+        conv = conv_store.get_conversation(conv_id)
+        if conv is None or conv.archived_at is not None:
+            return False
+        _turns[conv_id] = 1
+    _broadcast_queue(conv_id)
+    text = "\n\n".join(t for t in (q.text.strip() for q in items) if t)
+    attachments = [a for q in items for a in q.attachments]
+    try:
+        _launch_turn(conv, text, attachments)
+    except Exception:
+        logger.exception("Sending the queue of %s failed", conv_id)
+        return False
+    return True
+
+
+def drain_all_queues() -> None:
+    """At startup no turn is running, so whatever was queued goes out now."""
+    for conv_id in {q.conversation_id for q in conv_store.list_queued()}:
+        drain_queue(conv_id)
 
 
 def _slack_thread_url(channel_id: str, thread_ts: str) -> str:
@@ -470,6 +630,7 @@ def create_api() -> FastAPI:
         """Hide a conversation from every web view; its rows stay in the DB."""
         if not conv_store.archive_conversation(conv_id):
             raise HTTPException(status_code=404, detail="Conversation not found")
+        conv_store.take_queued(conv_id)
         heartbeat.target_gone(CONVERSATION, conv_id)
         return {"ok": True}
 
@@ -515,69 +676,45 @@ def create_api() -> FastAPI:
             raise HTTPException(status_code=404, detail="Conversation not found")
         if not body.text.strip() and not body.attachment_ids:
             raise HTTPException(status_code=400, detail="Empty message")
+        attachments = _stored_attachments(body.attachment_ids)
+        with _turns_lock:
+            _turns[conv_id] = _turns.get(conv_id, 0) + 1
+        return serialize_message(_launch_turn(conv, body.text, attachments))
 
-        # Resolve uploaded files into Attachment objects for Claude.
-        incoming_attachments: list[Attachment] = []
-        stored_atts = []
-        for fid in body.attachment_ids:
-            path = resolve_file(fid)
-            if path is None:
-                raise HTTPException(status_code=400, detail=f"Unknown attachment id {fid}")
-            incoming_attachments.append(Attachment(filename=path.name, local_path=path))
-            stored_atts.append(
-                {"id": fid, "filename": path.name, "url": f"/api/files/{fid}", "mime_type": None}
-            )
+    @api.get("/api/chat/queued")
+    def get_queued():
+        """Every conversation's queued messages: {conv_id: [item, ...]}."""
+        out: dict[str, list[dict]] = {}
+        for item in conv_store.list_queued():
+            out.setdefault(item.conversation_id, []).append(serialize_queued(item))
+        return out
 
-        # Persist the user message immediately and broadcast it.
-        from yuki_conductor.conversation_store import StoredAttachment
+    @api.post("/api/conversations/{conv_id}/queue", status_code=201)
+    def queue_message(conv_id: str, body: MessageCreate):
+        """Queue a message for when the conversation's turn ends.
 
-        user_msg = conv_store.add_message(
-            conv_id,
-            role="user",
-            text=body.text,
-            attachments=[StoredAttachment(**a) for a in stored_atts],
-        )
-        ws_manager.broadcast(
-            conv_id, {"type": "message", "message": serialize_message(user_msg)}
-        )
-        reopened = conv_store.reopen_if_done(conv_id, "user")
-        if reopened:
-            ws_manager.broadcast(conv_id, {"type": "status", "status": reopened})
+        With no web turn running it goes out at once, so a client that still
+        thought the conversation busy doesn't strand it.
+        """
+        conv = conv_store.get_conversation(conv_id)
+        if not conv or conv.archived_at is not None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        if not body.text.strip() and not body.attachment_ids:
+            raise HTTPException(status_code=400, detail="Empty message")
+        attachments = _stored_attachments(body.attachment_ids)
+        item = conv_store.queue_message(conv_id, body.text, attachments)
+        _broadcast_queue(conv_id)
+        drain_queue(conv_id)
+        return serialize_queued(item)
 
-        # Auto-title the conversation from the first message.
-        is_thread_start = conv.claude_session_id is None
-        if is_thread_start and not conv.title and body.text.strip():
-            title = body.text.strip().splitlines()[0][:80]
-            conv_store.update_conversation(conv_id, title=title)
-            ws_manager.broadcast(conv_id, {"type": "title", "title": title})
-
-        platform = WebPlatform(conv_store, ws_manager)
-        # Resolve working directory from conversation's project
-        msg_cwd = None
-        if conv.project:
-            msg_cwd = project_store.get_path(conv.project)
-        msg = IncomingMessage(
-            platform="web",
-            conversation_key=conv_id,
-            message_id=user_msg.id,
-            text=body.text,
-            attachments=incoming_attachments,
-            is_thread_start=is_thread_start,
-            title_hint=user_msg.text[:80] if is_thread_start else None,
-            model=conv.model,
-            wait_for_mcp=bool(conv.wait_for_mcp),
-            skip_permissions=bool(conv.skip_permissions),
-            cwd=msg_cwd,
-        )
-
-        threading.Thread(
-            target=handle_incoming_message,
-            args=(platform, msg),
-            name=f"web-msg-{user_msg.id}",
-            daemon=True,
-        ).start()
-
-        return serialize_message(user_msg)
+    @api.delete("/api/conversations/{conv_id}/queue/{item_id}")
+    def unqueue_message(conv_id: str, item_id: str):
+        """Take a queued message back; 404 once it's been sent."""
+        item = conv_store.unqueue_message(conv_id, item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Not queued")
+        _broadcast_queue(conv_id)
+        return serialize_queued(item)
 
     class PushMessage(BaseModel):
         conversation_id: str | None = None
@@ -1103,6 +1240,7 @@ mount_static(app)
 def start_web_server() -> FastAPI:
     """Start the web server in a daemon thread (non-blocking). Returns the app."""
     app = create_api()
+    drain_all_queues()
 
     def _run():
         uvicorn.run(app, host=WEB_HOST, port=WEB_PORT, log_level="info")
