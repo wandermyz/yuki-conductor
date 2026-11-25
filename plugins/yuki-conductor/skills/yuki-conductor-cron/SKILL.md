@@ -29,11 +29,12 @@ interval.
 Cron tasks are defined in a single YAML file:
 
 ```
-~/.yuki-conductor/workspace/cron.yaml
+<workspace>/cron.yaml
 ```
 
-(If `YUKI_CONDUCTOR_DATA_DIR` is set in the environment, the base is that
-directory instead of `~/.yuki-conductor`.)
+`<workspace>` is the workspace directory named under "yuki-conductor data
+directories" in your system prompt (by default `~/.yuki-conductor/workspace`;
+`YUKI_CONDUCTOR_WORKSPACE_DIR` moves it).
 
 The daemon hot-reloads this file automatically — no restart is needed after you
 edit it.
@@ -103,7 +104,7 @@ Field notes:
 
 ## How to add or change a task
 
-1. Read `~/.yuki-conductor/workspace/cron.yaml` (create it with a top-level
+1. Read `<workspace>/cron.yaml` (create it with a top-level
    `tasks:` list if it doesn't exist).
 2. Add or edit the relevant entry. Keep existing tasks intact.
 3. Write the file back. Do NOT run `crontab`, `schtasks`, launchd, or Claude

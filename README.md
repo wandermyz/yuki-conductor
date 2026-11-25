@@ -110,6 +110,8 @@ alive with an external supervisor instead.
 | `WEB_HOST` | Web UI bind address (default `127.0.0.1`; set `0.0.0.0` to expose it on the network) |
 | `WEB_FAVICON` | Path to a custom favicon image for the web UI (default: bundled `favicon.svg`) |
 | `YUKI_CONDUCTOR_DATA_DIR` | Override the `~/.yuki-conductor` location |
+| `YUKI_CONDUCTOR_WORKSPACE_DIR` | Put the workspace (cron, models, plugins, attachments…) somewhere else, e.g. a synced folder (default `<data dir>/workspace`). The live DB stays in the data dir |
+| `DB_BACKUP_DIR` | Where hourly DB snapshots go (default `<data dir>/backups`); safe to sync |
 
 For Slack setup, see [docs/slack-app-setup.md](docs/slack-app-setup.md).
 

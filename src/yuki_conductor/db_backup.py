@@ -1,4 +1,4 @@
-"""Periodic snapshots of the workspace SQLite database.
+"""Periodic snapshots of the SQLite database.
 
 The live DB must never be copied as a file: a copy taken mid-write is torn,
 and a sync tool writing into it corrupts it. Instead the daemon takes a

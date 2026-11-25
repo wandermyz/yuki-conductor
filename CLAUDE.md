@@ -75,14 +75,14 @@ examples/
 
 ## Workspace
 
-The personal workspace lives outside the repo at `~/.yuki-conductor/` (override with `YUKI_CONDUCTOR_DATA_DIR`). This is where all personal information — cron task definitions, secrets, attachments, the SQLite DB — is stored. **Do not include any personal information in the repo itself** — anything in the repo can end up in git.
+The data dir lives outside the repo at `~/.yuki-conductor/` (override with `YUKI_CONDUCTOR_DATA_DIR`). This is where all personal information — cron task definitions, secrets, attachments, the SQLite DB — is stored. Inside it, `workspace/` holds the user's config files and artifacts and is meant to be synced (cloud drive, git); `YUKI_CONDUCTOR_WORKSPACE_DIR` (`.env`, `~` expanded) puts it anywhere, e.g. straight into a synced folder. Everything else stays in the data dir, which is never synced. **Do not include any personal information in the repo itself** — anything in the repo can end up in git.
 
 Key files:
 - `~/.yuki-conductor/.env` — secrets and env overrides (loaded at startup, overrides the Claude env file)
 - `~/.yuki-conductor/favicon.png` — optional personal web favicon, served by `/api/favicon` when `.env` sets `WEB_FAVICON` (falls back to the bundled `favicon.svg`)
 - `~/.zshenv.d/claude.zsh` — exports `ANTHROPIC_AUTH_TOKEN` (read from `.secrets/claude-auth-token`), shared with interactive shells; `config.py` sources this one file under `zsh -f` at startup so the LaunchAgent authenticates the same way a terminal does. The endpoint is *not* here — `ANTHROPIC_BASE_URL` lives in `~/.claude/settings.json` under `env`, which applies to Claude Code only rather than every process that starts a zsh.
-- `~/.yuki-conductor/.secrets/` — one secret per file, mode 600 (referenced by the above; never in `workspace/`, which syncs to Obsidian)
-- `~/.yuki-conductor/workspace/yuki-conductor.db` — SQLite database for session and model tracking
+- `~/.yuki-conductor/.secrets/` — one secret per file, mode 600 (referenced by the above; never in the workspace, which is synced)
+- `~/.yuki-conductor/yuki-conductor.db` — SQLite database for session and model tracking. Deliberately *not* in the workspace: a sync tool touching a live SQLite file corrupts it (the snapshots in `DB_BACKUP_DIR` are what to sync). `config.migrate_db_file` runs at import, before any store opens the DB: if the data dir has no DB but the workspace does (the old location), it moves it and its `-journal`/`-wal`/`-shm` over — unless a daemon answers on `WEB_PORT`, in which case that old daemon still has it open, so this process uses the workspace copy and the move happens at the next start.
 - `~/.yuki-conductor/backups/` — hourly DB snapshots (see Database Backups; `DB_BACKUP_DIR` in `.env` moves it)
 - `~/.yuki-conductor/workspace/cron.yaml` — Cron task definitions (see `cron.example.yaml` for format)
 - `~/.yuki-conductor/workspace/plugins.yaml` — plugin registry: installed and enabled (see `plugins.example.yaml`)
@@ -563,7 +563,7 @@ runs a fresh session each time. Design: `docs/plans/2026-11-10-heartbeat.md`.
 - `uv run yuki-conductor send -c <conv-id> "text"` — push a message (and `--attach` files) into a web or Slack conversation (see Outbound Messages)
 - `uv run yuki-conductor task show|list|comment|ask|done|pr|create` — the taskboard from a shell (see Taskboard)
 - `uv run yuki-conductor heartbeat set|status|pause|resume|stop` — wake this conversation or task on an interval (see Heartbeat)
-- `uv run yuki-conductor db backup|list|restore` — snapshot the workspace DB now, list snapshots, restore one (daemon stopped; see Database Backups)
+- `uv run yuki-conductor db backup|list|restore` — snapshot the DB now, list snapshots, restore one (daemon stopped; see Database Backups)
 - `uv run yuki-conductor search [--conversations|--tasks] TERMS` / `conversation show <id>` — find and read past work (see Conversation search)
 - `uv run yuki-conductor web rebuild` — rebuild frontend + auto-reload connected browsers
 - `cd web && pnpm dev` — start frontend dev server (proxies /api to port 2333)
@@ -572,8 +572,8 @@ runs a fresh session each time. Design: `docs/plans/2026-11-10-heartbeat.md`.
 ## Database Backups
 
 The daemon snapshots `yuki-conductor.db` into `DB_BACKUP_DIR` (`.env`;
-default `~/.yuki-conductor/backups`, deliberately outside `workspace/`, which
-may sit in a synced or git-backed folder). `db_backup.py`:
+default `~/.yuki-conductor/backups`; unlike the live DB, the snapshots are safe
+to put in a synced folder). `db_backup.py`:
 
 - **Never copy the live file.** A copy taken mid-write is torn, and a sync
   tool writing into a live SQLite file corrupts it. A snapshot is
@@ -748,7 +748,7 @@ Keep the code clean. **No backward compatibility is required.** This project has
 
 ## Architecture
 
-- **Session tracking**: SQLite database at `~/.yuki-conductor/workspace/yuki-conductor.db` maps `thread_ts → (session_id, channel_id, harness)` and `<channel>:<harness> → model`
+- **Session tracking**: SQLite database at `~/.yuki-conductor/yuki-conductor.db` maps `thread_ts → (session_id, channel_id, harness)` and `<channel>:<harness> → model`
 - **Web server**: FastAPI on 127.0.0.1:2333 (env: `WEB_HOST`, `WEB_PORT`), serves React frontend and `/api/sessions` + chat endpoints. Starts in a daemon thread alongside any enabled chat-app receivers.
 - **Concurrency**: slack-bolt's default thread pool (10 threads); each handler blocks on `subprocess.run`
 - **Agent invocation**: `harness.process.run_agent(harness, prompt, ...)` spawns the harness's CLI and reads its stdout line by line; the harness's parser turns each record into a `StreamEvent` (tool calls, text, thinking, tool results) delivered live via `on_event`, and its final state into the returned `RunResult`. See Harnesses.
