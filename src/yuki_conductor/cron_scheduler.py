@@ -361,7 +361,7 @@ def start_cron_scheduler(
 ) -> threading.Event:
     """Initialize workspace and start the cron scheduler thread.
 
-    The scheduler reloads ~/.yuki-conductor/workspace/cron.yaml every 30 seconds, so changes
+    The scheduler reloads `cron.yaml` in the workspace every 30 seconds, so changes
     take effect without restarting the daemon.
 
     `platforms_by_name` maps a platform name (e.g. "slack") to

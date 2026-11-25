@@ -286,8 +286,8 @@ _ATTACHMENTS = (
 def _data_dirs() -> str:
     """Where yuki-conductor keeps its files, and what may go in each.
 
-    Read at render time so a `YUKI_CONDUCTOR_DATA_DIR` override (and the test
-    fixtures that rebind it) shows the real paths.
+    Read at render time so `YUKI_CONDUCTOR_DATA_DIR` / `_WORKSPACE_DIR`
+    overrides (and the test fixtures that rebind them) show the real paths.
     """
     data_dir = config.DATA_DIR
     workspace = config.WORKSPACE_DIR
@@ -302,7 +302,7 @@ def _data_dirs() -> str:
         "`node_modules`, Python virtualenvs or package caches, build output, or "
         "scratch clones; keep those outside the workspace.\n"
         f"- The rest of `{data_dir}` holds yuki-conductor's own system files "
-        "(daemon logs, DB backups, `.env`). They aren't meant for the user in "
+        "(the live database, daemon logs, `.env`). They aren't meant for the user in "
         "normal use; don't add your own files there.\n"
         f"- `{secrets}` holds credentials, one per file. Store any credential "
         "there, never in the workspace, and never echo a secret's contents in "

@@ -1,4 +1,4 @@
-"""`yuki-conductor db backup|list|restore`: the workspace DB's snapshots.
+"""`yuki-conductor db backup|list|restore`: the DB's snapshots.
 
 `backup` and `list` work on the files directly, daemon or not. `restore`
 refuses while the daemon answers, since replacing the DB under a running
@@ -15,7 +15,7 @@ from yuki_conductor import db_backup
 
 
 def register(sub) -> None:
-    db = sub.add_parser("db", help="Back up and restore the workspace database")
+    db = sub.add_parser("db", help="Back up and restore the database")
     dsub = db.add_subparsers(dest="db_command")
     dsub.add_parser("backup", help="Take a snapshot now (then prune old ones)")
     dsub.add_parser("list", help="List snapshots, newest first")

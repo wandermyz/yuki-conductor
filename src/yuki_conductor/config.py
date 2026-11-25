@@ -3,7 +3,10 @@
 import os
 import re
 import shlex
+import shutil
+import socket
 import subprocess
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -60,8 +63,11 @@ _load_claude_env()
 # Loaded second so it can override the Claude env file when needed.
 load_dotenv(DATA_DIR / ".env", override=True)
 
-WORKSPACE_DIR = DATA_DIR / "workspace"
-DB_FILE = WORKSPACE_DIR / "yuki-conductor.db"
+# The user's workspace: config files, notes, attachments. Meant to live in a
+# synced folder (cloud drive, git), so it may point anywhere.
+WORKSPACE_DIR = Path(
+    os.path.expanduser(os.environ.get("YUKI_CONDUCTOR_WORKSPACE_DIR") or DATA_DIR / "workspace")
+)
 CRON_FILE = WORKSPACE_DIR / "cron.yaml"
 PLUGINS_FILE = WORKSPACE_DIR / "plugins.yaml"
 SYSTEM_PROMPT_FILE = WORKSPACE_DIR / "system-prompt.md"
@@ -72,8 +78,48 @@ USER_SKILLS_DIR = Path.home() / ".claude" / "skills"
 ATTACHMENTS_DIR = WORKSPACE_DIR / "attachments"
 UPLOADS_DIR = WORKSPACE_DIR / "uploads"
 WEB_UPLOADS_DIR = UPLOADS_DIR / "web"
-# Where the daemon writes DB snapshots. Outside workspace/ by default, since
-# that may live in a synced or git-backed folder (see db_backup.py).
+
+
+def _daemon_listening() -> bool:
+    port = int(os.environ.get("WEB_PORT", "2333"))
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def migrate_db_file(db_file: Path, workspace_dir: Path) -> Path:
+    """One-time move of the DB from the workspace to the data dir; returns the DB to use.
+
+    Runs at import, before any store opens the DB. While a daemon is up, it
+    still has the old file open (it predates this code), so the move waits for
+    the next start and this process keeps using the old file meanwhile.
+    """
+    legacy = workspace_dir / db_file.name
+    if db_file.exists() or not legacy.exists():
+        return db_file
+    if _daemon_listening():
+        return legacy
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+    # Sidecars first: a hot journal must never be left behind its DB, and if
+    # this stops halfway the DB is still at `legacy` and the next start resumes.
+    for suffix in ("-journal", "-wal", "-shm", ""):
+        src = Path(f"{legacy}{suffix}")
+        if src.exists():
+            shutil.move(src, f"{db_file}{suffix}")
+    print(f"Moved {legacy} to {db_file}", file=sys.stderr)
+    return db_file
+
+
+# The live DB sits in the data dir, never in the workspace: a sync tool
+# uploading or rewriting a SQLite file that's being written corrupts it. The
+# snapshots in DB_BACKUP_DIR are the copies meant for syncing.
+DB_FILE = migrate_db_file(DATA_DIR / "yuki-conductor.db", WORKSPACE_DIR)
+
+
+# Where the daemon writes DB snapshots (see db_backup.py). Unlike the live DB,
+# these are safe to sync: each is written once, checked, and never modified.
 def parse_db_backup_dir(raw: str | None) -> Path:
     return Path(os.path.expanduser(raw)) if raw and raw.strip() else DATA_DIR / "backups"
 
