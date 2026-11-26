@@ -49,6 +49,10 @@ export interface Task {
   /** As GitHub last showed it; null until first checked. */
   pr_state: PrState | null;
   parent_task_id: number | null;
+  /** Tasks that must be Done before this one is first picked up. */
+  depends_on: number[];
+  /** The dependencies still holding back its first pickup. */
+  blocked_by: number[];
   cleanup_error: string | null;
   editable: boolean;
   created_at: number;
@@ -77,6 +81,9 @@ export interface TaskDetail extends Task {
   comments: TaskComment[];
   children: TaskRef[];
   parent: TaskRef | null;
+  dependencies: TaskRef[];
+  /** Tasks that depend on this one. */
+  dependents: TaskRef[];
 }
 
 export interface BoardState {
@@ -93,6 +100,7 @@ export interface TaskInput {
   use_worktree: boolean;
   wait_for_mcp: boolean;
   skip_permissions: boolean;
+  depends_on: number[];
   body: string;
 }
 

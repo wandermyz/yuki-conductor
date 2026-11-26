@@ -112,6 +112,11 @@ function TaskRow({
           {task.pr_url && <PrMarker url={task.pr_url} state={task.pr_state} />}
           {task.heartbeat && <HeartbeatMark hb={task.heartbeat} />}
           {task.comment_count ? <span>💬 {task.comment_count}</span> : null}
+          {task.blocked_by.length > 0 && (
+            <span className="task-row-blocked" title="Starts once these tasks are Done">
+              ⏳ {task.blocked_by.map((id) => `#${id}`).join(", ")}
+            </span>
+          )}
           <span className="task-row-time">{formatWhen(task.updated_at)}</span>
         </span>
         {!task.harness_enabled && task.status === "todo" && (
@@ -535,6 +540,7 @@ export default function TasksView({
         <TaskForm
           task={form === "edit" && shownDetail ? shownDetail : undefined}
           picked={form === "edit" ? undefined : form}
+          tasks={tasks}
           harnesses={harnesses}
           projects={projects}
           onCancel={() => setForm(null)}

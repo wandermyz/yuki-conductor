@@ -53,7 +53,7 @@ _TASK_COLUMNS = (
     "status", "sort_order", "session_id", "worktree_path", "branch", "pr_url",
     "pr_state", "pr_checked_at", "asked_input", "done_requested", "parent_task_id",
     "cleanup_error", "created_at", "updated_at", "started_at", "done_at", "archived_at",
-    "wait_for_mcp", "skip_permissions", "heartbeat_return_status",
+    "wait_for_mcp", "skip_permissions", "heartbeat_return_status", "depends_on",
 )
 _COMMENT_COLUMNS = (
     "id", "task_id", "author", "body", "quote_comment_id", "attachments",
@@ -66,7 +66,7 @@ _UPDATABLE = frozenset({
     "title", "body", "attachments", "project", "harness", "model", "use_worktree",
     "session_id", "worktree_path", "branch", "pr_url", "pr_state", "pr_checked_at",
     "asked_input", "done_requested", "cleanup_error",
-    "wait_for_mcp", "skip_permissions",
+    "wait_for_mcp", "skip_permissions", "depends_on",
 })
 
 
@@ -102,6 +102,8 @@ class Task:
     # Set while a heartbeat tick runs (In Progress): where a quiet tick
     # returns the task. Cleared by any other status change.
     heartbeat_return_status: str | None = None
+    # Tasks that must be Done before this one is first picked up.
+    depends_on: list[int] = field(default_factory=list)
 
     @property
     def editable(self) -> bool:
@@ -136,6 +138,7 @@ class TaskSearchHit:
 def _task(row: tuple) -> Task:
     d = dict(zip(_TASK_COLUMNS, row, strict=True))
     d["attachments"] = json.loads(d["attachments"])
+    d["depends_on"] = json.loads(d["depends_on"])
     d["use_worktree"] = bool(d["use_worktree"])
     d["asked_input"] = bool(d["asked_input"])
     d["done_requested"] = bool(d["done_requested"])
@@ -200,9 +203,12 @@ class TaskStore:
                     "archived_at REAL, "
                     "wait_for_mcp INTEGER NOT NULL DEFAULT 0, "
                     "skip_permissions INTEGER NOT NULL DEFAULT 0, "
-                    "heartbeat_return_status TEXT)"
+                    "heartbeat_return_status TEXT, "
+                    "depends_on TEXT NOT NULL DEFAULT '[]')"
                 )
                 columns = {row[1] for row in con.execute("PRAGMA table_info(tasks)")}
+                if "depends_on" not in columns:
+                    con.execute("ALTER TABLE tasks ADD COLUMN depends_on TEXT NOT NULL DEFAULT '[]'")
                 if "heartbeat_return_status" not in columns:
                     con.execute("ALTER TABLE tasks ADD COLUMN heartbeat_return_status TEXT")
                 for flag in ("wait_for_mcp", "skip_permissions"):
@@ -265,6 +271,7 @@ class TaskStore:
         wait_for_mcp: bool = False,
         skip_permissions: bool = False,
         draft: bool = False,
+        depends_on: list[int] | None = None,
     ) -> Task:
         """Add a task at the end of the To Do queue, or as a draft, which
         nothing picks up until it's queued."""
@@ -275,12 +282,13 @@ class TaskStore:
                 cur = con.execute(
                     "INSERT INTO tasks (title, body, attachments, project, harness, model, "
                     "use_worktree, status, sort_order, parent_task_id, created_at, "
-                    "updated_at, wait_for_mcp, skip_permissions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "
-                    "(SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks), ?, ?, ?, ?, ?)",
+                    "updated_at, wait_for_mcp, skip_permissions, depends_on) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, "
+                    "(SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks), ?, ?, ?, ?, ?, ?)",
                     (
                         title, body, json.dumps(attachments or []), project, harness, model,
                         int(use_worktree), DRAFT if draft else TODO, parent_task_id, now, now,
-                        int(wait_for_mcp), int(skip_permissions),
+                        int(wait_for_mcp), int(skip_permissions), json.dumps(depends_on or []),
                     ),
                 )
                 task_id = cur.lastrowid
@@ -347,13 +355,54 @@ class TaskStore:
                 con.close()
         return [_task(r) for r in rows]
 
+    def blocked_by(self) -> dict[int, list[int]]:
+        """Every task that may not start yet, with the dependencies it waits on.
+
+        Only a task that was never picked up waits: once it has run, a
+        dependency reopened later doesn't hold back its follow-up turns. A
+        dependency waits until it's Done; an archived (or missing) one no
+        longer counts.
+        """
+        with self._lock:
+            con = self._connect()
+            try:
+                rows = con.execute(
+                    "SELECT t.id, dep.id FROM tasks t, json_each(t.depends_on) d "
+                    "JOIN tasks dep ON dep.id = d.value "
+                    "WHERE t.started_at IS NULL AND t.archived_at IS NULL "
+                    "AND dep.status != ? AND dep.archived_at IS NULL ORDER BY t.id, dep.id",
+                    (DONE,),
+                ).fetchall()
+            finally:
+                con.close()
+        blocked: dict[int, list[int]] = {}
+        for task_id, dep_id in rows:
+            blocked.setdefault(task_id, []).append(dep_id)
+        return blocked
+
+    def dependents(self, task_id: int) -> list[Task]:
+        """Unarchived tasks that depend on this one."""
+        with self._lock:
+            con = self._connect()
+            try:
+                rows = con.execute(
+                    f"SELECT {', '.join('t.' + c for c in _TASK_COLUMNS)} FROM tasks t "
+                    "WHERE t.archived_at IS NULL AND EXISTS "
+                    "(SELECT 1 FROM json_each(t.depends_on) d WHERE d.value = ?) ORDER BY t.id",
+                    (task_id,),
+                ).fetchall()
+            finally:
+                con.close()
+        return [_task(r) for r in rows]
+
     def update_fields(self, task_id: int, **fields) -> Task | None:
         """Write any of the `_UPDATABLE` columns and bump `updated_at`."""
         unknown = set(fields) - _UPDATABLE
         if unknown:
             raise ValueError(f"Not updatable: {', '.join(sorted(unknown))}")
-        if "attachments" in fields:
-            fields["attachments"] = json.dumps(fields["attachments"])
+        for column in ("attachments", "depends_on"):
+            if column in fields:
+                fields[column] = json.dumps(fields[column])
         for flag in ("use_worktree", "asked_input", "done_requested", "wait_for_mcp", "skip_permissions"):
             if flag in fields:
                 fields[flag] = int(fields[flag])
@@ -380,8 +429,9 @@ class TaskStore:
         unknown = set(fields) - _UPDATABLE
         if unknown:
             raise ValueError(f"Not updatable: {', '.join(sorted(unknown))}")
-        if "attachments" in fields:
-            fields["attachments"] = json.dumps(fields["attachments"])
+        for column in ("attachments", "depends_on"):
+            if column in fields:
+                fields[column] = json.dumps(fields[column])
         for flag in ("use_worktree", "wait_for_mcp", "skip_permissions"):
             if flag in fields:
                 fields[flag] = int(fields[flag])

@@ -421,6 +421,14 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
   at. It stays editable and takes comments; Queue (`POST
   /api/tasks/{id}/queue`, `actions.queue`, `task queue <id>`) is its only
   way on, to the end of To Do.
+- **Dependencies**: `tasks.depends_on` (a JSON list of ids; the form's
+  "Waits for", `task create --depends-on ID`) holds a task's *first* pickup
+  until each of them is Done; once it has run, a reopened dependency no
+  longer holds it back. `TaskStore.blocked_by()` is the one query for that
+  (an archived dependency stops counting); the API serves it as
+  `blocked_by`, and the detail as `dependencies` / `dependents`.
+  `actions._check_dependencies` rejects unknown ids, self and cycles.
+  Editable like any field while the task is editable.
 - **Harvester** (`harvester.py`): picks To Do tasks in `sort_order`, per
   harness up to `TASKBOARD_CONCURRENCY` (`.env`, e.g. `claude-code:10,pi:1`;
   defaults 10 / 1 / 1 for anything else), unless paused (`taskboard_state`

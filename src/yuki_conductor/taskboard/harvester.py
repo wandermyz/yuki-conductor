@@ -1,7 +1,7 @@
 """Pick up To Do tasks as harness capacity frees up.
 
-One loop thread walks the queue in order and starts each task whose harness
-is enabled, has a free slot (`config.taskboard_limit`), and isn't paused
+One loop thread walks the queue in order and starts each task whose
+dependencies are all Done, whose harness is enabled, has a free slot (`config.taskboard_limit`), and isn't paused
 board-wide. Each picked task runs on its own thread via `runner.run_turn`.
 Due heartbeat ticks on waiting tasks are picked up the same way, after the
 queue (see `heartbeat.py`).
@@ -12,7 +12,7 @@ import threading
 
 from yuki_conductor import config, heartbeat, taskboard
 from yuki_conductor.harness import HARNESSES
-from yuki_conductor.task_store import IN_PROGRESS, TODO
+from yuki_conductor.task_store import DONE, IN_PROGRESS, TODO
 from yuki_conductor.taskboard import runner
 from yuki_conductor.taskboard.transitions import (
     HEARTBEAT_CLAIMABLE,
@@ -39,7 +39,8 @@ class Harvester:
         self._wake.set()
 
     def on_transition(self, event: TransitionEvent) -> None:
-        if event.to_status == TODO:
+        # Done may unblock a task that depends on it.
+        if event.to_status in (TODO, DONE):
             self.wake()
 
     def running(self) -> dict[str, int]:
@@ -71,9 +72,12 @@ class Harvester:
         counts = self.running()
         with self._lock:
             finishing = set(self._threads)
+        blocked = taskboard.store.blocked_by()
         for task in taskboard.store.list_status(TODO):
             if task.id in finishing:
                 continue  # back in To Do, but its last turn's thread is still exiting
+            if task.id in blocked:
+                continue  # waits for its dependencies to be Done
             if task.harness not in HARNESSES:
                 continue  # shown as "harness not enabled" in the UI
             if counts.get(task.harness, 0) >= config.taskboard_limit(task.harness):

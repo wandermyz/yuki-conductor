@@ -81,3 +81,10 @@ def test_reopened_follow_up_names_the_new_worktree():
     assert "reopened" in text and "/wt2" in text and "one more thing" in text
     taskboard.store.add_comment(task.id, "agent", "on it")
     assert not prompts.was_reopened(taskboard.store.comments(task.id))
+
+
+def test_first_turn_names_dependencies():
+    dep = _task()
+    task = taskboard.store.update_fields(_task().id, depends_on=[dep.id])
+    assert f"This task depends on #{dep.id}" in prompts.first_turn(task, [], "/repo")
+    assert "depends on" not in prompts.first_turn(dep, [], "/repo")
