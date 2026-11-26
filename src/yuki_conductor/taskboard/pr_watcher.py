@@ -1,13 +1,18 @@
 """Follow the pull requests of tasks in Ready for Review.
 
-Nothing polls on a timer: opening the Tasks tab calls `refresh()`, which
-checks each such task's PR once with `gh`, in the background (and the
-refresh button beside a task's PR calls `refresh_one()` for just that one):
+Two ways in:
 
-- merged or closed → Done (which cleans up its worktree);
-- new comments from anyone but the agent → imported onto the timeline as
-  GitHub comments (once each, by URL), and the task goes back to To Do so
-  the agent answers.
+- A background loop (`loop`, every `TASKBOARD_PR_POLL_INTERVAL` seconds)
+  runs `poll()`: one GraphQL query for every such PR's state (`statuses`),
+  so a merged or closed PR moves its task to Done and frees the tasks that
+  wait on it. It reads nothing else, to keep GitHub calls down.
+- Opening the Tasks tab calls `refresh()` → `check_all()`, which checks each
+  PR in full with `gh` (and the refresh button beside a task's PR calls
+  `refresh_one()` for just that one):
+  - merged or closed → Done (which cleans up its worktree);
+  - new comments from anyone but the agent → imported onto the timeline as
+    GitHub comments (once each, by URL), and the task goes back to To Do so
+    the agent answers.
 
 The agent may post as the user's own GitHub account, so its comments are
 told apart by the marker its footer carries (`skills.GITHUB_AGENT_MARKER`),
@@ -50,6 +55,28 @@ def _gh(args: list[str], cwd: str | None) -> object:
     return json.loads(proc.stdout or "null")
 
 
+def _graphql(query: str) -> dict:
+    """Run a GraphQL query and return its `data`. A query with several PRs
+    still answers when some of them fail (gh exits 1, with `data` and
+    `errors` on stdout); those come back as null and the rest are used."""
+    try:
+        proc = subprocess.run(
+            ["gh", "api", "graphql", "-f", f"query={query}"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise GhError(str(exc)) from exc
+    try:
+        payload = json.loads(proc.stdout or "null")
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
+        raise GhError(proc.stderr.strip() or f"gh exited {proc.returncode}")
+    for error in payload.get("errors") or []:
+        logger.warning("GitHub GraphQL: %s", error.get("message"))
+    return payload["data"]
+
+
 def _ts(iso: str | None) -> float:
     if not iso:
         return 0.0
@@ -80,6 +107,37 @@ def pr_state(pr_url: str, cwd: str | None) -> str:
     if pr.get("state") == "closed":
         return "CLOSED"
     return "DRAFT" if pr.get("draft") else "OPEN"
+
+
+# PRs per GraphQL query; well under GitHub's node limits.
+_BATCH = 50
+
+
+def statuses(pr_urls) -> dict[str, str]:
+    """Each PR's `pr_state`, from one GraphQL query per `_BATCH` PRs, across
+    any repos. A PR GitHub couldn't resolve is left out. Raises `GhError`
+    when a whole query fails."""
+    urls = list(dict.fromkeys(pr_urls))
+    result: dict[str, str] = {}
+    for start in range(0, len(urls), _BATCH):
+        chunk = urls[start:start + _BATCH]
+        fields = []
+        for i, url in enumerate(chunk):
+            owner, repo, number = _parse(url)
+            fields.append(
+                f"p{i}: repository(owner: {json.dumps(owner)}, name: {json.dumps(repo)}) "
+                f"{{ pullRequest(number: {number}) {{ state isDraft }} }}"
+            )
+        data = _graphql("query { " + " ".join(fields) + " }")
+        for i, url in enumerate(chunk):
+            pr = (data.get(f"p{i}") or {}).get("pullRequest")
+            if not pr:
+                continue
+            if pr["state"] in ("MERGED", "CLOSED"):
+                result[url] = pr["state"]
+            else:
+                result[url] = "DRAFT" if pr.get("isDraft") else "OPEN"
+    return result
 
 
 def fetch(pr_url: str, cwd: str | None) -> tuple[str, list[dict]]:
@@ -201,6 +259,35 @@ def check_all() -> None:
             logger.exception("Task #%s: PR check failed", task.id)
 
 
+def poll() -> None:
+    """Move each Ready for Review task whose PR was merged or closed to Done,
+    from one batched query; an open PR only has its `pr_state` updated.
+    Comments are left to `check_all`."""
+    tasks = [t for t in taskboard.store.list_status(READY_FOR_REVIEW) if t.pr_url]
+    if not tasks:
+        return
+    try:
+        found = statuses(t.pr_url for t in tasks)
+    except GhError as exc:
+        logger.warning("Couldn't poll the taskboard's PRs: %s", exc)
+        return
+    for task in tasks:
+        state = found.get(task.pr_url)
+        if state is None:
+            logger.warning("Task #%s: GitHub couldn't find %s", task.id, task.pr_url)
+            continue
+        if state != task.pr_state:
+            taskboard.store.update_fields(task.id, pr_state=state)
+            live.task_changed(task.id)
+        try:
+            if state == "MERGED":
+                transition(task.id, DONE, reason="PR merged")
+            elif state == "CLOSED":
+                transition(task.id, DONE, reason="PR closed without merging")
+        except InvalidTransition:
+            pass  # moved meanwhile; the next full check sees it
+
+
 def refresh_one(task: Task) -> None:
     """Check one task's PR now. Ready for Review gets the full `check`;
     any other status only has its `pr_state` updated, since comments and
@@ -234,3 +321,17 @@ def refresh() -> bool:
 
     threading.Thread(target=run, name="taskboard-pr-refresh", daemon=True).start()
     return True
+
+
+def loop(stop: threading.Event, interval: float) -> None:
+    """`poll()` every `interval` seconds until `stop` is set, skipping a
+    round that a tab-load refresh is already covering."""
+    while not stop.wait(interval):
+        if not _refreshing.acquire(blocking=False):
+            continue
+        try:
+            poll()
+        except Exception:
+            logger.exception("Taskboard PR poll failed")
+        finally:
+            _refreshing.release()

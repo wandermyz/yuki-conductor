@@ -18,14 +18,15 @@ active_harvester = None
 
 
 def start_taskboard(ws_manager=None) -> threading.Event:
-    """Recover tasks left In Progress, then start picking up To Do tasks.
+    """Recover tasks left In Progress, then start picking up To Do tasks and
+    polling the PRs of tasks in Ready for Review.
 
     `ws_manager` is the web `ConnectionManager` the board reports live state
     to. Returns an event that stops the loop when set.
     """
     global active_harvester
-    from yuki_conductor import heartbeat
-    from yuki_conductor.taskboard import cleanup, live, notify, transitions
+    from yuki_conductor import config, heartbeat
+    from yuki_conductor.taskboard import cleanup, live, notify, pr_watcher, transitions
     from yuki_conductor.taskboard.harvester import Harvester
 
     live.attach(ws_manager)
@@ -41,6 +42,13 @@ def start_taskboard(ws_manager=None) -> threading.Event:
     threading.Thread(
         target=active_harvester.loop, args=(stop,), name="taskboard-harvester", daemon=True
     ).start()
+    if config.TASKBOARD_PR_POLL_INTERVAL > 0:
+        threading.Thread(
+            target=pr_watcher.loop,
+            args=(stop, config.TASKBOARD_PR_POLL_INTERVAL),
+            name="taskboard-pr-watcher",
+            daemon=True,
+        ).start()
     return stop
 
 

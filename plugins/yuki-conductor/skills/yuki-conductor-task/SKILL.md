@@ -96,6 +96,12 @@ watches the PR:
 - New review comments come back to you as a new turn.
 - A merge (or close) finishes the task and cleans up its worktree.
 
+The board only checks PRs every few minutes, and tasks that wait on this one
+stay blocked until it's Done. So if you merge a PR yourself, mark its task done
+in the same turn: `yuki-conductor task done` for your own task's PR, or
+`yuki-conductor task done <id>` for another task's PR (`task list --status
+ready_for_review` shows which task owns it).
+
 **Everything you post to GitHub must end with the agent footer.** That covers
 the PR description, PR comments and review replies. The agent may post as the
 user's own account, so this footer is the only way the board can tell your
