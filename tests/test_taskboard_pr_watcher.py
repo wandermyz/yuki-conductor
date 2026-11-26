@@ -1,5 +1,7 @@
 """The PR watcher, with `gh api` mocked (GitHub REST shapes)."""
 
+import re
+import subprocess
 import threading
 
 import pytest
@@ -52,10 +54,10 @@ def gh(monkeypatch):
     return Gh
 
 
-def _in_review():
+def _in_review(pr_url=PR):
     task = taskboard.store.create(title="t", project="p", harness="claude-code", use_worktree=False)
     claim(task.id)
-    taskboard.store.update_fields(task.id, pr_url=PR)
+    taskboard.store.update_fields(task.id, pr_url=pr_url)
     transition(task.id, READY_FOR_REVIEW, reason="PR opened")
     return task
 
@@ -220,3 +222,128 @@ def test_check_skips_a_task_that_left_review(gh):
     gh.pr = {"state": "closed", "merged": True}
     pr_watcher.check(stale)
     assert _status(task) == TODO and gh.calls == []
+
+
+@pytest.fixture
+def graphql(monkeypatch):
+    """`graphql.prs` maps "owner/repo#n" to a GraphQL pullRequest node (or None)."""
+
+    class Fake:
+        prs: dict = {}
+        queries: list = []
+
+    def fake(query):
+        Fake.queries.append(query)
+        data = {}
+        for alias, owner, repo, number in re.findall(
+            r'(p\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) '
+            r"\{ pullRequest\(number: (\d+)\)", query
+        ):
+            data[alias] = {"pullRequest": Fake.prs.get(f"{owner}/{repo}#{number}")}
+        return data
+
+    Fake.prs, Fake.queries = {}, []
+    monkeypatch.setattr(pr_watcher, "_graphql", fake)
+    monkeypatch.setattr(pr_watcher, "_gh", lambda *a: pytest.fail("poll made a REST call"))
+    return Fake
+
+
+OTHER = "https://github.com/x/y/pull/3"
+
+
+def test_poll_finishes_merged_and_closed_prs_in_one_query(graphql):
+    merged, closed, still_open = _in_review(), _in_review(OTHER), _in_review(
+        "https://github.com/o/r/pull/8")
+    graphql.prs = {"o/r#7": {"state": "MERGED", "isDraft": False},
+                   "x/y#3": {"state": "CLOSED", "isDraft": False},
+                   "o/r#8": {"state": "OPEN", "isDraft": True}}
+    pr_watcher.poll()
+    assert len(graphql.queries) == 1
+    assert _status(merged) == DONE and _status(closed) == DONE
+    assert taskboard.store.comments(merged.id)[-1].body.endswith("PR merged")
+    assert taskboard.store.get(closed.id).pr_state == "CLOSED"
+    assert _status(still_open) == READY_FOR_REVIEW
+    assert taskboard.store.get(still_open.id).pr_state == "DRAFT"
+
+
+def test_poll_finishes_a_pr_already_recorded_as_merged(graphql):
+    """The ↻ button can record MERGED while the task is still running."""
+    task = _in_review()
+    taskboard.store.update_fields(task.id, pr_state="MERGED")
+    graphql.prs = {"o/r#7": {"state": "MERGED", "isDraft": False}}
+    pr_watcher.poll()
+    assert _status(task) == DONE
+
+
+def test_poll_ignores_comments_and_unknown_prs(graphql):
+    task = _in_review()
+    other = _in_review(OTHER)
+    graphql.prs = {"o/r#7": {"state": "OPEN", "isDraft": False}}  # x/y#3: not found
+    pr_watcher.poll()
+    assert _status(task) == READY_FOR_REVIEW and _status(other) == READY_FOR_REVIEW
+    assert _github(task) == [] and taskboard.store.get(task.id).pr_checked_at is None
+
+
+def test_poll_without_review_prs_asks_nothing(graphql):
+    task = taskboard.store.create(title="t", project="p", harness="claude-code", use_worktree=False)
+    transition(task.id, NEEDS_INPUT, reason="x")
+    taskboard.store.update_fields(task.id, pr_url=PR)
+    pr_watcher.poll()
+    assert graphql.queries == []
+
+
+def test_poll_failure_leaves_tasks_alone(monkeypatch):
+    task = _in_review()
+
+    def fail(query):
+        raise pr_watcher.GhError("HTTP 502")
+
+    monkeypatch.setattr(pr_watcher, "_graphql", fail)
+    pr_watcher.poll()
+    assert _status(task) == READY_FOR_REVIEW
+
+
+def test_statuses_batches_large_lists(graphql, monkeypatch):
+    monkeypatch.setattr(pr_watcher, "_BATCH", 2)
+    pr_watcher.statuses([f"https://github.com/o/r/pull/{n}" for n in range(5)])
+    assert [q.count("pullRequest(") for q in graphql.queries] == [2, 2, 1]
+
+
+def test_graphql_reads_partial_answers(monkeypatch):
+    """gh exits 1 when one PR fails, but the others are still in `data`."""
+    out = ('{"data": {"p0": {"pullRequest": {"state": "OPEN", "isDraft": false}}, '
+           '"p1": {"pullRequest": null}}, "errors": [{"message": "Could not resolve"}]}')
+    seen = {}
+
+    def run(args, **kw):
+        seen["args"] = args
+        return subprocess.CompletedProcess(args, 1, out, "gh: Could not resolve")
+
+    monkeypatch.setattr(pr_watcher.subprocess, "run", run)
+    assert pr_watcher.statuses([PR, "https://github.com/o/r/pull/8", PR]) == {PR: "OPEN"}
+    assert seen["args"][:3] == ["gh", "api", "graphql"]
+
+
+def test_graphql_raises_when_the_query_fails(monkeypatch):
+    monkeypatch.setattr(
+        pr_watcher.subprocess, "run",
+        lambda args, **kw: subprocess.CompletedProcess(args, 1, "", "HTTP 502"),
+    )
+    with pytest.raises(pr_watcher.GhError, match="HTTP 502"):
+        pr_watcher.statuses([PR])
+
+
+def test_loop_polls_until_stopped(monkeypatch):
+    stop = threading.Event()
+    runs = []
+
+    def poll():
+        runs.append(1)
+        if len(runs) == 2:
+            stop.set()
+
+    monkeypatch.setattr(pr_watcher, "poll", poll)
+    thread = threading.Thread(target=pr_watcher.loop, args=(stop, 0.01))
+    thread.start()
+    thread.join(5)
+    assert not thread.is_alive() and runs == [1, 1]

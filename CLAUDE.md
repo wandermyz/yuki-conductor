@@ -464,14 +464,20 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
   (`run_agent(task_id=...)`), and the bundled `yuki-conductor-task` skill
   documents `yuki-conductor task show|list|comment|ask|done|pr|create`
   (`cli_task.py`, over HTTP like `send`).
-- **PRs** (`pr_watcher.py`): nothing polls on a timer. Each time the Tasks
-  tab loads (page load, refresh, switching to the tab) it calls
-  `POST /api/taskboard/pr-refresh`, which starts one background check
-  (`pr_watcher.refresh`; skipped while one is already running). The ↻ beside
+- **PRs** (`pr_watcher.py`): a `taskboard-pr-watcher` thread runs `poll()`
+  every `TASKBOARD_PR_POLL_INTERVAL` seconds (`.env`, default 300, `0` =
+  off). It asks about every Ready for Review PR in **one** GraphQL query
+  (`statuses`, `_BATCH` PRs per query, across repos) and only acts on the
+  state: merged or closed → Done, otherwise `pr_state` is updated. Comments
+  are only read by the full check: each time the Tasks tab loads (page load,
+  refresh, switching to the tab) it calls `POST /api/taskboard/pr-refresh`,
+  which starts one background `check_all` (`pr_watcher.refresh`; skipped,
+  like a poll round, while one is already running). The ↻ beside
   a task's PR calls `POST /api/tasks/{id}/pr-refresh` (`actions.refresh_pr`),
   which checks just that PR and waits: the full check in Ready for Review,
-  only `pr_state` otherwise. Each Ready for
-  Review task's PR is read over the GitHub REST API via `gh api` (not
+  only `pr_state` otherwise. The task skill also tells agents that merge a PR
+  to `task done` its task, so dependents don't wait for the next poll. The full
+  check reads each Ready for Review PR over the GitHub REST API via `gh api` (not
   `gh pr view`: its GraphQL authors can't tell bots apart). Merged or closed →
   Done; new comments → imported as `github` comments (once each, by URL) and
   the task goes to To Do; the page picks the changes up as task broadcasts.

@@ -169,6 +169,12 @@ def parse_taskboard_concurrency(raw: str | None) -> dict[str, int]:
 TASKBOARD_CONCURRENCY = parse_taskboard_concurrency(os.environ.get("TASKBOARD_CONCURRENCY"))
 
 
+# How often (seconds) the board asks GitHub whether the PRs of tasks in Ready
+# for Review were merged or closed; 0 turns the background poll off (opening
+# the Tasks tab still checks). One GraphQL query covers every PR.
+TASKBOARD_PR_POLL_INTERVAL = int(os.environ.get("TASKBOARD_PR_POLL_INTERVAL", "300"))
+
+
 def taskboard_limit(harness: str) -> int:
     """Max concurrent taskboard tasks for `harness`."""
     return TASKBOARD_CONCURRENCY.get(harness, TASKBOARD_DEFAULT_LIMITS.get(harness, 1))

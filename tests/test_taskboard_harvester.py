@@ -7,7 +7,7 @@ import pytest
 from yuki_conductor import config, taskboard
 from yuki_conductor.task_store import IN_PROGRESS, NEEDS_INPUT, TODO
 from yuki_conductor.taskboard import harvester as harvester_mod
-from yuki_conductor.taskboard import transitions
+from yuki_conductor.taskboard import pr_watcher, transitions
 from yuki_conductor.taskboard.harvester import Harvester
 from yuki_conductor.taskboard.transitions import claim, transition
 
@@ -166,6 +166,7 @@ def test_start_taskboard_recovers_and_broadcasts(monkeypatch):
 
     monkeypatch.setattr(taskboard, "active_harvester", None)
     monkeypatch.setattr(harvester_mod.Harvester, "loop", lambda self, stop: None)
+    monkeypatch.setattr(pr_watcher, "loop", lambda stop, interval: None)
     task = _new()
     claim(task.id)
     try:
