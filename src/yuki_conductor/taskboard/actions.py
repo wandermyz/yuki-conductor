@@ -79,6 +79,34 @@ def _check_model(harness: str, model: str | None) -> None:
             raise BoardError(400, str(exc)) from None
 
 
+def _check_dependencies(task_id: int | None, ids: list[int]) -> list[int]:
+    """The dependency ids, deduplicated and in order, once each is known to
+    exist and none leads back to `task_id`, which would wait forever."""
+    ids = list(dict.fromkeys(ids))
+    for dep_id in ids:
+        if dep_id == task_id:
+            raise BoardError(400, "A task can't depend on itself")
+        try:
+            get(dep_id)
+        except BoardError:
+            raise BoardError(400, f"Dependency #{dep_id} not found") from None
+    if task_id is not None:
+        # A new task has no id yet, so nothing can depend on it.
+        seen: set[int] = set()
+        stack = list(ids)
+        while stack:
+            current = stack.pop()
+            if current == task_id:
+                raise BoardError(400, f"That would make #{task_id} wait on itself (a cycle)")
+            if current in seen:
+                continue
+            seen.add(current)
+            dep = taskboard.store.get(current)
+            if dep is not None:
+                stack.extend(dep.depends_on)
+    return ids
+
+
 def create(
     *,
     title: str,
@@ -92,8 +120,10 @@ def create(
     attachments: list[str] | None = None,
     parent_task_id: int | None = None,
     draft: bool = False,
+    depends_on: list[int] | None = None,
 ) -> Task:
-    """`draft`: save it without queueing it; `queue` sends it to To Do later."""
+    """`draft`: save it without queueing it; `queue` sends it to To Do later.
+    `depends_on`: tasks that must be Done before this one is picked up."""
     harness = harness or default_harness()
     title = _check_title(title, body)
     _check_project(project)
@@ -101,6 +131,7 @@ def create(
     _check_model(harness, model)
     if parent_task_id is not None:
         get(parent_task_id)
+    depends_on = _check_dependencies(None, depends_on or [])
     task = taskboard.store.create(
         title=title,
         project=project,
@@ -113,6 +144,7 @@ def create(
         attachments=attachments,
         parent_task_id=parent_task_id,
         draft=draft,
+        depends_on=depends_on,
     )
     _changed(task.id)
     return task
@@ -143,6 +175,8 @@ def edit(task_id: int, **fields) -> Task:
         fields["model"] = None
     if "model" in fields:
         _check_model(fields.get("harness", task.harness), fields["model"])
+    if "depends_on" in fields:
+        fields["depends_on"] = _check_dependencies(task_id, fields["depends_on"])
     if fields and not taskboard.store.edit_if_untouched(task_id, **fields):
         raise BoardError(409, "The task was picked up before the edit could be saved")
     _changed(task_id)

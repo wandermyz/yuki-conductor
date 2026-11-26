@@ -197,3 +197,64 @@ def test_task_still_finishing_is_not_picked_up_again():
     h.join(5)
     assert h.tick() == [task.id]
     h.join(5)
+
+
+def test_waits_for_dependencies_to_be_done():
+    gate = Gate()
+    h = Harvester(run_turn=gate)
+    first, second = _new(title="first"), _new(title="second")
+    blocked = taskboard.store.create(
+        title="after both", project="p", harness="claude-code", use_worktree=False,
+        depends_on=[first.id, second.id],
+    )
+    later = _new(title="independent")
+    # The blocked task is skipped; the queue behind it isn't held up.
+    assert h.tick() == [first.id, second.id]
+    gate.release.set()
+    h.join(5)
+    assert h.tick() == [later.id]
+    h.join(5)
+    transition(first.id, "done", reason="test")
+    assert h.tick() == []  # still waits for the second one
+    transition(second.id, "done", reason="test")
+    assert h.tick() == [blocked.id]
+    h.join(5)
+
+
+def test_archived_dependency_stops_blocking():
+    h = Harvester(run_turn=lambda task_id: transition(task_id, NEEDS_INPUT, reason="x"))
+    dep = taskboard.store.create(
+        title="dep", project="p", harness="claude-code", use_worktree=False, draft=True
+    )
+    task = taskboard.store.create(
+        title="t", project="p", harness="claude-code", use_worktree=False, depends_on=[dep.id]
+    )
+    assert h.tick() == []
+    taskboard.store.archive(dep.id, expected="draft")
+    assert h.tick() == [task.id]
+    h.join(5)
+
+
+def test_only_the_first_pickup_waits():
+    h = Harvester(run_turn=lambda task_id: transition(task_id, NEEDS_INPUT, reason="x"))
+    dep = _new(title="dep")
+    task = taskboard.store.create(
+        title="t", project="p", harness="claude-code", use_worktree=False, depends_on=[dep.id]
+    )
+    claim(dep.id)
+    transition(dep.id, "done", reason="test")
+    assert h.tick() == [task.id]
+    h.join(5)
+    # The dependency is reopened; a comment on the dependent still runs.
+    transition(dep.id, TODO, reason="reopened")
+    transition(dep.id, NEEDS_INPUT, reason="cancelled")
+    transition(task.id, TODO, reason="new comment")
+    assert h.tick() == [task.id]
+    h.join(5)
+
+
+def test_done_wakes_the_harvester():
+    h = Harvester()
+    task = _new()
+    h.on_transition(transitions.TransitionEvent(task, IN_PROGRESS, "done", "test", False))
+    assert h._wake.is_set()

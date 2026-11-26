@@ -217,3 +217,21 @@ def test_create_draft_and_queue(api, capsys):
     main(["task", "queue", "1"])
     assert "Queued task #1" in capsys.readouterr().out
     assert taskboard.store.get(1).status == "todo"
+
+
+def test_create_with_dependencies_and_show_them(api, capsys):
+    a, b = _task(), _task()
+    main(["task", "create", "--project", "proj", "--title", "Later",
+          "--depends-on", str(a.id), "--depends-on", str(b.id)])
+    out = capsys.readouterr().out
+    assert f"It starts once #{a.id}, #{b.id} are done" in out
+    created = taskboard.store.list_tasks()[-1]
+    assert created.depends_on == [a.id, b.id]
+    main(["task", "show", str(created.id)])
+    out = capsys.readouterr().out
+    assert f"- Depends on: #{a.id} Fix it (todo)" in out
+    assert f"- Waiting on #{a.id}, #{b.id} to be done before it starts" in out
+    main(["task", "show", str(a.id)])
+    assert f"- Blocks: #{created.id} Later (todo)" in capsys.readouterr().out
+    main(["task", "list", "--status", "todo"])
+    assert f"#{created.id}\tTo Do (waiting on #{a.id}, #{b.id})\tproj\tLater" in capsys.readouterr().out

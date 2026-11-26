@@ -503,3 +503,33 @@ def test_draft_can_be_archived(client):
     task = _create(client, draft=True)
     assert client.post(f"/api/tasks/{task['id']}/archive").status_code == 200
     assert client.get(f"/api/tasks/{task['id']}").status_code == 404
+
+
+def test_dependencies(client):
+    dep = _create(client, title="Build it")
+    task = _create(client, title="Ship it", depends_on=[dep["id"], dep["id"]])
+    assert task["depends_on"] == [dep["id"]]
+    assert task["blocked_by"] == [dep["id"]]
+    listed = {t["id"]: t for t in client.get("/api/tasks").json()}
+    assert listed[task["id"]]["blocked_by"] == [dep["id"]]
+    assert listed[dep["id"]]["blocked_by"] == []
+    got = client.get(f"/api/tasks/{task['id']}").json()
+    assert got["dependencies"] == [{"id": dep["id"], "title": "Build it", "status": TODO}]
+    assert client.get(f"/api/tasks/{dep['id']}").json()["dependents"][0]["id"] == task["id"]
+
+    claim(dep["id"])
+    transition(dep["id"], "done", reason="test")
+    assert client.get(f"/api/tasks/{task['id']}").json()["blocked_by"] == []
+
+
+def test_dependency_validation(client):
+    a = _create(client)
+    assert client.post("/api/tasks", json={"title": "x", "project": "proj", "depends_on": [999]}).status_code == 400
+    assert client.patch(f"/api/tasks/{a['id']}", json={"depends_on": [a["id"]]}).status_code == 400
+    b = _create(client, depends_on=[a["id"]])
+    c = _create(client, depends_on=[b["id"]])
+    r = client.patch(f"/api/tasks/{a['id']}", json={"depends_on": [c["id"]]})
+    assert r.status_code == 400 and "cycle" in r.json()["detail"]
+    r = client.patch(f"/api/tasks/{c['id']}", json={"depends_on": [a["id"]]})
+    assert r.status_code == 200 and r.json()["depends_on"] == [a["id"]]
+    assert client.patch(f"/api/tasks/{c['id']}", json={"depends_on": None}).status_code == 400

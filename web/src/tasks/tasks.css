@@ -307,6 +307,16 @@
   color: #b45309;
 }
 
+.task-row-blocked {
+  white-space: nowrap;
+}
+
+.task-note {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
 .task-old-toggle {
   display: flex;
   align-items: center;
@@ -731,6 +741,29 @@ a.pr-marker:hover {
   min-height: 36px;
   display: inline-flex;
   align-items: center;
+}
+
+.task-form-deps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 14px;
+}
+
+.task-form-deps-label {
+  color: var(--text-h);
+}
+
+.task-form-deps select {
+  max-width: 100%;
+  min-height: 32px;
+  font-size: 13px;
+}
+
+.task-form-deps small {
+  color: var(--text);
+  font-size: 12px;
 }
 
 .task-form-files {

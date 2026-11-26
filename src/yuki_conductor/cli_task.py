@@ -54,6 +54,10 @@ def register(sub) -> argparse.ArgumentParser:
     create.add_argument("--skip-permissions", action="store_true", help="Bypass approval checks")
     create.add_argument("--attach", "-a", action="append", default=[], metavar="PATH")
     create.add_argument("--draft", action="store_true", help="Save it without queueing it")
+    create.add_argument(
+        "--depends-on", action="append", type=int, default=[], metavar="ID",
+        help="A task that must be done before this one starts (repeatable)",
+    )
     create.add_argument("body", nargs="?", default="", help="Task body (Markdown; - for stdin)")
     return task
 
@@ -122,6 +126,13 @@ def format_task(task: dict) -> str:
         lines.append(f"- Parent: #{task['parent']['id']} {task['parent']['title']}")
     for child in task.get("children") or []:
         lines.append(f"- Follow-up: #{child['id']} {child['title']} ({child['status']})")
+    for dep in task.get("dependencies") or []:
+        lines.append(f"- Depends on: #{dep['id']} {dep['title']} ({dep['status']})")
+    for dep in task.get("dependents") or []:
+        lines.append(f"- Blocks: #{dep['id']} {dep['title']} ({dep['status']})")
+    if task.get("blocked_by"):
+        waiting = ", ".join(f"#{i}" for i in task["blocked_by"])
+        lines.append(f"- Waiting on {waiting} to be done before it starts")
     for att in task["attachments"]:
         lines.append(f"- Attachment: {att['path']}")
     lines += ["", task["body"] or "_(no description)_", "", "## Timeline"]
@@ -153,7 +164,10 @@ def handle(args) -> None:
                 continue
             if args.project and t["project"] != args.project:
                 continue
-            print(f"#{t['id']}\t{t['status_label']}\t{t['project']}\t{t['title']}")
+            waiting = ""
+            if t.get("blocked_by"):
+                waiting = " (waiting on " + ", ".join(f"#{i}" for i in t["blocked_by"]) + ")"
+            print(f"#{t['id']}\t{t['status_label']}{waiting}\t{t['project']}\t{t['title']}")
     elif cmd == "comment":
         task_id, text = _split_id(args.args)
         attachments = _files(args.attach)
@@ -206,10 +220,14 @@ def handle(args) -> None:
             "attachments": _files(args.attach),
             "parent_task_id": env_task_id(),
             "draft": args.draft,
+            "depends_on": args.depends_on,
         }
         t = api_request("POST", "/api/tasks", payload, what="Create")
         kind = "draft" if args.draft else "task"
         print(f"Created {kind} #{t['id']}: {t['title']}")
+        if t.get("blocked_by"):
+            waiting = ", ".join(f"#{i}" for i in t["blocked_by"])
+            print(f"It starts once {waiting} {'is' if len(t['blocked_by']) == 1 else 'are'} done")
     elif cmd == "queue":
         api_request("POST", f"/api/tasks/{args.id}/queue", what="Queue")
         print(f"Queued task #{args.id}")

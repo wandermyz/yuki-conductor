@@ -48,6 +48,12 @@ def _task_header(task: Task, cwd: str) -> str:
     where = f"Project: {task.project}, working directory: {cwd}"
     if task.branch:
         where += f" (a git worktree on branch `{task.branch}`)"
+    if task.depends_on:
+        ids = ", ".join(f"#{i}" for i in task.depends_on)
+        where += (
+            f"\n\nThis task depends on {ids}, which had to be done before it could start; "
+            "`yuki-conductor task show <id>` reads one."
+        )
     return (
         f"# Task #{task.id}: {task.title}\n\n"
         f"{where}\n\n"

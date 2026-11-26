@@ -16,6 +16,7 @@ import { DRAFT_KEY, loadDraft } from "./draft";
 export default function TaskForm({
   task,
   picked,
+  tasks,
   harnesses,
   projects,
   onSaved,
@@ -23,6 +24,8 @@ export default function TaskForm({
 }: {
   task?: Task;
   picked?: { harness: string | null; project: string };
+  /** The board, to pick dependencies from. */
+  tasks: Task[];
   harnesses: HarnessInfo[];
   projects: Project[];
   onSaved: (task: Task) => void;
@@ -31,7 +34,7 @@ export default function TaskForm({
   const [draft] = useState(() => (task ? null : loadDraft()));
   const [input, setInput] = useState<TaskInput>(
     () =>
-      draft?.input ?? {
+      (draft && { ...draft.input, depends_on: draft.input.depends_on ?? [] }) ?? {
         title: task?.title ?? "",
         body: task?.body ?? "",
         project: task?.project ?? picked?.project ?? "",
@@ -41,6 +44,7 @@ export default function TaskForm({
         use_worktree: task?.use_worktree ?? true,
         wait_for_mcp: task?.wait_for_mcp ?? false,
         skip_permissions: task?.skip_permissions ?? false,
+        depends_on: task?.depends_on ?? [],
       },
   );
   const [uploads, setUploads] = useState<AttachmentRef[]>(draft?.uploads ?? []);
@@ -61,6 +65,12 @@ export default function TaskForm({
     localStorage.removeItem(DRAFT_KEY);
     onCancel();
   };
+
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  // Done tasks wouldn't hold anything back, so only open ones are offered.
+  const dependable = tasks.filter(
+    (t) => t.id !== task?.id && t.status !== "done" && !input.depends_on.includes(t.id),
+  );
 
   const set = <K extends keyof TaskInput>(key: K, value: TaskInput[K]) =>
     setInput((cur) => ({ ...cur, [key]: value }));
@@ -199,6 +209,36 @@ export default function TaskForm({
             <small>Bypass approval checks and the Codex sandbox for this task.</small>
           </span>
         </label>
+
+        <div className="task-form-deps">
+          <span className="task-form-deps-label">Waits for</span>
+          {input.depends_on.map((id) => (
+            <span key={id} className="task-file-chip">
+              #{id} {byId.get(id)?.title ?? ""}
+              <button
+                title="Remove this dependency"
+                onClick={() => set("depends_on", input.depends_on.filter((d) => d !== id))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {dependable.length > 0 && (
+            <select
+              value=""
+              title="This task isn't picked up until every task it waits for is Done"
+              onChange={(e) => e.target.value && set("depends_on", [...input.depends_on, Number(e.target.value)])}
+            >
+              <option value="">{input.depends_on.length ? "Add another task…" : "Add a task to finish first…"}</option>
+              {dependable.map((t) => (
+                <option key={t.id} value={t.id}>
+                  #{t.id} {t.title}
+                </option>
+              ))}
+            </select>
+          )}
+          {!dependable.length && !input.depends_on.length && <small>No open tasks to wait for</small>}
+        </div>
 
         <div className="task-form-files">
           {uploads.map((u) => (

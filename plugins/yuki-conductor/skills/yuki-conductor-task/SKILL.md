@@ -130,6 +130,10 @@ yuki-conductor task create --project my-app --title "Add rate limiting" --worktr
 - `--draft` saves the task without queueing it: no agent picks it up until
   the user (or `yuki-conductor task queue <id>`) queues it. Use it when the
   user wants to write a task now and start it later.
+- `--depends-on ID` (repeatable) holds the task in To Do until each of those
+  tasks is Done, e.g. to chain "implement" → "write the migration guide".
+  Only its first pickup waits; an archived dependency stops counting.
 
 A task created from inside a task is linked to it as a follow-up. That link is
-informational only: the new task runs on its own, and nothing waits for it.
+informational only: the new task runs on its own, and nothing waits for it
+(use `--depends-on` for that).

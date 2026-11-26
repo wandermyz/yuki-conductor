@@ -369,6 +369,32 @@ export default function TaskDetail({
             ))}
           </div>
         )}
+        {task.dependencies.length > 0 && (
+          <div className="task-links">
+            Waits for:{" "}
+            {task.dependencies.map((d) => (
+              <button key={d.id} className="link" onClick={() => onOpenTask(d.id)}>
+                #{d.id} {d.title} <StatusBadge status={d.status} />
+              </button>
+            ))}
+          </div>
+        )}
+        {task.dependents.length > 0 && (
+          <div className="task-links">
+            Blocks:{" "}
+            {task.dependents.map((d) => (
+              <button key={d.id} className="link" onClick={() => onOpenTask(d.id)}>
+                #{d.id} {d.title} <StatusBadge status={d.status} />
+              </button>
+            ))}
+          </div>
+        )}
+        {task.blocked_by.length > 0 && (task.status === "todo" || task.status === "draft") && (
+          <p className="task-note">
+            ⏳ Starts once {task.blocked_by.map((id) => `#${id}`).join(", ")}{" "}
+            {task.blocked_by.length === 1 ? "is" : "are"} done.
+          </p>
+        )}
         {!task.harness_enabled && task.status === "todo" && (
           <p className="task-warning">
             {task.harness} isn't enabled on this machine, so this task won't be picked up.

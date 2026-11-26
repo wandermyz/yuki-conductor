@@ -32,12 +32,18 @@ def _attachments(task_id: int, paths: list[str]) -> list[dict]:
 
 
 def serialize_task(
-    task: Task, *, comment_count: int | None = None, hb: Heartbeat | None | bool = True
+    task: Task,
+    *,
+    comment_count: int | None = None,
+    hb: Heartbeat | None | bool = True,
+    blocked: dict[int, list[int]] | None = None,
 ) -> dict:
     """`hb`: the task's heartbeat if the caller already has it (None: none);
-    True looks it up."""
+    True looks it up. `blocked`: `TaskStore.blocked_by()`, if the caller has it."""
     if hb is True:
         hb = hs.store.get(TASK, str(task.id))
+    if blocked is None:
+        blocked = taskboard.store.blocked_by() if task.depends_on else {}
     return {
         "id": task.id,
         "title": task.title,
@@ -59,6 +65,9 @@ def serialize_task(
         "pr_url": task.pr_url,
         "pr_state": task.pr_state,
         "parent_task_id": task.parent_task_id,
+        "depends_on": task.depends_on,
+        # The dependencies that aren't Done yet, while they hold back its first pickup.
+        "blocked_by": blocked.get(task.id, []),
         "cleanup_error": task.cleanup_error,
         "editable": task.editable,
         "created_at": task.created_at,
@@ -125,6 +134,7 @@ class TaskCreate(BaseModel):
     attachment_ids: list[str] = []  # /api/uploads ids (web)
     parent_task_id: int | None = None
     draft: bool = False  # saved, but not queued for pickup
+    depends_on: list[int] = []  # task ids that must be Done before pickup
 
 
 class TaskEdit(BaseModel):
@@ -138,6 +148,7 @@ class TaskEdit(BaseModel):
     body: str | None = None
     attachments: list[str] | None = None  # the full new list of paths
     attachment_ids: list[str] = []  # /api/uploads ids (web), added to the list
+    depends_on: list[int] | None = None  # the full new list
 
 
 class CommentCreate(BaseModel):
@@ -170,8 +181,11 @@ def list_tasks(old: bool = False):
     tasks = taskboard.store.list_tasks(include_old=old)
     counts = taskboard.store.comment_counts()
     beats = {hb.target_id: hb for hb in hs.store.list_all(TASK)}
+    blocked = taskboard.store.blocked_by()
     return [
-        serialize_task(t, comment_count=counts.get(t.id, 0), hb=beats.get(str(t.id)))
+        serialize_task(
+            t, comment_count=counts.get(t.id, 0), hb=beats.get(str(t.id)), blocked=blocked
+        )
         for t in tasks
     ]
 
@@ -191,6 +205,7 @@ def create_task(body: TaskCreate):
         attachments=_paths(body.attachments, body.attachment_ids),
         parent_task_id=body.parent_task_id,
         draft=body.draft,
+        depends_on=body.depends_on,
     )
     return serialize_task(task, comment_count=0)
 
@@ -229,6 +244,16 @@ def get_task(task_id: int):
         if parent and parent.archived_at is None
         else None
     )
+    deps = [taskboard.store.get(i) for i in task.depends_on]
+    data["dependencies"] = [
+        {"id": d.id, "title": d.title, "status": d.status}
+        for d in deps
+        if d is not None and d.archived_at is None
+    ]
+    data["dependents"] = [
+        {"id": d.id, "title": d.title, "status": d.status}
+        for d in taskboard.store.dependents(task_id)
+    ]
     return data
 
 
