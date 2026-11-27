@@ -428,7 +428,10 @@ PRD and implementation plan are `docs/plans/2026-10-18-taskboard*.md`.
   (an archived dependency stops counting); the API serves it as
   `blocked_by`, and the detail as `dependencies` / `dependents`.
   `actions._check_dependencies` rejects unknown ids, self and cycles.
-  Editable like any field while the task is editable.
+  Editable like any field while the task is editable. The Tasks list shows
+  To Do in pickup order (`pickupOrder` in `TasksView.tsx`): in dependency
+  waves (free now, then blocked only by started tasks, then by wave 0, …),
+  by `sort_order` within a wave, not by `sort_order` alone.
 - **Harvester** (`harvester.py`): picks To Do tasks in `sort_order`, per
   harness up to `TASKBOARD_CONCURRENCY` (`.env`, e.g. `claude-code:10,pi:1`;
   defaults 10 / 1 / 1 for anything else), unless paused (`taskboard_state`

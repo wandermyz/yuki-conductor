@@ -59,11 +59,41 @@ const FILTERS: { key: Filter; label: string }[] = [
 /** The order statuses are grouped in: what needs the user first. */
 const STATUS_ORDER: TaskStatus[] = ["needs_input", "ready_for_review", "in_progress", "todo", "draft", "done"];
 
+/**
+ * To Do in the order the harvester will pick it up. Tasks run in parallel, so
+ * this goes in waves: first those free to start now, then those waiting only
+ * on tasks already started, then those waiting on the first wave, and so on;
+ * by queue position within a wave.
+ */
+function pickupOrder(todo: Task[]): Task[] {
+  const byId = new Map(todo.map((t) => [t.id, t]));
+  const wave = new Map<number, number>();
+  const waveOf = (t: Task, seen: Set<number>): number => {
+    const known = wave.get(t.id);
+    if (known !== undefined) return known;
+    if (seen.has(t.id)) return 0; // a cycle: never picked up, so it doesn't matter
+    seen.add(t.id);
+    let w = t.blocked_by.length > 0 ? 1 : 0;
+    for (const d of t.blocked_by) {
+      const dep = byId.get(d);
+      if (dep) w = Math.max(w, waveOf(dep, seen) + 1);
+    }
+    wave.set(t.id, w);
+    return w;
+  };
+  for (const t of todo) waveOf(t, new Set());
+  return [...todo].sort(
+    (a, b) => wave.get(a.id)! - wave.get(b.id)! || a.sort_order - b.sort_order || a.id - b.id,
+  );
+}
+
 function sortForDisplay(tasks: Task[]): Task[] {
+  const todo = pickupOrder(tasks.filter((t) => t.status === "todo"));
+  const rank = new Map(todo.map((t, i) => [t.id, i]));
   return [...tasks].sort((a, b) => {
     const s = STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status);
     if (s !== 0) return s;
-    if (a.status === "todo") return a.sort_order - b.sort_order;
+    if (a.status === "todo") return rank.get(a.id)! - rank.get(b.id)!;
     return b.updated_at - a.updated_at;
   });
 }
