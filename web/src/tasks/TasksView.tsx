@@ -20,6 +20,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { fetchProcessing, listHarnesses, listProjects, subscribeChatSocket } from "../chat/api";
 import type { HarnessInfo, Project, StreamStep } from "../chat/api";
 import { HarnessIcon, NewSessionPicker } from "../chat/shared";
+import PullIndicator from "../PullIndicator";
+import { usePullToRefresh } from "../usePullToRefresh";
 import SidebarResizer from "../SidebarResizer";
 import Snippet from "../Snippet";
 import { useSidebarWidth } from "../sidebarWidth";
@@ -247,13 +249,17 @@ export default function TasksView({
     selectedRef.current = selectedId;
   }, [selectedId]);
 
-  const refreshList = useCallback(() => {
-    listTasks(showOld)
-      .then(setTasks)
-      .catch(console.error)
-      .finally(() => setLoading(false));
-    getBoardState().then(setBoard).catch(console.error);
-  }, [showOld]);
+  const refreshList = useCallback(
+    () =>
+      Promise.all([
+        listTasks(showOld)
+          .then(setTasks)
+          .catch(console.error)
+          .finally(() => setLoading(false)),
+        getBoardState().then(setBoard).catch(console.error),
+      ]),
+    [showOld],
+  );
 
   const refreshDetail = useCallback(() => {
     const id = selectedRef.current;
@@ -425,7 +431,16 @@ export default function TasksView({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  // Pull-to-refresh on the sidebar: the list, plus a check of the PRs. Off
+  // while a drag-to-reorder holds the touch.
+  const [dragging, setDragging] = useState(false);
+  const { pull, refreshing, attach: pullTarget } = usePullToRefresh(
+    useCallback(() => Promise.all([refreshList(), refreshPrs().catch(console.error)]), [refreshList]),
+    dragging,
+  );
+
   const onDragEnd = ({ active, over }: DragEndEvent) => {
+    setDragging(false);
     if (!over || active.id === over.id) return;
     const order = arrayMove(todoIds, todoIds.indexOf(Number(active.id)), todoIds.indexOf(Number(over.id)));
     // Optimistic: renumber locally so the row doesn't jump back while saving.
@@ -453,7 +468,8 @@ export default function TasksView({
       className={`app tasks-view ${selectedId !== null ? "detail-open" : ""}`}
       style={sidebar.style}
     >
-      <aside className="sidebar task-sidebar">
+      <aside className="sidebar task-sidebar" ref={pullTarget}>
+        <PullIndicator pull={pull} refreshing={refreshing} />
         <div className="sidebar-header task-sidebar-header">
           <h2>Tasks</h2>
           <button className="primary" onClick={newTask}>
@@ -537,7 +553,13 @@ export default function TasksView({
           </p>
         )}
 
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={() => setDragging(true)}
+          onDragCancel={() => setDragging(false)}
+          onDragEnd={onDragEnd}
+        >
           <SortableContext items={todoIds} strategy={verticalListSortingStrategy}>
             <ul className="task-list">
               {shown.map((t) => (

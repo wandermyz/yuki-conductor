@@ -44,6 +44,8 @@ import { FileAttachment, FileRow } from "../FileAttachment";
 import { pastedFiles } from "../paste";
 import { disablePush, enablePush, getPushState } from "../webPush";
 import type { PushState } from "../webPush";
+import PullIndicator from "../PullIndicator";
+import { usePullToRefresh } from "../usePullToRefresh";
 import SidebarResizer from "../SidebarResizer";
 import Snippet from "../Snippet";
 import { useSidebarWidth } from "../sidebarWidth";
@@ -1394,6 +1396,21 @@ export default function Chat({
     wasVisible.current = visible;
   }, [visible, selected]);
 
+  // Pull-to-refresh on the list: everything the sidebar shows, refetched.
+  const { pull, refreshing, attach: pullTarget } = usePullToRefresh(
+    useCallback(
+      () =>
+        Promise.all([
+          listConversations().then(setConversations),
+          fetchStatuses().then((s) => setStatuses(s as Record<string, ConvStatus>)),
+          fetchAllUsage().then(setUsage),
+          fetchProcessing().then((p) => setProcessingConvs(new Set(Object.keys(p)))),
+          fetchQueued().then(setQueues),
+        ]).catch(console.error),
+      [],
+    ),
+  );
+
   // Debounced search; a stale response never overwrites a newer query's.
   useEffect(() => {
     const q = query.trim();
@@ -1723,7 +1740,8 @@ export default function Chat({
             All
           </button>
         </div>
-        <ul className="chat-list">
+        <PullIndicator pull={pull} refreshing={refreshing} />
+        <ul className="chat-list" ref={pullTarget}>
           {conversations.length === 0 && (
             <li className="chat-empty-list">No conversations yet.</li>
           )}

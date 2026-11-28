@@ -1,0 +1,39 @@
+.pull-indicator {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--text);
+  transition: height 0.2s ease;
+}
+
+/* Follow the finger exactly while pulling; animate only the snap back. */
+.pull-indicator.pulling {
+  transition: none;
+}
+
+.pull-arrow {
+  font-size: 18px;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.pull-arrow.ready {
+  transform: rotate(180deg);
+}
+
+.pull-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: pull-spin 0.7s linear infinite;
+}
+
+@keyframes pull-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
