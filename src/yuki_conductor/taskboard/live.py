@@ -52,4 +52,4 @@ def step(task_id: int, event: StreamEvent) -> None:
 def steps(task_id: int) -> list[dict]:
     if _manager is None:
         return []
-    return _manager.get_steps().get(steps_key(task_id), [])
+    return _manager.get_steps(steps_key(task_id))

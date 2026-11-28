@@ -328,7 +328,10 @@ function EditableLabel({
   );
 }
 
-export default function AutomationsView() {
+export default function AutomationsView({ visible }: {
+  /** False while another tab is showing; the view stays mounted, hidden. */
+  visible: boolean;
+}) {
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Automation | null>(null);
@@ -347,9 +350,18 @@ export default function AutomationsView() {
     getAutomation(selected).then(setDetail).catch(console.error);
   }, [selected]);
 
+  // Runs aren't broadcast, so showing the tab (again) refetches.
+  const wasVisible = useRef(false);
+  const shownBefore = useRef(false);
   useEffect(() => {
+    const shown = visible && !wasVisible.current;
+    wasVisible.current = visible;
+    if (!shown) return;
     refreshList();
-  }, [refreshList]);
+    // The first time, the selection effect below loads the detail.
+    if (shownBefore.current) refreshDetail();
+    shownBefore.current = true;
+  }, [visible, refreshList, refreshDetail]);
 
   useEffect(() => {
     setDetail(null);
@@ -360,13 +372,13 @@ export default function AutomationsView() {
   // its result lands in the history on its own.
   const anyRunning = detail?.runs?.some((r) => r.status === "running") ?? false;
   useEffect(() => {
-    if (!anyRunning) return;
+    if (!anyRunning || !visible) return;
     const id = setInterval(() => {
       refreshDetail();
       refreshList();
     }, RUNNING_POLL_MS);
     return () => clearInterval(id);
-  }, [anyRunning, refreshDetail, refreshList]);
+  }, [anyRunning, visible, refreshDetail, refreshList]);
 
   const applyUpdate = useCallback((updated: Automation) => {
     setDetail((d) => (d ? { ...d, ...updated, runs: d.runs } : d));

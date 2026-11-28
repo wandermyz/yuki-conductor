@@ -5,7 +5,7 @@ import { HarnessIcon, ModelPicker, NewSessionPicker } from "../chat/shared";
 import Markdown from "../Markdown";
 import { imageMarkers, insertAt, pastedFiles, withoutMarker } from "../paste";
 import { createTask, editTask } from "./api";
-import type { Task, TaskInput } from "./api";
+import type { Task, TaskDetail, TaskInput } from "./api";
 import { DRAFT_KEY, loadDraft } from "./draft";
 
 /**
@@ -22,7 +22,7 @@ export default function TaskForm({
   onSaved,
   onCancel,
 }: {
-  task?: Task;
+  task?: TaskDetail;
   picked?: { harness: string | null; project: string };
   /** The board, to pick dependencies from. */
   tasks: Task[];

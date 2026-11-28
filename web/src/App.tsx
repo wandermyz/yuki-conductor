@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import AutomationsView from "./AutomationsView";
 import Chat from "./chat/Chat";
 import PluginsView from "./PluginsView";
@@ -657,16 +657,27 @@ function App() {
     window.localStorage.setItem("yuki-tab", tab);
   }, [tab, chatId, taskId]);
 
-  const renderTab = () => {
+  // Chat, Tasks and Automations stay mounted once visited and are only hidden
+  // when another tab is showing, so switching back costs no requests: their
+  // state is kept and the chat socket keeps it current. The rest are cheap
+  // and remount each time.
+  const [visited, setVisited] = useState<Set<Tab>>(() => new Set([tab]));
+  if (!visited.has(tab)) setVisited(new Set(visited).add(tab));
+  const pane = (t: Tab, view: ReactNode) =>
+    (tab === t || visited.has(t)) && (
+      <div className="tab-pane" hidden={tab !== t}>
+        {view}
+      </div>
+    );
+
+  const renderOther = () => {
     switch (tab) {
       case "chat":
-        return <Chat selectedId={chatId} onSelectId={setChatId} />;
       case "tasks":
-        return <TasksView selectedId={taskId} onSelectId={setTaskId} />;
+      case "automations":
+        return null;
       case "projects":
         return <ProjectsView />;
-      case "automations":
-        return <AutomationsView />;
       case "status":
         return <StatusView />;
       case "plugins":
@@ -685,7 +696,15 @@ function App() {
 
   return (
     <div className="root">
-      <div className="tab-content">{renderTab()}</div>
+      <div className="tab-content">
+        {pane("chat", <Chat selectedId={chatId} onSelectId={setChatId} visible={tab === "chat"} />)}
+        {pane(
+          "tasks",
+          <TasksView selectedId={taskId} onSelectId={setTaskId} visible={tab === "tasks"} />,
+        )}
+        {pane("automations", <AutomationsView visible={tab === "automations"} />)}
+        {renderOther()}
+      </div>
       <nav className="tabbar" role="tablist">
         {barTabs.map((t) => (
           <button

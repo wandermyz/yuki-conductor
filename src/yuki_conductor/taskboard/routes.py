@@ -37,14 +37,17 @@ def serialize_task(
     comment_count: int | None = None,
     hb: Heartbeat | None | bool = True,
     blocked: dict[int, list[int]] | None = None,
+    body: bool = True,
 ) -> dict:
     """`hb`: the task's heartbeat if the caller already has it (None: none);
-    True looks it up. `blocked`: `TaskStore.blocked_by()`, if the caller has it."""
+    True looks it up. `blocked`: `TaskStore.blocked_by()`, if the caller has it.
+    `body=False` leaves out the description, for lists: it's most of a task's
+    size and only the detail view shows it."""
     if hb is True:
         hb = hs.store.get(TASK, str(task.id))
     if blocked is None:
         blocked = taskboard.store.blocked_by() if task.depends_on else {}
-    return {
+    data = {
         "id": task.id,
         "title": task.title,
         "body": task.body,
@@ -79,6 +82,9 @@ def serialize_task(
             hb, is_ticking=task.status == IN_PROGRESS and bool(task.heartbeat_return_status)
         ),
     }
+    if not body:
+        del data["body"]
+    return data
 
 
 def serialize_comment(comment: TaskComment) -> dict:
@@ -184,7 +190,11 @@ def list_tasks(old: bool = False):
     blocked = taskboard.store.blocked_by()
     return [
         serialize_task(
-            t, comment_count=counts.get(t.id, 0), hb=beats.get(str(t.id)), blocked=blocked
+            t,
+            comment_count=counts.get(t.id, 0),
+            hb=beats.get(str(t.id)),
+            blocked=blocked,
+            body=False,
         )
         for t in tasks
     ]

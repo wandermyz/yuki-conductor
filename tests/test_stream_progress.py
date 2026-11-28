@@ -98,17 +98,17 @@ def test_web_steps_survive_the_run_and_reset_on_the_next_one():
     platform.on_stream_event("conv-1", StreamEvent(kind="tool_use", label="Read(a.py)"))
     platform.on_stream_event("conv-1", StreamEvent(kind="text", label="writing"))
 
-    steps = manager.get_steps()["conv-1"]
+    steps = manager.get_steps("conv-1")
     assert [s["label"] for s in steps] == ["Read(a.py)", "writing"]
     assert [s["seq"] for s in steps] == [0, 1]
 
     # The finished turn keeps its trace so the UI can show it next to the reply.
     platform.set_processing("conv-1", "m1", on=False)
-    assert [s["label"] for s in manager.get_steps()["conv-1"]] == ["Read(a.py)", "writing"]
+    assert [s["label"] for s in manager.get_steps("conv-1")] == ["Read(a.py)", "writing"]
 
     # The next turn starts from a clean slate.
     platform.set_processing("conv-1", "m2", on=True)
-    assert manager.get_steps()["conv-1"] == []
+    assert manager.get_steps("conv-1") == []
 
 
 def test_web_steps_are_dropped_outside_a_run():
@@ -116,7 +116,7 @@ def test_web_steps_are_dropped_outside_a_run():
     manager = ConnectionManager()
     platform = WebPlatform(store=MagicMock(), manager=manager)
     platform.on_stream_event("conv-1", StreamEvent(kind="text", label="stray"))
-    assert manager.get_steps() == {}
+    assert manager.get_steps("conv-1") == []
 
 
 def test_web_step_buffer_is_bounded():
@@ -127,7 +127,7 @@ def test_web_step_buffer_is_bounded():
     for i in range(MAX_BUFFERED_STEPS + 25):
         manager.add_step("conv-1", {"kind": "text", "label": f"step {i}", "detail": {}})
 
-    steps = manager.get_steps()["conv-1"]
+    steps = manager.get_steps("conv-1")
     assert len(steps) == MAX_BUFFERED_STEPS
     # Sequence numbers keep counting past the trim so clients can still dedupe.
     assert steps[-1]["seq"] == MAX_BUFFERED_STEPS + 24

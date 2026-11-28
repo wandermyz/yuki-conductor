@@ -44,6 +44,8 @@ import { FileAttachment, FileRow } from "../FileAttachment";
 import { pastedFiles } from "../paste";
 import { disablePush, enablePush, getPushState } from "../webPush";
 import type { PushState } from "../webPush";
+import PullIndicator from "../PullIndicator";
+import { usePullToRefresh } from "../usePullToRefresh";
 import SidebarResizer from "../SidebarResizer";
 import Snippet from "../Snippet";
 import { useSidebarWidth } from "../sidebarWidth";
@@ -1003,6 +1005,7 @@ function ChatThread({
   onSetWaitForMcp,
   onSetSkipPermissions,
   onSetPinned,
+  visible,
 }: {
   conv: Conversation;
   harness: HarnessInfo | undefined;
@@ -1027,6 +1030,8 @@ function ChatThread({
   onSetWaitForMcp: (enabled: boolean) => void;
   onSetSkipPermissions: (enabled: boolean) => void;
   onSetPinned: (pinned: boolean) => void;
+  /** False while another tab is showing: the thread stays mounted, hidden. */
+  visible: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
@@ -1053,8 +1058,8 @@ function ChatThread({
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && isNearBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages, processing, steps]);
+    if (el && visible && isNearBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, [messages, processing, steps, visible]);
 
   // Scroll a search hit into view once its message has loaded. Runs after the
   // stick-to-bottom effect above, so it wins on the first load. A hit older
@@ -1148,9 +1153,12 @@ function ChatThread({
 export default function Chat({
   selectedId,
   onSelectId,
+  visible,
 }: {
   selectedId: string | null;
   onSelectId: (id: string | null) => void;
+  /** False while another tab is showing; Chat stays mounted, hidden. */
+  visible: boolean;
 }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const selected = selectedId;
@@ -1184,6 +1192,34 @@ export default function Chat({
   // Keep a ref to `selected` so the WS handler can read the latest value
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  // The conversation the user is actually looking at: none while hidden, so a
+  // reply landing there meanwhile still marks it unread.
+  const viewingRef = useRef<string | null>(null);
+  const visibleRef = useRef(visible);
+  useEffect(() => {
+    visibleRef.current = visible;
+    viewingRef.current = visible ? selected : null;
+  }, [visible, selected]);
+  // Conversations whose step buffer has been fetched; live `step` events keep
+  // them current after that.
+  const stepsLoaded = useRef(new Set<string>());
+  const loadSteps = useCallback((id: string) => {
+    stepsLoaded.current.add(id);
+    fetchSteps(id)
+      .then((fetched) =>
+        // Merge rather than replace: a step may have streamed in meanwhile.
+        setStepsByConv((prev) => {
+          const seen = new Set(fetched.map((s) => s.seq));
+          const extra = (prev[id] || []).filter((s) => !seen.has(s.seq));
+          const steps = [...fetched, ...extra].sort((a, b) => a.seq - b.seq);
+          return { ...prev, [id]: steps };
+        }),
+      )
+      .catch((e) => {
+        stepsLoaded.current.delete(id);
+        console.error(e);
+      });
+  }, []);
 
   const setStatus = useCallback((id: string, s: ConvStatus) => {
     setStatuses((prev) => ({ ...prev, [id]: s }));
@@ -1220,7 +1256,7 @@ export default function Chat({
           });
           // An out-of-band push has no `processing` event to close the turn,
           // so alert here instead — otherwise it arrives silently.
-          if (e.pushed) {
+          if (e.pushed && visibleRef.current) {
             playNotificationSound();
           }
           // An out-of-band push can be the first we hear of a conversation
@@ -1233,7 +1269,7 @@ export default function Chat({
           });
           // Mark as unread if this is an assistant message and the conversation
           // is not currently selected. A done conversation comes out of done.
-          if (e.message.role === "assistant" && selectedRef.current !== cid) {
+          if (e.message.role === "assistant" && viewingRef.current !== cid) {
             setStatuses((prev) => {
               const next = { ...prev, [cid]: "unread" as ConvStatus };
               setConvStatus(cid, "unread").catch(console.error);
@@ -1245,7 +1281,7 @@ export default function Chat({
           // conversation unread, or a new message taking it out of done). In
           // the thread the user is looking at it only clears a stale "done":
           // it mustn't un-read what they're reading.
-          if (selectedRef.current !== cid) {
+          if (viewingRef.current !== cid) {
             setStatuses((prev) => ({ ...prev, [cid]: e.status }));
           } else {
             setStatuses((prev) => (prev[cid] === "done" ? { ...prev, [cid]: "read" } : prev));
@@ -1260,7 +1296,7 @@ export default function Chat({
           });
         } else if (e.type === "processing") {
           if (!e.on) {
-            playNotificationSound();
+            if (visibleRef.current) playNotificationSound();
             // Refresh usage after an assistant response completes
             fetchAllUsage().then(setUsage).catch(console.error);
           }
@@ -1308,13 +1344,14 @@ export default function Chat({
           setProcessingConvs(new Set(Object.keys(p)));
         }).catch(console.error);
         fetchQueued().then(setQueues).catch(console.error);
-        // Resume the step stream: replace buffers wholesale with the server's
-        // snapshot, so a run that started while we were disconnected still
-        // shows its progress instead of an empty list.
-        fetchSteps().then(setStepsByConv).catch(console.error);
+        // Resume the step stream: anything streamed while disconnected was
+        // missed, so every buffer is stale. Refetch the open one now and the
+        // rest when they're opened.
+        stepsLoaded.current.clear();
         fetchAllUsage().then(setUsage).catch(console.error);
         const sel = selectedRef.current;
         if (sel) {
+          loadSteps(sel);
           listMessages(sel).then((msgs) => {
             setMessagesByConv((prev) => ({ ...prev, [sel]: msgs }));
           }).catch(console.error);
@@ -1323,7 +1360,7 @@ export default function Chat({
       onClose: () => setWsConnected(false),
     });
     return () => unsub();
-  }, []);
+  }, [loadSteps]);
 
   useEffect(() => {
     listConversations().then(setConversations).catch(console.error);
@@ -1339,8 +1376,40 @@ export default function Chat({
       .then((p) => setProcessingConvs(new Set(Object.keys(p))))
       .catch(console.error);
     fetchQueued().then(setQueues).catch(console.error);
-    fetchSteps().then(setStepsByConv).catch(console.error);
   }, []);
+
+  // Fetch a conversation's step buffer the first time it's opened.
+  useEffect(() => {
+    if (selected && !stepsLoaded.current.has(selected)) loadSteps(selected);
+  }, [selected, loadSteps]);
+
+  // Coming back to the tab counts as looking at the open conversation again.
+  const wasVisible = useRef(visible);
+  useEffect(() => {
+    if (visible && !wasVisible.current && selected) {
+      setStatuses((prev) => {
+        if (prev[selected] !== "unread") return prev;
+        setConvStatus(selected, "read").catch(console.error);
+        return { ...prev, [selected]: "read" };
+      });
+    }
+    wasVisible.current = visible;
+  }, [visible, selected]);
+
+  // Pull-to-refresh on the list: everything the sidebar shows, refetched.
+  const { pull, refreshing, attach: pullTarget } = usePullToRefresh(
+    useCallback(
+      () =>
+        Promise.all([
+          listConversations().then(setConversations),
+          fetchStatuses().then((s) => setStatuses(s as Record<string, ConvStatus>)),
+          fetchAllUsage().then(setUsage),
+          fetchProcessing().then((p) => setProcessingConvs(new Set(Object.keys(p)))),
+          fetchQueued().then(setQueues),
+        ]).catch(console.error),
+      [],
+    ),
+  );
 
   // Debounced search; a stale response never overwrites a newer query's.
   useEffect(() => {
@@ -1671,7 +1740,8 @@ export default function Chat({
             All
           </button>
         </div>
-        <ul className="chat-list">
+        <PullIndicator pull={pull} refreshing={refreshing} />
+        <ul className="chat-list" ref={pullTarget}>
           {conversations.length === 0 && (
             <li className="chat-empty-list">No conversations yet.</li>
           )}
@@ -1773,6 +1843,7 @@ export default function Chat({
             onSetWaitForMcp={(enabled) => setWaitForMcp(active.id, enabled)}
             onSetSkipPermissions={(enabled) => setSkipPermissions(active.id, enabled)}
             onSetPinned={(pinned) => setPinned(active.id, pinned)}
+            visible={visible}
           />
         ) : (
           <div className="chat-placeholder">

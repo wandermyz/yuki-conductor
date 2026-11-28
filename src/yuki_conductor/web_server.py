@@ -22,6 +22,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -288,6 +289,10 @@ def create_api() -> FastAPI:
     from yuki_conductor.taskboard.routes import router as taskboard_router
 
     api = FastAPI(title="Agent Conductor")
+    # The UI is often used over a slow link, where the JSON lists and the
+    # bundle dominate load time and shrink 5-10x. Starlette already leaves
+    # media, already-compressed types and 206 range responses alone.
+    api.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
     api.include_router(taskboard_router)
     api.include_router(heartbeat_router)
 
@@ -982,15 +987,16 @@ def create_api() -> FastAPI:
     def get_processing():
         return ws_manager.get_processing()
 
-    @api.get("/api/chat/steps")
-    def get_steps():
-        """Buffered intermediate steps per in-flight conversation.
+    @api.get("/api/conversations/{conv_id}/steps")
+    def get_steps(conv_id: str):
+        """A conversation's buffered intermediate steps.
 
-        A browser that connects or reconnects mid-run calls this to replay the
-        step stream it missed; steps are memory-only and vanish once the run
-        finishes.
+        A browser opening a conversation, or reconnecting, calls this to replay
+        the step stream it missed; steps are memory-only, kept for the
+        in-flight turn and the last finished one. Per conversation, since one
+        long run's buffer is tens of kilobytes.
         """
-        return ws_manager.get_steps()
+        return ws_manager.get_steps(conv_id)
 
     @api.post("/api/conversations/{conv_id}/cancel")
     def cancel_conversation(conv_id: str):

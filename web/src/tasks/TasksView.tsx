@@ -20,6 +20,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { fetchProcessing, listHarnesses, listProjects, subscribeChatSocket } from "../chat/api";
 import type { HarnessInfo, Project, StreamStep } from "../chat/api";
 import { HarnessIcon, NewSessionPicker } from "../chat/shared";
+import PullIndicator from "../PullIndicator";
+import { usePullToRefresh } from "../usePullToRefresh";
 import SidebarResizer from "../SidebarResizer";
 import Snippet from "../Snippet";
 import { useSidebarWidth } from "../sidebarWidth";
@@ -199,9 +201,12 @@ function SearchResults({
 export default function TasksView({
   selectedId,
   onSelectId,
+  visible,
 }: {
   selectedId: number | null;
   onSelectId: (id: number | null) => void;
+  /** False while another tab is showing; the view stays mounted, hidden. */
+  visible: boolean;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -244,13 +249,17 @@ export default function TasksView({
     selectedRef.current = selectedId;
   }, [selectedId]);
 
-  const refreshList = useCallback(() => {
-    listTasks(showOld)
-      .then(setTasks)
-      .catch(console.error)
-      .finally(() => setLoading(false));
-    getBoardState().then(setBoard).catch(console.error);
-  }, [showOld]);
+  const refreshList = useCallback(
+    () =>
+      Promise.all([
+        listTasks(showOld)
+          .then(setTasks)
+          .catch(console.error)
+          .finally(() => setLoading(false)),
+        getBoardState().then(setBoard).catch(console.error),
+      ]),
+    [showOld],
+  );
 
   const refreshDetail = useCallback(() => {
     const id = selectedRef.current;
@@ -281,11 +290,26 @@ export default function TasksView({
     refreshList();
   }, [refreshList]);
 
-  // PRs aren't polled: opening the tab checks them once, and any change
-  // comes back as a task broadcast.
+  // While hidden, task changes only mark the board stale; showing the tab
+  // again catches up once, instead of refetching on every change unseen.
+  const visibleRef = useRef(visible);
+  const stale = useRef(false);
+
+  // Comments on PRs aren't polled: showing the tab checks them, and any
+  // change comes back as a task broadcast.
+  const wasVisible = useRef(false);
   useEffect(() => {
+    visibleRef.current = visible;
+    const shown = visible && !wasVisible.current;
+    wasVisible.current = visible;
+    if (!shown) return;
     refreshPrs().catch(console.error);
-  }, []);
+    if (stale.current) {
+      stale.current = false;
+      refreshList();
+      refreshDetail();
+    }
+  }, [visible, refreshList, refreshDetail]);
 
   // Load the selected task and replay its live steps.
   useEffect(() => {
@@ -298,11 +322,16 @@ export default function TasksView({
   useEffect(() => {
     let pending: ReturnType<typeof setTimeout> | null = null;
     const changed = new Set<number>();
+    let firstOpen = true;
     const unsubscribe = subscribeChatSocket({
       onEvent: (e) => {
         if (e.type === "task") {
           // Coalesce bursts (a turn's end writes several changes at once),
           // remembering every task they touched.
+          if (!visibleRef.current) {
+            stale.current = true;
+            return;
+          }
           changed.add(e.id);
           if (pending) clearTimeout(pending);
           pending = setTimeout(() => {
@@ -331,9 +360,19 @@ export default function TasksView({
       },
       // Anything may have happened while disconnected: catch up fully.
       onOpen: () => {
+        // The first open is this subscription starting, which the load
+        // effects above already cover; only a reconnect needs catching up.
+        if (firstOpen) {
+          firstOpen = false;
+          return;
+        }
+        refreshLive();
+        if (!visibleRef.current) {
+          stale.current = true;
+          return;
+        }
         refreshList();
         refreshDetail();
-        refreshLive();
       },
     });
     return () => {
@@ -392,7 +431,16 @@ export default function TasksView({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  // Pull-to-refresh on the sidebar: the list, plus a check of the PRs. Off
+  // while a drag-to-reorder holds the touch.
+  const [dragging, setDragging] = useState(false);
+  const { pull, refreshing, attach: pullTarget } = usePullToRefresh(
+    useCallback(() => Promise.all([refreshList(), refreshPrs().catch(console.error)]), [refreshList]),
+    dragging,
+  );
+
   const onDragEnd = ({ active, over }: DragEndEvent) => {
+    setDragging(false);
     if (!over || active.id === over.id) return;
     const order = arrayMove(todoIds, todoIds.indexOf(Number(active.id)), todoIds.indexOf(Number(over.id)));
     // Optimistic: renumber locally so the row doesn't jump back while saving.
@@ -420,7 +468,8 @@ export default function TasksView({
       className={`app tasks-view ${selectedId !== null ? "detail-open" : ""}`}
       style={sidebar.style}
     >
-      <aside className="sidebar task-sidebar">
+      <aside className="sidebar task-sidebar" ref={pullTarget}>
+        <PullIndicator pull={pull} refreshing={refreshing} />
         <div className="sidebar-header task-sidebar-header">
           <h2>Tasks</h2>
           <button className="primary" onClick={newTask}>
@@ -504,7 +553,13 @@ export default function TasksView({
           </p>
         )}
 
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={() => setDragging(true)}
+          onDragCancel={() => setDragging(false)}
+          onDragEnd={onDragEnd}
+        >
           <SortableContext items={todoIds} strategy={verticalListSortingStrategy}>
             <ul className="task-list">
               {shown.map((t) => (
@@ -540,6 +595,7 @@ export default function TasksView({
             steps={live.id === selectedId ? live.steps : []}
             running={live.id === selectedId && live.running}
             highlight={highlight?.taskId === shownDetail.id ? highlight : null}
+            visible={visible}
             onBack={() => onSelectId(null)}
             onEdit={() => setForm("edit")}
             onOpenTask={onSelectId}

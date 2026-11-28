@@ -676,3 +676,30 @@ def test_archive_and_delete_drop_the_queue(client):
     client.post(f"/api/conversations/{a}/archive")
     client.delete(f"/api/conversations/{b}")
     assert client.get("/api/chat/queued").json() == {}
+
+
+def test_steps_are_served_per_conversation(client, monkeypatch):
+    from yuki_conductor import web_server
+    from yuki_conductor.harness.base import StreamEvent
+    from yuki_conductor.messaging.web_platform import WebPlatform
+
+    monkeypatch.setattr(web_server.ws_manager, "broadcast", lambda cid, payload: None)
+    platform = WebPlatform(web_server.conv_store, web_server.ws_manager)
+    for cid in ("conv-a", "conv-b"):
+        platform.set_processing(cid, "m1", on=True)
+        platform.on_stream_event(cid, StreamEvent(kind="tool_use", label=f"Read({cid})"))
+
+    steps = client.get("/api/conversations/conv-a/steps").json()
+    assert [s["label"] for s in steps] == ["Read(conv-a)"]
+    assert client.get("/api/conversations/nope/steps").json() == []
+
+
+def test_text_responses_are_gzipped(client):
+    conv = client.post("/api/conversations", json={"title": "big"}).json()
+    from yuki_conductor import web_server
+
+    web_server.conv_store.add_message(conv["id"], "assistant", "word " * 2000)
+    url = f"/api/conversations/{conv['id']}/messages"
+    r = client.get(url, headers={"Accept-Encoding": "gzip"})
+    assert r.headers["content-encoding"] == "gzip"
+    assert "content-encoding" not in client.get(url, headers={"Accept-Encoding": "identity"}).headers
