@@ -316,6 +316,7 @@ export default function TasksView({
   useEffect(() => {
     let pending: ReturnType<typeof setTimeout> | null = null;
     const changed = new Set<number>();
+    let firstOpen = true;
     const unsubscribe = subscribeChatSocket({
       onEvent: (e) => {
         if (e.type === "task") {
@@ -353,6 +354,12 @@ export default function TasksView({
       },
       // Anything may have happened while disconnected: catch up fully.
       onOpen: () => {
+        // The first open is this subscription starting, which the load
+        // effects above already cover; only a reconnect needs catching up.
+        if (firstOpen) {
+          firstOpen = false;
+          return;
+        }
         refreshLive();
         if (!visibleRef.current) {
           stale.current = true;
