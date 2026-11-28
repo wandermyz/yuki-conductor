@@ -692,3 +692,14 @@ def test_steps_are_served_per_conversation(client, monkeypatch):
     steps = client.get("/api/conversations/conv-a/steps").json()
     assert [s["label"] for s in steps] == ["Read(conv-a)"]
     assert client.get("/api/conversations/nope/steps").json() == []
+
+
+def test_text_responses_are_gzipped(client):
+    conv = client.post("/api/conversations", json={"title": "big"}).json()
+    from yuki_conductor import web_server
+
+    web_server.conv_store.add_message(conv["id"], "assistant", "word " * 2000)
+    url = f"/api/conversations/{conv['id']}/messages"
+    r = client.get(url, headers={"Accept-Encoding": "gzip"})
+    assert r.headers["content-encoding"] == "gzip"
+    assert "content-encoding" not in client.get(url, headers={"Accept-Encoding": "identity"}).headers

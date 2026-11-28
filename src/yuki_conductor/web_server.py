@@ -22,6 +22,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -52,7 +53,6 @@ from yuki_conductor.messaging.web_platform import (
 from yuki_conductor.model_config import ModelConfigError, load_harness_models
 from yuki_conductor.reader_page import render_reader_page
 from yuki_conductor.store import CronRunStore, ProjectStore, SessionStore
-from yuki_conductor.web_gzip import TextGZipMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -289,7 +289,10 @@ def create_api() -> FastAPI:
     from yuki_conductor.taskboard.routes import router as taskboard_router
 
     api = FastAPI(title="Agent Conductor")
-    api.add_middleware(TextGZipMiddleware)
+    # The UI is often used over a slow link, where the JSON lists and the
+    # bundle dominate load time and shrink 5-10x. Starlette already leaves
+    # media, already-compressed types and 206 range responses alone.
+    api.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
     api.include_router(taskboard_router)
     api.include_router(heartbeat_router)
 
