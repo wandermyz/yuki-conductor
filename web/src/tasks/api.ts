@@ -27,10 +27,10 @@ export interface TaskRef {
   status: TaskStatus;
 }
 
+/** A task as the list serves it: everything but the description. */
 export interface Task {
   id: number;
   title: string;
-  body: string;
   attachments: TaskAttachment[];
   project: string;
   harness: string;
@@ -78,6 +78,7 @@ export interface TaskComment {
 }
 
 export interface TaskDetail extends Task {
+  body: string;
   comments: TaskComment[];
   children: TaskRef[];
   parent: TaskRef | null;

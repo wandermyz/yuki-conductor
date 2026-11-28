@@ -199,9 +199,12 @@ function SearchResults({
 export default function TasksView({
   selectedId,
   onSelectId,
+  visible,
 }: {
   selectedId: number | null;
   onSelectId: (id: number | null) => void;
+  /** False while another tab is showing; the view stays mounted, hidden. */
+  visible: boolean;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -281,11 +284,26 @@ export default function TasksView({
     refreshList();
   }, [refreshList]);
 
-  // PRs aren't polled: opening the tab checks them once, and any change
-  // comes back as a task broadcast.
+  // While hidden, task changes only mark the board stale; showing the tab
+  // again catches up once, instead of refetching on every change unseen.
+  const visibleRef = useRef(visible);
+  const stale = useRef(false);
+
+  // Comments on PRs aren't polled: showing the tab checks them, and any
+  // change comes back as a task broadcast.
+  const wasVisible = useRef(false);
   useEffect(() => {
+    visibleRef.current = visible;
+    const shown = visible && !wasVisible.current;
+    wasVisible.current = visible;
+    if (!shown) return;
     refreshPrs().catch(console.error);
-  }, []);
+    if (stale.current) {
+      stale.current = false;
+      refreshList();
+      refreshDetail();
+    }
+  }, [visible, refreshList, refreshDetail]);
 
   // Load the selected task and replay its live steps.
   useEffect(() => {
@@ -303,6 +321,10 @@ export default function TasksView({
         if (e.type === "task") {
           // Coalesce bursts (a turn's end writes several changes at once),
           // remembering every task they touched.
+          if (!visibleRef.current) {
+            stale.current = true;
+            return;
+          }
           changed.add(e.id);
           if (pending) clearTimeout(pending);
           pending = setTimeout(() => {
@@ -331,9 +353,13 @@ export default function TasksView({
       },
       // Anything may have happened while disconnected: catch up fully.
       onOpen: () => {
+        refreshLive();
+        if (!visibleRef.current) {
+          stale.current = true;
+          return;
+        }
         refreshList();
         refreshDetail();
-        refreshLive();
       },
     });
     return () => {
@@ -540,6 +566,7 @@ export default function TasksView({
             steps={live.id === selectedId ? live.steps : []}
             running={live.id === selectedId && live.running}
             highlight={highlight?.taskId === shownDetail.id ? highlight : null}
+            visible={visible}
             onBack={() => onSelectId(null)}
             onEdit={() => setForm("edit")}
             onOpenTask={onSelectId}

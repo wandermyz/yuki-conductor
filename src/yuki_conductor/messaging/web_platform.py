@@ -116,10 +116,10 @@ class ConnectionManager:
                 del buf[: len(buf) - MAX_BUFFERED_STEPS]
         self.broadcast(conv_id, {"type": "step", "step": step})
 
-    def get_steps(self) -> dict[str, list[dict]]:
-        """Snapshot of buffered steps for every in-flight conversation."""
+    def get_steps(self, conv_id: str) -> list[dict]:
+        """Snapshot of one conversation's buffered steps (empty if none)."""
         with self._lock:
-            return {cid: list(steps) for cid, steps in self._steps.items()}
+            return list(self._steps.get(conv_id, []))
 
 
 def _serialize_attachments(atts: list[StoredAttachment]) -> list[dict]:

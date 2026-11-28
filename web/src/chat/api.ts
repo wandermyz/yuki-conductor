@@ -284,11 +284,12 @@ export async function fetchProcessing(): Promise<Record<string, string>> {
 }
 
 /**
- * Buffered intermediate steps for every in-flight conversation. Called on
- * (re)connect so the step list resumes instead of starting blank mid-run.
+ * A conversation's buffered intermediate steps: the in-flight turn's, or the
+ * last finished one's. Fetched when a conversation is opened (or the socket
+ * reconnects) so its step list resumes instead of starting blank mid-run.
  */
-export async function fetchSteps(): Promise<Record<string, StreamStep[]>> {
-  const r = await fetch("/api/chat/steps");
+export async function fetchSteps(convId: string): Promise<StreamStep[]> {
+  const r = await fetch(`/api/conversations/${encodeURIComponent(convId)}/steps`);
   if (!r.ok) throw new Error("Failed to fetch steps");
   return r.json();
 }

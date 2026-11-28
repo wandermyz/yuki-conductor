@@ -1459,3 +1459,16 @@
   gap: 10px;
   margin-top: 16px;
 }
+
+/* A kept-alive tab (see App): fills .tab-content like a direct child would. */
+.tab-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.tab-pane[hidden] {
+  display: none;
+}

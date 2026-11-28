@@ -52,6 +52,7 @@ from yuki_conductor.messaging.web_platform import (
 from yuki_conductor.model_config import ModelConfigError, load_harness_models
 from yuki_conductor.reader_page import render_reader_page
 from yuki_conductor.store import CronRunStore, ProjectStore, SessionStore
+from yuki_conductor.web_gzip import TextGZipMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +289,7 @@ def create_api() -> FastAPI:
     from yuki_conductor.taskboard.routes import router as taskboard_router
 
     api = FastAPI(title="Agent Conductor")
+    api.add_middleware(TextGZipMiddleware)
     api.include_router(taskboard_router)
     api.include_router(heartbeat_router)
 
@@ -982,15 +984,16 @@ def create_api() -> FastAPI:
     def get_processing():
         return ws_manager.get_processing()
 
-    @api.get("/api/chat/steps")
-    def get_steps():
-        """Buffered intermediate steps per in-flight conversation.
+    @api.get("/api/conversations/{conv_id}/steps")
+    def get_steps(conv_id: str):
+        """A conversation's buffered intermediate steps.
 
-        A browser that connects or reconnects mid-run calls this to replay the
-        step stream it missed; steps are memory-only and vanish once the run
-        finishes.
+        A browser opening a conversation, or reconnecting, calls this to replay
+        the step stream it missed; steps are memory-only, kept for the
+        in-flight turn and the last finished one. Per conversation, since one
+        long run's buffer is tens of kilobytes.
         """
-        return ws_manager.get_steps()
+        return ws_manager.get_steps(conv_id)
 
     @api.post("/api/conversations/{conv_id}/cancel")
     def cancel_conversation(conv_id: str):

@@ -141,6 +141,7 @@ export default function TaskDetail({
   onOpenTask,
   onArchived,
   onChanged,
+  visible,
 }: {
   task: Detail;
   steps: StreamStep[];
@@ -151,6 +152,8 @@ export default function TaskDetail({
   onOpenTask: (id: number) => void;
   onArchived: () => void;
   onChanged: () => void;
+  /** False while another tab is showing: the view stays mounted, hidden. */
+  visible: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const [quoteId, setQuoteId] = useState<number | null>(null);
@@ -171,8 +174,8 @@ export default function TaskDetail({
   }, [task.id]);
   useEffect(() => {
     const el = timelineRef.current;
-    if (el && followRef.current) el.scrollTop = el.scrollHeight;
-  }, [task.id, task.comments.length, steps.length, running]);
+    if (el && visible && followRef.current) el.scrollTop = el.scrollHeight;
+  }, [task.id, task.comments.length, steps.length, running, visible]);
   const scrollToComment = useCallback((id: number | "body") => {
     const el = timelineRef.current?.querySelector<HTMLElement>(`[data-quote-id="${id}"]`);
     if (!el) return;

@@ -126,6 +126,12 @@ def test_list_counts_comments_and_hides_archive(client):
     assert tasks[0]["comment_count"] == 1
 
 
+def test_list_leaves_out_the_description(client):
+    task = _create(client, body="a long description")
+    assert "body" not in client.get("/api/tasks").json()[0]
+    assert client.get(f"/api/tasks/{task['id']}").json()["body"] == "a long description"
+
+
 def test_edit_only_before_pickup(client):
     task = _create(client)
     r = client.patch(f"/api/tasks/{task['id']}", json={"title": "Renamed", "harness": "pi"})
